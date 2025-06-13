@@ -62,25 +62,12 @@ def classify_node(state: GraphState) -> GraphState:
     question = state["question"]
     history = state.get("history", [])
 
-    context = "\n.".join(history[-3:]) 
+    context = "\n.".join(history[-3:])
 
     route = router.route(question, context=context)
     normalized_route = route.strip().upper()
     print(f"[DEBUG] 정규화된 경로: {normalized_route}")
     return {**state, "route": normalized_route}
-
-def response_node(state: GraphState) -> GraphState:
-    question = state.get("question")
-    history = state.get("history", []) + [question]
-    print("✅ [DEBUG] response_node 실행됨")
-    print("🧾 [DEBUG] 기존 history:", state.get("history"))
-    print("🆕 [DEBUG] 추가된 history:", history)
-    return {
-        "response_df": state.get("response_df"),
-        "response": state.get("response"),
-        "description": state.get("description"),
-        "history": history
-    }
 
 def genie_sales_node(state: GraphState) -> GraphState:
     try:
@@ -186,7 +173,7 @@ def genie_license_node(state: GraphState) -> GraphState:
 
     except Exception as e:
         print("[ERROR] [LICENSE] 예외 발생:", str(e))
-        return {**state, "response": f"❗LICENSE 처리 중 오류 발생: {str(e)}"}
+        return {**state, "response": f"❗LICENSE 처리 중 오류 발생: {str(e)}"} # 기존 오류 메시지 유지
 
 def genie_100_node(state: GraphState) -> GraphState:
     try:
@@ -239,7 +226,7 @@ def genie_100_node(state: GraphState) -> GraphState:
 
     except Exception as e:
         print("[ERROR] [100] 예외 발생:", str(e))
-        return {**state, "response": f"❗데이터 처리 중 오류가 발생했습니다.\n({str(e)})"}
+        return {**state, "response": f"❗데이터 처리 중 오류가 발생했습니다.\n({str(e)})"} 
 
 # D 시스템 처리
 def rag_node(state: GraphState) -> GraphState:
@@ -255,20 +242,19 @@ def fallback_node(state: GraphState) -> GraphState:
         "response": fallback_example_node(state["question"])["response"]
     }
 
-# 최종 응답 노드
 def response_node(state: GraphState) -> GraphState:
     question = state.get("question")
     history = state.get("history", []) + [question]
 
     print("✅ [DEBUG] response_node 실행됨")
-    print("🧾 [DEBUG] 기존 history:", state.get("history"))
-    print("🆕 [DEBUG] 추가된 history:", history)
+    print("🧾 [DEBUG] response_node 진입 시 history:", state.get("history"))
+    print("🆕 [DEBUG] response_node 종료 시 history (현재 질문 추가됨):", history)
 
     return {
         "response_df": state.get("response_df"),
         "response": state.get("response"),
         "description": state.get("description"),
-        "history": history  # 반드시 반환
+        "history": history
     }
 # ─────────────────────────────────────────────────────────────
 # 4. LangGraph 구성
@@ -303,50 +289,64 @@ builder.add_edge("genie_license_node", "respond_node")
 builder.add_edge("genie_100_node", "respond_node")
 builder.add_edge("rag_node", "respond_node")
 builder.add_edge("fallback_node", "respond_node")
-builder.set_finish_point("respond_node")
+builder.set_finish_point("respond_node") # 최종 종료 지점
 
 graph = builder.compile()
 
 # ─────────────────────────────────────────────────────────────
-# 5. 실행 예시
-
-if __name__ == "__main__":
-    user_input = input("질문을 입력하세요: ")
-    output = graph.invoke({"question": user_input})
-
-    if "response_df" in output:
-        print("\n[📊 데이터프레임 결과]")
-        print(output["response_df"])
-    elif "response" in output:
-        print("\n[💬 텍스트 응답]")
-        print(output["response"])
-    else:
-        print("\n❗답변이 없습니다.")
+# 5. 실행 함수
 
 def run_chatbot(question: str, history: list[str] = None) -> dict:
     if history is None:
         history = []
 
-    print("🧪[DEBUG] 전달된 히스토리:", history)
+    print("🧪[DEBUG] run_chatbot 전달된 히스토리:", history)
 
     output = graph.invoke({
         "question": question,
         "history": history
     })
 
-    print("🧪[DEBUG] LangGraph 응답 결과:", output)
+    print("🧪[DEBUG] LangGraph 최종 응답 결과 (output):", output)
 
     return {
         "response": output.get("response"),
         "response_df": output.get("response_df"),
         "description": output.get("description"),
-        "route": output.get("route"),
-        "history": output.get("history", history)
+        "route": output.get("route")
     }
 
+if __name__ == "__main__":
 
-# In[ ]:
+    current_history = []
+    while True:
+        user_input = input("질문을 입력하세요 (종료하려면 'exit' 입력): ")
+        if user_input.lower() == 'exit':
+            break
+        try:
+            print(f"\n[INFO] 현재 __main__ 환경에서는 Streamlit의 session_state를 사용할 수 없어 Genie 노드의 대화 ID 관리에 문제가 있을 수 있습니다.")
+            print(f"[INFO] 정확한 테스트는 Streamlit 앱을 통해 진행해주세요.")
+            
+            if not hasattr(st, 'session_state'):
+                class MockSessionState(dict):
+                    def __getattr__(self, key):
+                        return self.get(key)
+                    def __setattr__(self, key, value):
+                        self[key] = value
+                st.session_state = MockSessionState()
 
 
+            result = run_chatbot(user_input, history=current_history)
 
+            if result.get("response_df") is not None:
+                print("\n[📊 데이터프레임 결과]")
+                print(result["response_df"])
+            elif result.get("response"):
+                print("\n[💬 텍스트 응답]")
+                print(result["response"])
+            else:
+                print("\n❗답변이 없습니다.")
 
+        except Exception as e:
+            print(f"[ERROR] __main__ 실행 중 오류: {e}")
+            print(f"[INFO] 이는 __main__ 환경에서의 st.session_state 제한 때문일 수 있습니다.")
