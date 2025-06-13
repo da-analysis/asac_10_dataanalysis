@@ -41,64 +41,64 @@ for chat in chatbot.get_chat_history():
         st.markdown(chat["question"])
 
     with st.chat_message("assistant"):
-        answer = chat["answer"]
+        answer_data = chat["answer"] # 'answer_data'는 항상 dict 타입
 
-        if isinstance(answer, dict):
-            if answer.get("response"):
-                st.markdown(answer["response"].replace("\n", "  \n"))
+        # 텍스트 응답이 있으면 표시
+        if answer_data.get("response"):
+            st.markdown(answer_data["response"].replace("\n", "  \n"))
 
-            description = answer.get("description")
-            if description:
-                st.markdown(f"**📝 답변:** {description}")
+        # 설명이 있으면 표시
+        description = answer_data.get("description")
+        if description:
+            st.markdown(f"**📝 답변:** {description}")
 
-            df = answer.get("response_df")
-            if isinstance(df, pd.DataFrame):
-                try:
-                    formatted_df = df.copy()
-                    for col in formatted_df.select_dtypes(include=["number"]).columns:
-                        formatted_df[col] = formatted_df[col].apply(lambda x: f"{x:,.0f}")
+        # DataFrame이 있으면 표시하고 차트 그리기
+        df = answer_data.get("response_df")
+        if isinstance(df, pd.DataFrame):
+            try:
+                formatted_df = df.copy()
+                for col in formatted_df.select_dtypes(include=["number"]).columns:
+                    formatted_df[col] = formatted_df[col].apply(lambda x: f"{x:,.0f}")
 
-                    st.dataframe(formatted_df)
+                st.dataframe(formatted_df)
 
-                    numeric_cols = df.select_dtypes(include="number").columns
-                    if len(numeric_cols) >= 2:
-                        x_col = df.columns[0]
-                        y1_col = numeric_cols[0]
-                        y2_col = numeric_cols[1]
+                numeric_cols = df.select_dtypes(include="number").columns
+                if len(numeric_cols) >= 2:
+                    x_col = df.columns[0]
+                    y1_col = numeric_cols[0]
+                    y2_col = numeric_cols[1]
 
-                        fig, ax1 = plt.subplots(figsize=(10, 5))
-                        ax2 = ax1.twinx()
+                    fig, ax1 = plt.subplots(figsize=(10, 5))
+                    ax2 = ax1.twinx()
 
-                        ax1.plot(df[x_col], df[y1_col], color='tab:blue', marker='o')
-                        ax2.plot(df[x_col], df[y2_col], color='tab:orange', marker='x')
+                    ax1.plot(df[x_col], df[y1_col], color='tab:blue', marker='o')
+                    ax2.plot(df[x_col], df[y2_col], color='tab:orange', marker='x')
 
-                        ax1.set_xlabel(x_col)
-                        ax1.set_ylabel(y1_col, color='tab:blue')
-                        ax2.set_ylabel(y2_col, color='tab:orange')
-                        plt.title(f"{y1_col} & {y2_col} by {x_col}")
-                        plt.xticks(rotation=45)
-                        plt.tight_layout()
+                    ax1.set_xlabel(x_col)
+                    ax1.set_ylabel(y1_col, color='tab:blue')
+                    ax2.set_ylabel(y2_col, color='tab:orange')
+                    plt.title(f"{y1_col} & {y2_col} by {x_col}")
+                    plt.xticks(rotation=45)
+                    plt.tight_layout()
 
-                        st.pyplot(fig)
+                    st.pyplot(fig)
 
-                except Exception as e:
-                    st.markdown(f"⚠️ 시각화 오류: {e}")
+            except Exception as e:
+                st.markdown(f"⚠️ 시각화 오류: {e}")
+        elif not answer_data.get("response") and not description and df is None:
+            # Fallback if the answer_data dictionary is empty or has no displayable content
+            st.markdown("표시할 내용이 답변에 없습니다.")
 
-        elif isinstance(answer, pd.DataFrame):
-            st.dataframe(answer)
-
-        else:
-            st.markdown(str(answer).replace("\n", "  \n"))
 
 # 🔁 대화 초기화 버튼
 if st.button("대화 초기화"):
     st.session_state.pop("genie_sales_conversation_id", None)
     st.session_state.pop("genie_license_conversation_id", None)
     st.session_state.pop("genie_100_conversation_id", None)
-    st.session_state.pop("chat_history", None)
-    st.session_state.chatbot = ChatbotRun()
+    st.session_state.pop("chat_history", None) # ChatbotRun 인스턴스 내부의 chat_history는 ChatbotRun을 새로 만들면 초기화됨
+    st.session_state.chatbot = ChatbotRun() # ChatbotRun 인스턴스를 새로 생성하여 초기화
     st.rerun()
-    
+
 
 # 📝 질문 입력
 example_prompt = st.session_state.pop("example_prompt") if "example_prompt" in st.session_state else ""
