@@ -1,5 +1,5 @@
-# asac_7_dataanalysis
-ASAC 7기 Data Analysis Project (소상공인 업종 분석 시스템 개발)
+# asaa_10_dataanalysis
+ASAC 10기 Data Analysis Project
 
 ## 폴더 가이드라인
 
@@ -19,13 +19,11 @@ Projects 안에서 프로젝트 단위로 issue 단위로 확인할 예정입니
 | 이름   | Github Username | ... |
 |--------|-----|-----|
 | 이상열 |syleeie2310||
-| 이은우|NUNURI2||
-| 최지민|jiiiim442||
-| 김나현|Hello-Miz||
-| 강혜경|khye00||
-| 조서영|seoyoung1027||
-| 장길만|ckm0104||
-
+| 노경준|bmwhana1||
+| 강민서|kang-min-suh	||
+| 윤정식|biod-bgh||
+| 이예림|rimmyeb||
+| 정유정|ikdae||
 - - -
 
 ### Ground Rules
@@ -42,4 +40,4 @@ Git 정책 가이드
 - - -
 ### Contributors
 
-*syleeie*, *jiiiim442*, *NUNURI2*, *seoyoung1027*, *ckm0104*, *khye00*, *Hello-Miz*
+*syleeie*
