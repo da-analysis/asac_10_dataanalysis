@@ -8,6 +8,7 @@ newenv/
 
 # 환경 변수 파일
 .env
+.files
 
 # Streamlit secrets 파일
 .streamlit/secrets.toml
