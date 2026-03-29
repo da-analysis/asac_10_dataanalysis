@@ -19,7 +19,7 @@ Projects 안에서 프로젝트 단위로 issue 단위로 확인할 예정입니
 | 이름   | Github Username | ... |
 |--------|-----|-----|
 | 이상열 |syleeie2310||
-| 노경준|bmwhana1||
+| 노경준|RohKJ||
 | 강민서|kang-min-suh	||
 | 윤정식|biod-bgh||
 | 이예림|rimmyeb||
