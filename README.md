@@ -40,4 +40,4 @@ Git 정책 가이드
 - - -
 ### Contributors
 
-*syleeie*, *kang-min-suh*, *biod-bgh*, *ikdae*, *ROHkj*, *rimmyeb*
+*syleeie*, *biod-bgh*, *ikdae*, *ROHkj*, *rimmyeb*, *kang-min-suh*
