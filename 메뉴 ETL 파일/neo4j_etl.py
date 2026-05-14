@@ -206,3 +206,56 @@ with driver.session() as session:
     """)
     for record in result:
         print(f"  {record['r.name']} → {record['i.name']} ({record['c.quantity']})")
+
+# COMMAND ----------
+
+######### + 조리단계 누락으로 속성으로 추가 #############
+
+# COMMAND ----------
+
+# 조리단계를 레시피별로 합치기
+steps_agg = spark.sql("""
+    SELECT CAST(RCP_SNO AS INT) AS rcp_sno,
+           concat_ws('\n', collect_list(
+               concat(COOKING_NO, '. ', COALESCE(COOKING_DC_CLEAN, ''))
+           )) AS steps
+    FROM silver.`10000recipe`.cooking_steps
+    WHERE is_noise = false
+    AND COOKING_DC_CLEAN IS NOT NULL AND COOKING_DC_CLEAN != ''
+    GROUP BY RCP_SNO
+""")
+
+print(f"조리단계 있는 레시피: {steps_agg.count()}개")
+steps_agg.show(3, truncate=80)
+
+# COMMAND ----------
+
+steps_list = [row.asDict() for row in steps_agg.collect()]
+
+for i in range(0, len(steps_list), 500):
+    batch = steps_list[i:i+500]
+    with driver.session() as session:
+        session.run("""
+            UNWIND $items AS item
+            MATCH (r:Recipe {rcp_sno: item.rcp_sno})
+            SET r.steps = item.steps
+        """, items=batch)
+    print(f"  Steps: {min(i+500, len(steps_list))}/{len(steps_list)}")
+
+print(f"✅ 조리단계 {len(steps_list)}개 레시피에 추가 완료!")
+
+# COMMAND ----------
+
+with driver.session() as session:
+    result = session.run("""
+        MATCH (r:Recipe)
+        WHERE r.name = '김치찌개' AND r.steps IS NOT NULL
+        RETURN r.name, r.steps
+        LIMIT 1
+    """)
+    record = result.single()
+    if record:
+        print(f"레시피: {record['r.name']}")
+        print(f"조리단계:\n{record['r.steps']}")
+    else:
+        print("조리단계 없음")
