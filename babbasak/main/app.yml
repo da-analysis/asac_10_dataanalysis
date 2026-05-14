@@ -1,0 +1,35 @@
+command: ["sh", "start.sh"]
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: ea576f572ba19fea
+  - name: BACKEND_API_URL
+    value: "http://localhost:9000"
+  - name: SEARCH_BACKEND
+    value: "naver"
+  - name: NAVER_CLIENT_ID
+    valueFrom: secret
+  - name: NAVER_CLIENT_SECRET
+    valueFrom: secret-2
+  - name: NEO4J_URI
+    valueFrom: secret-4
+  - name: NEO4J_USER
+    valueFrom: secret-6
+  - name: NEO4J_PASSWORD
+    valueFrom: secret-3
+  - name: NEO4J_DATABASE
+    valueFrom: secret-5
+  - name: PYTHONUNBUFFERED
+    value: "1"
+
+# test 배포
+# databricks workspace import-dir app /Workspace/Users/jyj000818@gmail.com/chatbot-test --profile DEFAULT --overwrite
+# databricks apps deploy chatbot-test --source-code-path /Workspace/Users/jyj000818@gmail.com/chatbot-test --profile DEFAULT
+
+# main 배포
+# databricks workspace import-dir app /Workspace/Users/jyj000818@gmail.com/chatbot-main --profile DEFAULT --overwrite
+# databricks apps deploy chatbot-main --source-code-path /Workspace/Users/jyj000818@gmail.com/chatbot-main --profile DEFAULT
+
+# 데이터브릭스 배포
+# databricks workspace import-dir app /Workspace/Users/jyj000818@gmail.com/chatbot-test --profile DEFAULT --overwrite
+# databricks apps deploy chatbot-test --source-code-path /Workspace/Users/jyj000818@gmail.com/chatbot-test --profile DEFAULT
+
