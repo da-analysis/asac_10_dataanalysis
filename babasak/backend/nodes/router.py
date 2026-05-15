@@ -1,6 +1,15 @@
 from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
+
+def _get_last_human_query(messages: list) -> str:
+    """메시지 리스트에서 마지막 HumanMessage의 content를 반환"""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            return msg.content
+    return ""
+
+
 MAX_LOOP_COUNT = 5
 
 _llm_router = None
@@ -11,8 +20,76 @@ def _get_llm_router():
         _llm_router = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.1)
     return _llm_router
 
+
+# === 원가 관련 키워드 ===
+_COST_KEYWORDS = ["원가", "마진", "판매가", "비용", "수익", "1인분 가격"]
+_PRICE_KEYWORDS = ["가격", "시세", "도매가", "얼마", "단가"]
+_RECIPE_KEYWORDS = ["레시피", "재료", "만드는 법", "조리법", "만들기"]
+
+
+def _detect_intent(query: str) -> str | None:
+    """쿼리에서 의도 키워드를 감지하여 힌트 반환"""
+    for kw in _COST_KEYWORDS:
+        if kw in query:
+            return "cost"
+    for kw in _PRICE_KEYWORDS:
+        if kw in query:
+            return "price"
+    for kw in _RECIPE_KEYWORDS:
+        if kw in query:
+            return "recipe"
+    return None
+
+
+def _rule_based_route(state: dict, query: str) -> str | None:
+    """
+    규칙 기반 라우팅. 명확한 경우 LLM 호출 없이 결정.
+    None 반환 시 LLM fallback.
+    """
+    recipe_info = state.get("recipe_info", {})
+    price_info = state.get("price_info", {})
+    cost_info = state.get("cost_info", {})
+
+    has_recipe = bool(recipe_info)
+    has_price = bool(price_info)
+    has_cost = bool(cost_info)
+    has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False
+
+    intent = _detect_intent(query)
+
+    # 규칙 1: 레시피 필요한데 없으면 → recipe_search
+    if not has_recipe and intent in ("recipe", "cost"):
+        return "recipe_search"
+
+    # 규칙 2: 가격만 묻는 질문 + 가격 없으면 → price_search
+    if not has_price and intent == "price":
+        return "price_search"
+
+    # 규칙 3: 레시피 있고 가격 없으면 → price_search
+    if has_recipe and not has_price:
+        return "price_search"
+
+    # 규칙 4: 가격 있고 누락 재료 있으면 → missing_price_search
+    if has_price and has_unavailable:
+        return "missing_price_search"
+
+    # 규칙 5: 레시피+가격 있고 원가 미완 + 원가 의도 → cost_calculator
+    if has_recipe and has_price and not has_cost and intent == "cost":
+        return "cost_calculator"
+
+    # 규칙 6: 모든 정보 수집 완료 → report_generator
+    if has_recipe and has_price and has_cost:
+        return "report_generator"
+
+    # 규칙 7: 가격만 묻는 질문 + 가격 있음 → report_generator
+    if has_price and intent == "price":
+        return "report_generator"
+
+    return None  # 판단 불가 → LLM fallback
+
+
 def router_node(state: dict) -> dict:
-    """다음 액션을 결정하는 라우터. MAX_LOOP_COUNT 초과 시 강제 종료."""
+    """다음 액션을 결정하는 라우터. 규칙 기반 우선, 애매하면 LLM fallback."""
     loop_count = state.get("loop_count", 0) + 1
 
     if not state.get("is_valid", False):
@@ -21,7 +98,18 @@ def router_node(state: dict) -> dict:
     if loop_count > MAX_LOOP_COUNT:
         return {"next_action": "report_generator", "loop_count": loop_count}
 
-    query = state["messages"][0].content
+    query = _get_last_human_query(state.get("messages", []))
+
+    # === 1단계: 규칙 기반 라우팅 (LLM 호출 없음) ===
+    rule_result = _rule_based_route(state, query)
+    if rule_result:
+        # 중복 호출 방지
+        last_action = state.get("next_action", "")
+        if rule_result == last_action and rule_result != "report_generator":
+            return {"next_action": "report_generator", "loop_count": loop_count}
+        return {"next_action": rule_result, "loop_count": loop_count}
+
+    # === 2단계: LLM fallback (규칙으로 판단 불가한 경우만) ===
     recipe_info = state.get("recipe_info", {})
     price_info = state.get("price_info", {})
     cost_info = state.get("cost_info", {})
@@ -63,12 +151,13 @@ def router_node(state: dict) -> dict:
             matched = v
             break
 
-    # 중복 호출 방지: 직전과 동일한 노드면 report_generator로 강제 이동
+    # 중복 호출 방지
     last_action = state.get("next_action", "")
     if matched == last_action and matched != "report_generator":
         matched = "report_generator"
 
     return {"next_action": matched, "loop_count": loop_count}
+
 
 def route_edge(state: dict) -> str:
     return state.get("next_action", "report_generator")
