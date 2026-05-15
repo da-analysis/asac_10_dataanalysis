@@ -1,6 +1,5 @@
 from backend.db import search_recipes, get_recipe_ingredients, get_recipes_by_ingredient
 
-# 원본 쿼리에서 메뉴/재료 키워드를 추출하기 위한 참조 리스트
 _KNOWN_MENUS = [
     '김치찌개', '된장찌개', '불고기', '순두부찌개', '비빔밥',
     '제육볶음', '김치전', '떡볶이', '잡채', '오므라이스',
@@ -17,12 +16,15 @@ _KNOWN_INGREDIENTS = [
     '참기름', '식용유', '소금', '후추', '새우',
 ]
 
+_ALIASES = {
+    '김찌': '김치찌개', '된찌': '된장찌개', '순찌': '순두부찌개',
+    '부찌': '부대찌개', '김치찌게': '김치찌개', '된장찌게': '된장찌개',
+    '돈까쓰': '돈까스', '떡볶히': '떡볶이',
+}
+
 
 def _extract_keywords_from_query(query: str) -> dict:
-    """
-    원본 쿼리에서 직접 메뉴/재료 키워드를 문자열 매칭으로 추출.
-    preprocessor가 entity를 못 잡았을 때의 fallback용.
-    """
+    """원본 쿼리에서 메뉴/재료 키워드 직접 추출 (preprocessor fallback용)"""
     found_menu = None
     found_ingredient = None
 
@@ -30,13 +32,8 @@ def _extract_keywords_from_query(query: str) -> dict:
         if menu in query:
             found_menu = menu
             break
-    # 오타/줄임말 처리
+
     if not found_menu:
-        _ALIASES = {
-            '김찌': '김치찌개', '된찌': '된장찌개', '순찌': '순두부찌개',
-            '부찌': '부대찌개', '김치찌게': '김치찌개', '된장찌게': '된장찌개',
-            '돈까쓰': '돈까스', '떡볶히': '떡볶이',
-        }
         for alias, real in _ALIASES.items():
             if alias in query:
                 found_menu = real
@@ -52,19 +49,27 @@ def _extract_keywords_from_query(query: str) -> dict:
 
 def recipe_search_node(state: dict) -> dict:
     """
-    backend/db.py의 Neo4j 함수를 활용하여 레시피/재료 정보를 조회합니다.
-    entities가 비어있으면 원본 쿼리에서 키워드를 직접 추출하여 검색합니다 (fallback).
+    Neo4j에서 레시피/재료 정보를 조회하는 노드.
+    entities가 비어있으면 원본 쿼리에서 키워드 직접 추출 (fallback).
     """
     entities = state.get("entities", {})
     menu = entities.get("menu")
     ingredient = entities.get("ingredient")
+    existing_errors = state.get("error_log", [])
 
-    # === Fallback: entities가 비어있으면 원본 쿼리에서 직접 추출 ===
+    # fallback: entities 못 잡았으면 원본 쿼리에서 직접 추출
     if not menu and not ingredient:
         query = state["messages"][-1].content if state.get("messages") else ""
         fallback = _extract_keywords_from_query(query)
         menu = fallback.get("menu")
         ingredient = fallback.get("ingredient")
+
+    # fallback 후에도 키워드 없으면 종료
+    if not menu and not ingredient:
+        return {
+            "recipe_info": {},
+            "error_log": existing_errors + ["recipe_search: 키워드 추출 실패"],
+        }
 
     recipe_data = []
 
@@ -77,7 +82,7 @@ def recipe_search_node(state: dict) -> dict:
                     "menu": recipe["name"],
                     "servings": recipe.get("servings"),
                     "difficulty": recipe.get("difficulty"),
-                    "ingredients": ingredients
+                    "ingredients": ingredients,
                 })
         elif ingredient:
             recipes = get_recipes_by_ingredient(ingredient, limit=5)
@@ -88,6 +93,9 @@ def recipe_search_node(state: dict) -> dict:
                     "servings": recipe.get("servings"),
                 })
     except Exception as e:
-        return {"recipe_info": {}, "error_log": [f"recipe_search: {str(e)}"]}
+        return {
+            "recipe_info": {},
+            "error_log": existing_errors + [f"recipe_search: {str(e)}"],
+        }
 
     return {"recipe_info": {"data": recipe_data}}
