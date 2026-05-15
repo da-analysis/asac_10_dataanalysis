@@ -9,6 +9,7 @@ class AgentState(TypedDict):
     rewritten_query: str
     recipe_info: Dict[str, Any]
     price_info: Dict[str, Any]
+    cost_info: Dict[str, Any]
     final_report: str
     error_log: Annotated[List[str], operator.add]
     next_action: str
