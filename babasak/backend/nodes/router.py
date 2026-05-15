@@ -57,11 +57,18 @@ def router_node(state: dict) -> dict:
     decision = response.content.strip().lower()
 
     valid = ["recipe_search", "price_search", "missing_price_search", "cost_calculator", "report_generator"]
+    matched = "report_generator"
     for v in valid:
         if v in decision:
-            return {"next_action": v, "loop_count": loop_count}
+            matched = v
+            break
 
-    return {"next_action": "report_generator", "loop_count": loop_count}
+    # 중복 호출 방지: 직전과 동일한 노드면 report_generator로 강제 이동
+    last_action = state.get("next_action", "")
+    if matched == last_action and matched != "report_generator":
+        matched = "report_generator"
+
+    return {"next_action": matched, "loop_count": loop_count}
 
 def route_edge(state: dict) -> str:
     return state.get("next_action", "report_generator")

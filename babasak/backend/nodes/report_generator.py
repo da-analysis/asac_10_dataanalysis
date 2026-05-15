@@ -37,12 +37,16 @@ def report_generator_node(state: dict) -> dict:
     entities = state.get("entities", {})
     user_query = state["messages"][0].content if state.get("messages") else ""
 
+    cost_info = state.get("cost_info", {})
+
     # 컨텍스트 조합
     context_parts = []
     if recipe_info and recipe_info.get("data"):
         context_parts.append(f"[레시피/재료 정보]\n{recipe_info['data']}")
     if price_info:
         context_parts.append(f"[가격/시세 정보]\n{price_info}")
+    if cost_info and cost_info.get("analysis"):
+        context_parts.append(f"[원가 분석]\n{cost_info['analysis']}")
 
     context = "\n\n".join(context_parts) if context_parts else "관련 정보를 찾지 못했습니다."
 

@@ -115,15 +115,26 @@ def preprocessor_node(state: dict) -> dict:
     ingredient = None
 
     if is_valid:
-        menu_scores = cosine_similarity(query_vec, indices['menu'])
-        best_menu_idx = int(menu_scores.argmax())
-        if float(menu_scores[best_menu_idx]) >= ENTITY_THRESHOLD_KO:
-            menu = MENU_NAMES[best_menu_idx]
+        # 문자열 매칭 우선, 임베딩은 보조
+        for m in MENU_NAMES:
+            if m in query:
+                menu = m
+                break
+        if not menu:
+            menu_scores = cosine_similarity(query_vec, indices['menu'])
+            best_menu_idx = int(menu_scores.argmax())
+            if float(menu_scores[best_menu_idx]) >= 0.75:  # 직접 언급 없으면 높은 threshold
+                menu = MENU_NAMES[best_menu_idx]
 
-        ing_scores = cosine_similarity(query_vec, indices['ingredient'])
-        best_ing_idx = int(ing_scores.argmax())
-        if float(ing_scores[best_ing_idx]) >= ENTITY_THRESHOLD_KO:
-            ingredient = INGREDIENT_NAMES[best_ing_idx]
+        for ing in INGREDIENT_NAMES:
+            if ing in query:
+                ingredient = ing
+                break
+        if not ingredient:
+            ing_scores = cosine_similarity(query_vec, indices['ingredient'])
+            best_ing_idx = int(ing_scores.argmax())
+            if float(ing_scores[best_ing_idx]) >= 0.75:
+                ingredient = INGREDIENT_NAMES[best_ing_idx]
 
     # 3. rewritten_query
     if is_valid:
