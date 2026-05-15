@@ -10,5 +10,6 @@ class AgentState(TypedDict):
     recipe_info: Dict[str, Any]
     price_info: Dict[str, Any]
     final_report: str
-    error_log: List[str]
+    error_log: Annotated[List[str], operator.add]
     next_action: str
+    loop_count: int

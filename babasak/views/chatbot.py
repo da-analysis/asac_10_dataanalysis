@@ -23,7 +23,12 @@ def render():
 
     user_input = st.chat_input("예: 감자, 양파, 돼지등뼈가 있는데 마진 좋은 메뉴 추천해줘")
     if user_input:
-        _send_message(user_input)
+        st.session_state.chat_history.append(("user", user_input))
+        with st.chat_message("user"):
+            st.write(user_input)
+        with st.spinner("AI가 답변을 생성 중입니다..."):
+            bot_response = _fetch_response(user_input)
+        st.session_state.chat_history.append(("assistant", bot_response))
         st.rerun()
 
 
@@ -79,8 +84,7 @@ def _render_profile():
                 st.warning("업종과 지역을 모두 입력해주세요.")
 
 
-def _send_message(message: str):
-    st.session_state.chat_history.append(("user", message))
+def _fetch_response(message: str) -> str:
     try:
         history = [{"role": role, "content": msg} for role, msg in st.session_state.chat_history[:-1]]
         resp = requests.post(
@@ -94,8 +98,6 @@ def _send_message(message: str):
             timeout=180,
         )
         resp.raise_for_status()
-        bot_response = resp.json().get("response", "응답을 가져올 수 없습니다.")
+        return resp.json().get("response", "응답을 가져올 수 없습니다.")
     except Exception as exc:
-        bot_response = f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. ({exc})"
-
-    st.session_state.chat_history.append(("assistant", bot_response))
+        return f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. ({exc})"

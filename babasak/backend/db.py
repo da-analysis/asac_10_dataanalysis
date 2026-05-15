@@ -221,33 +221,3 @@ def get_db_stats() -> dict:
         stats["총 관계 수"] = rel_result.single()["cnt"]
 
         return stats
-
-
-# ============================================================
-# 챗봇 컨텍스트 (agent.py에서 호출)
-# ============================================================
-
-def get_chatbot_context(keyword: str) -> list[dict]:
-    """
-    agent.py의 recipe_db_expert에서 호출하는 함수.
-    키워드로 레시피 검색 후 재료 목록까지 포함하여 반환.
-    """
-    recipes = search_recipes(keyword, limit=5)
-    if not recipes:
-        return []
-
-    results = []
-    for recipe in recipes:
-        ingredients = get_recipe_ingredients(recipe["id"])
-        ing_names = [ing["name"] for ing in ingredients]
-        results.append({
-            "menu": recipe["name"],
-            "margin": 0,  # 마진은 가격 데이터 연동 후 계산
-            "ingredients": ing_names,
-            "difficulty": recipe.get("difficulty"),
-            "servings": recipe.get("servings"),
-            "cooking_time": recipe.get("cooking_time"),
-            "view_count": recipe.get("view_count"),
-        })
-
-    return results

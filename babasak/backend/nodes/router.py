@@ -1,16 +1,30 @@
-from langchain_databricks import ChatDatabricks
+from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
-# 라우터용 LLM 초기화
-llm_router = ChatDatabricks(endpoint="databricks-meta-llama-3-3-70b-instruct", temperature=0.1)
+MAX_LOOP_COUNT = 3
+
+# lazy init
+_llm_router = None
+
+def _get_llm_router():
+    global _llm_router
+    if _llm_router is None:
+        _llm_router = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.1)
+    return _llm_router
 
 def router_node(state: dict) -> dict:
     """
     현재 수집된 상태와 사용자의 질문을 바탕으로 다음 액션을 결정하는 노드입니다.
-    순환(Loop) 구조를 지원하여 정보가 부족하면 필요한 노드를 반복 호출합니다.
+    순환(Loop) 구조를 지원하되, MAX_LOOP_COUNT 초과 시 강제로 report_generator로 이동합니다.
     """
+    loop_count = state.get("loop_count", 0) + 1
+
     if not state.get("is_valid", False):
-        return {"next_action": "report_generator"}
+        return {"next_action": "report_generator", "loop_count": loop_count}
+
+    # 순환 횟수 초과 시 강제 종료
+    if loop_count > MAX_LOOP_COUNT:
+        return {"next_action": "report_generator", "loop_count": loop_count}
         
     query = state['messages'][0].content
     recipe_info = state.get('recipe_info', {})
@@ -39,7 +53,7 @@ def router_node(state: dict) -> dict:
         HumanMessage(content=f"사용자 질문: {query}")
     ]
     
-    response = llm_router.invoke(messages)
+    response = _get_llm_router().invoke(messages)
     decision = response.content.strip()
     
     # 안전장치 (원하는 출력이 아닐 경우 보정)
@@ -50,7 +64,7 @@ def router_node(state: dict) -> dict:
     else:
         decision = "report_generator"
         
-    return {"next_action": decision}
+    return {"next_action": decision, "loop_count": loop_count}
 
 def route_edge(state: dict) -> str:
     """

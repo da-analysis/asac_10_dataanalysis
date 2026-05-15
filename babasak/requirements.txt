@@ -9,7 +9,4 @@ requests
 langgraph>=1.1.10
 langchain-core
 databricks-langchain
-mlflow
-langchain-community
-ddgs
-beautifulsoup4
+numpy

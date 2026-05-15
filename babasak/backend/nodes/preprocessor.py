@@ -1,10 +1,11 @@
+
 import numpy as np
-from langchain_databricks import DatabricksEmbeddings
+from databricks_langchain import DatabricksEmbeddings
 
-# ── Qwen3 한국어 임베딩 모델 ──
-emb_ko = DatabricksEmbeddings(endpoint='databricks-qwen3-embedding-0-6b')
+# ── Qwen3 한국어 임베딩 모델 (lazy init) ──
+_emb_ko = None
+_indices = None
 
-# ── 1. 의도 분류 인덱스 (is_valid 판단용) ──
 VALID_PATTERNS = [
     '메뉴 원가 알려줘', '재료 가격', '1인분 비용',
     '레시피 재료', '식재료 시세', '도매가 조회',
@@ -22,7 +23,6 @@ INVALID_PATTERNS = [
     '노래 가사', '게임 추천', '택시 불러줘',
 ]
 
-# ── 2. 메뉴명 인덱스 (entity: menu) ──
 MENU_NAMES = [
     '김치찌개', '된장찌개', '불고기', '순두부찌개', '비빔밥',
     '제육볶음', '김치전', '떡볶이', '잡채', '오므라이스',
@@ -31,7 +31,6 @@ MENU_NAMES = [
     '콩나물국', '마라탕', '부침개', '돈까스', '어묵국',
 ]
 
-# ── 3. 재료명 인덱스 (entity: ingredient) ──
 INGREDIENT_NAMES = [
     '돼지고기', '소고기', '닭고기', '두부', '김치',
     '양파', '대파', '감자', '당근', '애호박',
@@ -40,7 +39,6 @@ INGREDIENT_NAMES = [
     '참기름', '식용유', '소금', '후추', '새우',
 ]
 
-# ── 4. 의도 키워드 인덱스 (rewritten_query 조합용) ──
 INTENT_PATTERNS = {
     '원가': ['원가 알려줘', '얼마야', '가격 얼마', '비용 알려줘', '단가 얼마'],
     '재료': ['재료 알려줘', '뭐 필요해', '재료 뭐뭐', '레시피 알려줘'],
@@ -54,20 +52,37 @@ for label, patterns in INTENT_PATTERNS.items():
     intent_texts.extend(patterns)
     intent_labels.extend([label] * len(patterns))
 
-def build_index_ko(texts: list[str]) -> np.ndarray:
+VALID_THRESHOLD_KO = 0.38
+ENTITY_THRESHOLD_KO = 0.55
+
+
+def _get_emb():
+    """임베딩 모델 lazy init"""
+    global _emb_ko
+    if _emb_ko is None:
+        _emb_ko = DatabricksEmbeddings(endpoint='databricks-qwen3-embedding-0-6b')
+    return _emb_ko
+
+
+def _build_index(texts: list[str]) -> np.ndarray:
     """텍스트 리스트를 임베딩하여 numpy 배열로 반환"""
-    vecs = emb_ko.embed_documents(texts)
+    vecs = _get_emb().embed_documents(texts)
     return np.array(vecs)
 
-# 전역 인덱스 생성
-valid_index_ko = build_index_ko(VALID_PATTERNS)
-invalid_index_ko = build_index_ko(INVALID_PATTERNS)
-menu_index_ko = build_index_ko(MENU_NAMES)
-ingredient_index_ko = build_index_ko(INGREDIENT_NAMES)
-intent_index_ko = build_index_ko(intent_texts)
 
-VALID_THRESHOLD_KO = 0.38
-ENTITY_THRESHOLD_KO = 0.68
+def _get_indices() -> dict:
+    """인덱스를 lazy하게 빌드하고 캐시"""
+    global _indices
+    if _indices is None:
+        _indices = {
+            'valid': _build_index(VALID_PATTERNS),
+            'invalid': _build_index(INVALID_PATTERNS),
+            'menu': _build_index(MENU_NAMES),
+            'ingredient': _build_index(INGREDIENT_NAMES),
+            'intent': _build_index(intent_texts),
+        }
+    return _indices
+
 
 def cosine_similarity(query_vec: np.ndarray, index: np.ndarray) -> np.ndarray:
     """쿼리 벡터와 인덱스 간 코사인 유사도 계산"""
@@ -75,17 +90,22 @@ def cosine_similarity(query_vec: np.ndarray, index: np.ndarray) -> np.ndarray:
     index_norm = index / (np.linalg.norm(index, axis=1, keepdims=True) + 1e-10)
     return index_norm @ query_norm
 
+
 def preprocessor_node(state: dict) -> dict:
     """
     v4-ko 전처리 노드 (LLM 0회, Qwen3 임베딩).
     한국어 줄임말/오타/구어체를 임베딩 유사도로 처리.
+    첫 호출 시 인덱스 빌드 (lazy init).
     """
-    query = state['messages'][-1].content
-    query_vec = np.array(emb_ko.embed_query(query))
+    indices = _get_indices()
+    emb = _get_emb()
 
-    # 1. is_valid: 절대 threshold(0.38) + 상대 비교 (valid > invalid)
-    valid_scores = cosine_similarity(query_vec, valid_index_ko)
-    invalid_scores = cosine_similarity(query_vec, invalid_index_ko)
+    query = state['messages'][-1].content
+    query_vec = np.array(emb.embed_query(query))
+
+    # 1. is_valid
+    valid_scores = cosine_similarity(query_vec, indices['valid'])
+    invalid_scores = cosine_similarity(query_vec, indices['invalid'])
     max_valid = float(valid_scores.max())
     max_invalid = float(invalid_scores.max())
     is_valid = max_valid >= VALID_THRESHOLD_KO and max_valid > max_invalid
@@ -95,21 +115,19 @@ def preprocessor_node(state: dict) -> dict:
     ingredient = None
 
     if is_valid:
-        # 메뉴 매칭
-        menu_scores = cosine_similarity(query_vec, menu_index_ko)
+        menu_scores = cosine_similarity(query_vec, indices['menu'])
         best_menu_idx = int(menu_scores.argmax())
         if float(menu_scores[best_menu_idx]) >= ENTITY_THRESHOLD_KO:
             menu = MENU_NAMES[best_menu_idx]
 
-        # 재료 매칭
-        ing_scores = cosine_similarity(query_vec, ingredient_index_ko)
+        ing_scores = cosine_similarity(query_vec, indices['ingredient'])
         best_ing_idx = int(ing_scores.argmax())
         if float(ing_scores[best_ing_idx]) >= ENTITY_THRESHOLD_KO:
             ingredient = INGREDIENT_NAMES[best_ing_idx]
 
     # 3. rewritten_query
     if is_valid:
-        intent_scores = cosine_similarity(query_vec, intent_index_ko)
+        intent_scores = cosine_similarity(query_vec, indices['intent'])
         intent = intent_labels[int(intent_scores.argmax())]
         if menu:
             rewritten_query = f'{menu} {intent}'
