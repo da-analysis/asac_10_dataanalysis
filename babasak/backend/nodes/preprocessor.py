@@ -63,6 +63,24 @@ for label, patterns in INTENT_PATTERNS.items():
 VALID_THRESHOLD_KO = 0.38
 ENTITY_THRESHOLD_KO = 0.75  # 직접 언급 없을 때 임베딩 기반 threshold (높게 유지)
 
+# ── 제외/대체재 의도 키워드 ──
+_EXCLUDE_KEYWORDS = ['제외', '빼고', '없는', '알레르기', '못 먹', '빼줘', '없이']
+_ALTERNATIVE_KEYWORDS = ['대신', '대체', '바꿀', '대용', '다른 걸로']
+
+# ── 조건 매핑 (기존 agent.py에서 포팅) ──
+KIND_MAP = {
+    '국/탕': '국/탕', '탕': '국/탕',
+    '반찬': '메인반찬', '밑반찬': '밑반찬', '디저트': '디저트',
+    '면': '면/만두', '볶음': '볶음', '구이': '구이',
+}
+# 주의: '찌개', '국' 같은 너무 일반적인 단어는 메뉴명에 포함되므로 조건 매핑에서 제외
+# ('김치찌개'는 메뉴명이지 조건이 아님)
+
+METHOD_MAP = {
+    '볶음': '볶기', '끓이': '끓이기', '굽': '굽기',
+    '찜': '찌기', '튀김': '튀기기',
+}
+
 
 def _get_emb():
     """임베딩 모델 lazy init"""
@@ -76,16 +94,13 @@ def _get_indices() -> dict:
     """
     인덱스를 lazy하게 빌드하고 캐시.
     [최적화] 모든 텍스트를 하나로 합쳐 1회 embed_documents 호출 후 슬라이싱.
-    기존: 5회 API 호출 (3~5초) → 개선: 1회 호출 (~1초)
     """
     global _indices
     if _indices is None:
         emb = _get_emb()
-        # 모든 텍스트를 하나로 합침
         all_texts = VALID_PATTERNS + INVALID_PATTERNS + MENU_NAMES + INGREDIENT_NAMES + intent_texts
         all_vecs = np.array(emb.embed_documents(all_texts))
 
-        # 슬라이싱으로 분리
         i = 0
         valid_vecs = all_vecs[i:i + len(VALID_PATTERNS)]; i += len(VALID_PATTERNS)
         invalid_vecs = all_vecs[i:i + len(INVALID_PATTERNS)]; i += len(INVALID_PATTERNS)
@@ -121,12 +136,87 @@ def _match_menu_from_query(query: str) -> str | None:
     return None
 
 
-def _match_ingredient_from_query(query: str) -> str | None:
-    """문자열 매칭으로 재료 추출"""
+def _match_ingredients_from_query(query: str) -> list[str]:
+    """문자열 매칭으로 재료 추출 (복수 가능)"""
+    found = []
     for ing in INGREDIENT_NAMES:
         if ing in query:
-            return ing
-    return None
+            found.append(ing)
+    return found
+
+
+def _detect_exclude_intent(query: str) -> dict:
+    """
+    제외/대체재 의도 감지.
+    반환: {'exclude': '재료명' or None, 'is_alternative': bool}
+    """
+    exclude = None
+    is_alternative = False
+
+    # 대체재 의도
+    for kw in _ALTERNATIVE_KEYWORDS:
+        if kw in query:
+            is_alternative = True
+            break
+
+    # 제외 의도: "X 빼고", "X 제외" 패턴에서 X 추출
+    for kw in _EXCLUDE_KEYWORDS:
+        if kw in query:
+            # 키워드 앞의 재료를 찾기
+            for ing in INGREDIENT_NAMES:
+                if ing in query:
+                    exclude = ing
+                    break
+            break
+
+    return {'exclude': exclude, 'is_alternative': is_alternative}
+
+
+def _detect_conditions(query: str, menu: str | None) -> dict:
+    """
+    조건 기반 추천 의도 감지 (난이도, 인분, 종류, 조리법).
+    주의: 메뉴명이 이미 감지된 경우 메뉴명에 포함된 조건 키워드는 무시.
+    """
+    conditions = {}
+
+    # 메뉴명을 제거한 순수 조건 부분만 분석
+    query_for_cond = query
+    if menu:
+        query_for_cond = query.replace(menu, '')
+
+    # 종류 (메뉴명에 포함된 '찌개', '국' 등은 조건으로 간주하지 않음)
+    for k, v in KIND_MAP.items():
+        if k in query_for_cond:
+            conditions['kind'] = v
+            break
+
+    # 난이도
+    if '초급' in query or '쉬운' in query or '간단' in query:
+        conditions['difficulty'] = '초급'
+    elif '중급' in query:
+        conditions['difficulty'] = '중급'
+    elif '고급' in query or '어려운' in query:
+        conditions['difficulty'] = '고급'
+
+    # 인분
+    for s in ['1인분', '2인분', '3인분', '4인분', '5인분', '6인분이상']:
+        if s in query:
+            conditions['servings'] = s
+            break
+
+    # 조리법
+    for k, v in METHOD_MAP.items():
+        if k in query_for_cond:
+            conditions['cooking_method'] = v
+            break
+
+    return conditions
+
+
+def _detect_popular_intent(query: str) -> bool:
+    """인기 레시피 요청 감지"""
+    keywords = ['인기', 'top', 'best', '많이', '추천순', '베스트', '랭킹']
+    return any(kw in query for kw in keywords)
 
 
 def preprocessor_node(state: dict) -> dict:
@@ -134,7 +224,7 @@ def preprocessor_node(state: dict) -> dict:
     전처리 노드 (LLM 0회, Qwen3 임베딩).
     1단계: 문자열 매칭 (빠름, 정확)
     2단계: 임베딩 유사도 (느림, fuzzy)
-    첫 호출 시 인덱스 빌드 (배치 1회 호출).
+    3단계: 제외/조건/인기 의도 감지 (신규)
     """
     indices = _get_indices()
     emb = _get_emb()
@@ -151,12 +241,12 @@ def preprocessor_node(state: dict) -> dict:
 
     # 2. entity 추출: 문자열 매칭 우선 → 임베딩 보조
     menu = None
-    ingredient = None
+    ingredients = []  # ★ 복수 재료 지원
 
     if is_valid:
         # 2a. 문자열 매칭 (줄임말/오타 포함)
         menu = _match_menu_from_query(query)
-        ingredient = _match_ingredient_from_query(query)
+        ingredients = _match_ingredients_from_query(query)
 
         # 2b. 문자열 매칭 실패 시 임베딩 유사도로 보조 (높은 threshold)
         if not menu:
@@ -165,11 +255,11 @@ def preprocessor_node(state: dict) -> dict:
             if float(menu_scores[best_idx]) >= ENTITY_THRESHOLD_KO:
                 menu = MENU_NAMES[best_idx]
 
-        if not ingredient:
+        if not ingredients:
             ing_scores = cosine_similarity(query_vec, indices['ingredient'])
             best_idx = int(ing_scores.argmax())
             if float(ing_scores[best_idx]) >= ENTITY_THRESHOLD_KO:
-                ingredient = INGREDIENT_NAMES[best_idx]
+                ingredients = [INGREDIENT_NAMES[best_idx]]
 
     # 3. intent 분류 + rewritten_query
     if is_valid:
@@ -177,15 +267,35 @@ def preprocessor_node(state: dict) -> dict:
         intent = intent_labels[int(intent_scores.argmax())]
         if menu:
             rewritten_query = f'{menu} {intent}'
-        elif ingredient:
-            rewritten_query = f'{ingredient} {intent}'
+        elif ingredients:
+            rewritten_query = f'{", ".join(ingredients)} {intent}'
         else:
             rewritten_query = f'{intent} 조회'
     else:
         rewritten_query = '식당 운영/메뉴/원가 관련 질문이 아닙니다'
 
+    # 4. ★ 신규: 제외/대체재 의도, 조건, 인기 감지
+    exclude_info = _detect_exclude_intent(query)
+    conditions = _detect_conditions(query, menu)  # 메뉴명 전달하여 오감지 방지
+    is_popular = _detect_popular_intent(query)
+
+    # 메뉴명이 있으면 conditions는 보조적 역할만 (메뉴 검색이 우선)
+    # 메뉴명 없이 조건만 있을 때만 conditions를 주 라우팅 신호로 사용
+    if menu and conditions:
+        conditions = None  # 메뉴명 우선
+
+    # entities 구성
+    entities = {
+        'menu': menu,
+        'ingredient': ingredients if ingredients else None,  # list or None
+        'exclude': exclude_info['exclude'],
+        'is_alternative': exclude_info['is_alternative'],
+        'conditions': conditions if conditions else None,
+        'is_popular': is_popular,
+    }
+
     return {
         'is_valid': is_valid,
-        'entities': {'menu': menu, 'ingredient': ingredient},
+        'entities': entities,
         'rewritten_query': rewritten_query
     }

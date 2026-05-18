@@ -25,10 +25,22 @@ def _get_llm_router():
 _COST_KEYWORDS = ["원가", "마진", "판매가", "비용", "수익", "1인분 가격"]
 _PRICE_KEYWORDS = ["가격", "시세", "도매가", "얼마", "단가"]
 _RECIPE_KEYWORDS = ["레시피", "재료", "만드는 법", "조리법", "만들기"]
+# === 신규: 제외/대체재/조건/인기 키워드 ===
+_EXCLUDE_KEYWORDS = ["제외", "빼고", "없는", "알레르기", "못 먹"]
+_ALTERNATIVE_KEYWORDS = ["대신", "대체", "바꿀", "대용"]
+_CONDITION_KEYWORDS = ["초급", "쉬운", "간단", "중급", "인분", "국/탕", "찌개", "볶음", "구이"]
+_POPULAR_KEYWORDS = ["인기", "top", "best", "추천순", "랭킹"]
 
 
 def _detect_intent(query: str) -> str | None:
     """쿼리에서 의도 키워드를 감지하여 힌트 반환"""
+    # 제외/대체재/조건/인기 → recipe 의도
+    for kw in _EXCLUDE_KEYWORDS + _ALTERNATIVE_KEYWORDS:
+        if kw in query:
+            return "recipe"
+    for kw in _CONDITION_KEYWORDS + _POPULAR_KEYWORDS:
+        if kw in query:
+            return "recipe"
     for kw in _COST_KEYWORDS:
         if kw in query:
             return "cost"
@@ -49,6 +61,7 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     recipe_info = state.get("recipe_info", {})
     price_info = state.get("price_info", {})
     cost_info = state.get("cost_info", {})
+    entities = state.get("entities", {})
 
     has_recipe = bool(recipe_info)
     has_price = bool(price_info)
@@ -56,6 +69,15 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False
 
     intent = _detect_intent(query)
+
+    # ★ 신규 규칙: 제외/대체재/조건/인기 의도는 직접 recipe_search로
+    if not has_recipe:
+        if entities.get("exclude") or entities.get("is_alternative"):
+            return "recipe_search"
+        if entities.get("conditions"):
+            return "recipe_search"
+        if entities.get("is_popular"):
+            return "recipe_search"
 
     # 규칙 1: 레시피 필요한데 없으면 → recipe_search
     if not has_recipe and intent in ("recipe", "cost"):
@@ -83,6 +105,10 @@ def _rule_based_route(state: dict, query: str) -> str | None:
 
     # 규칙 7: 가격만 묻는 질문 + 가격 있음 → report_generator
     if has_price and intent == "price":
+        return "report_generator"
+
+    # ★ 신규 규칙 8: 레시피만 묻는 질문 + 레시피 있음 → report_generator
+    if has_recipe and intent == "recipe":
         return "report_generator"
 
     return None  # 판단 불가 → LLM fallback
