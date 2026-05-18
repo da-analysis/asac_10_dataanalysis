@@ -7,11 +7,17 @@ _driver = None
 def get_driver():
     global _driver
     if _driver is None:
-        uri = os.getenv("NEO4J_URI", "neo4j+s://e76ed54b.databases.neo4j.io")
-        user = os.getenv("NEO4J_USER", "e76ed54b")
-        password = os.getenv("NEO4J_PASSWORD", "")
+        uri = os.getenv("NEO4J_URI")
+        user = os.getenv("NEO4J_USER")
+        password = os.getenv("NEO4J_PASSWORD")
         _driver = GraphDatabase.driver(uri, auth=(user, password))
     return _driver
+
+
+def get_session():
+    """database 지정하여 세션 생성"""
+    database = os.getenv("NEO4J_DATABASE", "e76ed54b")
+    return get_driver().session(database=database)
 
 
 # ============================================================
@@ -20,7 +26,7 @@ def get_driver():
 
 def get_all_ingredients() -> list[dict]:
     """전체 재료 목록 (카테고리 포함)"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (i:Ingredient)
             RETURN i.name AS name, i.lv1 AS category, i.lv2 AS subcategory
@@ -31,7 +37,7 @@ def get_all_ingredients() -> list[dict]:
 
 def get_ingredient_by_category(category: str) -> list[dict]:
     """카테고리별 재료 조회 (예: '채소류', '양념·기름')"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (i:Ingredient)
             WHERE i.lv1 = $category
@@ -47,7 +53,7 @@ def get_ingredient_by_category(category: str) -> list[dict]:
 
 def search_recipes(keyword: str, limit: int = 5) -> list[dict]:
     """키워드로 레시피 검색 (점수 기반 정렬)"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (r:Recipe)
             WHERE r.name CONTAINS $keyword
@@ -64,7 +70,7 @@ def search_recipes(keyword: str, limit: int = 5) -> list[dict]:
 
 def get_recipe_ingredients(rcp_sno: int) -> list[dict]:
     """특정 레시피의 재료 + 수량 조회"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (r:Recipe {rcp_sno: $rcp_sno})-[c:CONTAINS]->(i:Ingredient)
             RETURN i.name AS name, c.quantity AS quantity,
@@ -76,7 +82,7 @@ def get_recipe_ingredients(rcp_sno: int) -> list[dict]:
 
 def get_recipe_detail(rcp_sno: int) -> dict | None:
     """레시피 상세 정보"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (r:Recipe {rcp_sno: $rcp_sno})
             RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
@@ -98,7 +104,7 @@ def get_recipe_detail(rcp_sno: int) -> dict | None:
 
 def get_recipes_by_ingredient(ingredient_name: str, limit: int = 10) -> list[dict]:
     """특정 재료가 들어간 레시피 조회"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (r:Recipe)-[c:CONTAINS]->(i:Ingredient {name: $name})
             WITH r, (r.view_count + r.recommend_count * 100 + r.scrap_count * 50) AS score
@@ -112,7 +118,7 @@ def get_recipes_by_ingredient(ingredient_name: str, limit: int = 10) -> list[dic
 
 def get_recipes_by_multiple_ingredients(ingredients: list[str], limit: int = 10) -> list[dict]:
     """여러 재료가 모두 들어간 레시피 조회"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (r:Recipe)
             WHERE ALL(ing IN $ingredients WHERE (r)-[:CONTAINS]->(:Ingredient {name: ing}))
@@ -127,7 +133,7 @@ def get_recipes_by_multiple_ingredients(ingredients: list[str], limit: int = 10)
 
 def get_recipes_excluding_ingredient(keyword: str, exclude: str, limit: int = 10) -> list[dict]:
     """특정 재료를 제외한 레시피 조회 (알레르기 대응)"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (r:Recipe)
             WHERE r.name CONTAINS $keyword
@@ -171,7 +177,7 @@ def recommend_recipes(
 
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)
             {where_clause}
@@ -191,7 +197,7 @@ def recommend_recipes(
 
 def get_popular_recipes(limit: int = 10) -> list[dict]:
     """인기 레시피 top N"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (r:Recipe)
             WITH r, (r.view_count + r.recommend_count * 100 + r.scrap_count * 50) AS score
@@ -209,7 +215,7 @@ def get_popular_recipes(limit: int = 10) -> list[dict]:
 
 def get_db_stats() -> dict:
     """DB 전체 통계"""
-    with get_driver().session() as session:
+    with get_session() as session:
         result = session.run("""
             MATCH (n)
             RETURN labels(n)[0] AS label, count(*) AS cnt
@@ -221,3 +227,33 @@ def get_db_stats() -> dict:
         stats["총 관계 수"] = rel_result.single()["cnt"]
 
         return stats
+
+
+# ============================================================
+# 챗봇 컨텍스트 (agent.py에서 호출)
+# ============================================================
+
+def get_chatbot_context(keyword: str) -> list[dict]:
+    """
+    agent.py의 recipe_db_expert에서 호출하는 함수.
+    키워드로 레시피 검색 후 재료 목록까지 포함하여 반환.
+    """
+    recipes = search_recipes(keyword, limit=5)
+    if not recipes:
+        return []
+
+    results = []
+    for recipe in recipes:
+        ingredients = get_recipe_ingredients(recipe["id"])
+        ing_names = [ing["name"] for ing in ingredients]
+        results.append({
+            "menu": recipe["name"],
+            "margin": 0,
+            "ingredients": ing_names,
+            "difficulty": recipe.get("difficulty"),
+            "servings": recipe.get("servings"),
+            "cooking_time": recipe.get("cooking_time"),
+            "view_count": recipe.get("view_count"),
+        })
+
+    return results

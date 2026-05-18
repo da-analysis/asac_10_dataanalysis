@@ -272,6 +272,12 @@ st.markdown(
     font-weight: 700;
 }
 
+.price-neutral {
+    font-size: 13px;
+    color: #94a3b8;
+    font-weight: 700;
+}
+
 .profile-prompt {
     background: #fffbeb;
     border: 1px solid #fde68a;

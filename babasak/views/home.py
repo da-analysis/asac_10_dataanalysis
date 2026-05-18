@@ -96,8 +96,12 @@ def render():
             cols = st.columns(n_cols)
             for col, ing in zip(cols, ingredients[row_start : row_start + n_cols]):
                 change = ing.get("change", 0) or 0
-                direction = "▲" if change > 0 else "▼"
-                cls = "price-up" if change > 0 else "price-down"
+                if change > 0:
+                    direction, cls = "▲", "price-up"
+                elif change < 0:
+                    direction, cls = "▼", "price-down"
+                else:
+                    direction, cls = "─", "price-neutral"
                 date = ing.get("date", "")
                 date_html = (
                     f'<div style="font-size:12px; color:#94a3b8; margin-top:4px;">{date} 기준</div>' if date else ""

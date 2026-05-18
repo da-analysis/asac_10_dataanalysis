@@ -4,14 +4,15 @@ env:
     value: ea576f572ba19fea
   - name: BACKEND_API_URL
     value: "http://localhost:9000"
-  - name: SEARCH_BACKEND
-    value: "naver"
-  - name: NAVER_CLIENT_ID
-    valueFrom: NAVER_CLIENT_ID
-  - name: NAVER_CLIENT_SECRET
-    valueFrom: NAVER_CLIENT_SECRET
-
-# cd C:\Users\Dell 3571_11TH\Desktop\compact\databricks_apps
-# databricks workspace import-dir app /Workspace/Users/jyj000818@gmail.com/databricks_apps_jyjtest --profile DEFAULT --overwrite
-# databricks apps deploy jyjtest --source-code-path /Workspace/Users/jyj000818@gmail.com/databricks_apps_jyjtest --profile DEFAULT
-
+  - name: NEO4J_URI
+    valueFrom: secret-4
+  - name: NEO4J_USER
+    valueFrom: secret-6
+  - name: NEO4J_PASSWORD
+    valueFrom: secret-3
+  - name: NEO4J_DATABASE
+    valueFrom: secret-5
+  - name: GENIE_SPACE_ID
+    value: "01f148e5845f1f68843892ceb53abd32"
+  - name: PYTHONUNBUFFERED
+    value: "1"

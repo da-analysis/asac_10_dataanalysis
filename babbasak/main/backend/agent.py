@@ -29,6 +29,10 @@ SYSTEM_PROMPT = (
     "web_search_price 결과를 사용할 경우 반드시 도구 결과에 포함된 출처(예: 네이버 쇼핑, CJ프레시웨이, 에이스식자재몰 등)를 그대로 가격 옆에 표기하고, '시세 DB에 없는 재료로, 웹 검색 결과를 참고한 가격입니다'라고 명시하세요. "
     "음식, 요리, 식재료와 전혀 관련 없는 것(가전제품, 자동차, 부동산 등)의 가격을 물어보면 '식재료에 대한 질문만 답변드릴 수 있습니다'라고 안내하세요. "
     "커피 원두, 밀가루, 설탕, 버터 등 식음료 재료는 모두 식재료로 간주하고 답변하세요. "
+    "③ 레시피 그래프 DB 상세 조회 시: neo4j_graph_query를 사용하세요. "
+    "이 도구는 Neo4j 그래프 데이터베이스에서 레시피-재료 관계를 조회합니다. "
+    "재료 기반 검색, 난이도/인분/종류 조건 추천, 알레르기 재료 제외 검색이 가능합니다. "
+    "recipe_db_expert로 결과가 부족하면 neo4j_graph_query로 추가 검색하세요. "
     "답변은 항상 한국어로, 핵심만 간결하게 작성하세요."
 )
 
@@ -111,7 +115,6 @@ def price_expert(ingredients_text: str) -> str:
         try:
             w = WorkspaceClient()
             response = w.genie.start_conversation_and_wait(space_id=GENIE_SPACE_ID, content=question)
-            # TextAttachment에 실제 가격 상세 내용이 담겨있음
             text_parts = []
             if response.attachments:
                 for att in response.attachments:
@@ -130,9 +133,155 @@ def web_search_price(query: str) -> str:
     return _external_search(query)
 
 
+@tool
+def neo4j_graph_query(query: str) -> str:
+    """Neo4j 그래프 DB에서 레시피와 재료 관계를 조회합니다.
+
+    사용 상황:
+    - 레시피 검색: "김치찌개", "된장찌개" 등 요리명
+    - 재료 기반 검색: "두부가 들어간 요리", "소고기 요리"
+    - 조건 기반 추천: "초급 난이도", "2인분", "국/탕 종류"
+    - 재료 제외: "돼지고기 빼고 김치찌개" (알레르기 대응)
+    - 인기 레시피: "인기 레시피 top 5"
+    - 특정 레시피 재료: "김치찌개에 뭐가 들어가?"
+
+    query에 자연어로 요청하면 적절한 그래프 쿼리를 실행합니다.
+    결과는 인기순(조회수+추천+스크랩)으로 정렬됩니다."""
+    from backend.db import (
+        search_recipes,
+        get_recipe_ingredients,
+        get_recipes_by_ingredient,
+        get_recipes_excluding_ingredient,
+        recommend_recipes,
+        get_popular_recipes,
+    )
+
+    try:
+        q = query.strip()
+
+        # 인기 레시피
+        if any(kw in q for kw in ['인기', 'top', 'best', '많이', '추천순']):
+            results = get_popular_recipes(limit=5)
+            return f"인기 레시피 top 5:\n{_format_recipes(results)}"
+
+        # 재료 제외 (알레르기)
+        if any(kw in q for kw in ['제외', '빼고', '없는', '알레르기', '못 먹']):
+            parts = q.split()
+            exclude_keywords = ['제외', '빼고', '없는', '알레르기', '못', '먹']
+            keyword = ""
+            exclude = ""
+            for i, part in enumerate(parts):
+                if any(ek in part for ek in exclude_keywords):
+                    exclude = parts[i - 1] if i > 0 else ""
+                    keyword = " ".join(
+                        p for p in parts
+                        if p != exclude and not any(ek in p for ek in exclude_keywords)
+                    )
+                    break
+            if keyword and exclude:
+                results = get_recipes_excluding_ingredient(keyword, exclude, limit=5)
+                return f"'{exclude}' 제외 '{keyword}' 레시피:\n{_format_recipes(results)}"
+
+        # 재료 기반 검색
+        ingredient_keywords = ['들어간', '포함', '사용한', '넣은', '으로 만든', '로 만든']
+        if any(kw in q for kw in ingredient_keywords):
+            ingredient = q
+            for kw in ingredient_keywords + ['요리', '레시피', '메뉴', '이', '가', ' ']:
+                ingredient = ingredient.replace(kw, '')
+            ingredient = ingredient.strip()
+            if ingredient:
+                results = get_recipes_by_ingredient(ingredient, limit=5)
+                if results:
+                    return f"'{ingredient}' 들어간 레시피:\n{_format_recipes(results)}"
+
+        # 조건 기반 추천
+        kind = None
+        difficulty = None
+        servings = None
+        cooking_method = None
+        condition_match = False
+
+        kind_map = {
+            '국/탕': '국/탕', '국': '국/탕', '탕': '국/탕', '찌개': '찌개류',
+            '반찬': '메인반찬', '밑반찬': '밑반찬', '디저트': '디저트',
+            '면': '면/만두', '볶음': '볶음', '구이': '구이',
+        }
+        for k, v in kind_map.items():
+            if k in q:
+                kind = v
+                condition_match = True
+                break
+
+        if '초급' in q or '쉬운' in q:
+            difficulty = '초급'
+            condition_match = True
+        elif '중급' in q:
+            difficulty = '중급'
+            condition_match = True
+
+        for s in ['1인분', '2인분', '3인분', '4인분', '5인분', '6인분이상']:
+            if s in q:
+                servings = s
+                condition_match = True
+                break
+
+        method_map = {'볶음': '볶기', '끓이': '끓이기', '굽': '굽기', '찜': '찌기', '튀김': '튀기기'}
+        for k, v in method_map.items():
+            if k in q:
+                cooking_method = v
+                condition_match = True
+                break
+
+        if condition_match:
+            results = recommend_recipes(
+                kind=kind, difficulty=difficulty,
+                servings=servings, cooking_method=cooking_method, limit=5
+            )
+            conditions_str = ", ".join(filter(None, [kind, difficulty, servings, cooking_method]))
+            return f"조건({conditions_str}) 추천 레시피:\n{_format_recipes(results)}"
+
+        # 기본: 키워드 검색 + 1등 재료 포함
+        results = search_recipes(q, limit=5)
+        if results:
+            top = results[0]
+            ingredients = get_recipe_ingredients(top['id'])
+            ing_text = ", ".join(f"{i['name']}({i['quantity']})" for i in ingredients[:15])
+
+            output = f"🥇 1등 레시피: {top['name']}\n"
+            output += f"   난이도: {top.get('difficulty', '-')}, 인분: {top.get('servings', '-')}, "
+            output += f"조리시간: {top.get('cooking_time', '-')}\n"
+            output += f"   재료: {ing_text}\n\n"
+
+            if len(results) > 1:
+                output += "📋 다른 레시피도 있어요:\n"
+                for r in results[1:]:
+                    output += f"   - {r['name']} (난이도: {r.get('difficulty', '-')}, {r.get('servings', '-')})\n"
+
+            return output
+
+        return "검색 결과가 없습니다."
+
+    except Exception as e:
+        return f"Neo4j 조회 실패: {str(e)}"
+
+
+def _format_recipes(results: list[dict]) -> str:
+    if not results:
+        return "검색 결과가 없습니다."
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(
+            f"{i}. {r.get('name', '-')} "
+            f"(난이도: {r.get('difficulty', '-')}, "
+            f"{r.get('servings', '-')}, "
+            f"조회수: {r.get('view_count', 0):,})"
+        )
+    return "\n".join(lines)
+
+
 def _build_graph():
     _setup_mlflow()
-    tools = [recipe_db_expert, creative_generator, price_expert, web_search_price]
+    tools = [recipe_db_expert, neo4j_graph_query, creative_generator, price_expert, web_search_price]
     llm_with_tools = _get_llm().bind_tools(tools)
 
     def agent_node(state: AgentState):
@@ -152,7 +301,6 @@ def _build_graph():
     return workflow.compile()
 
 
-# 챗봇 첫 호출 시 한 번만 컴파일
 _chatbot = None
 
 

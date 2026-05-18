@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage
-from backend.agent import get_chatbot
+from backend.graph import get_graph
 
 router = APIRouter(tags=["chatbot"])
 
@@ -19,6 +19,7 @@ def chat(req: ChatRequest):
     user_message = f"{profile}\n{req.message}".strip() if profile else req.message
 
     try:
+        # 대화 히스토리 구성
         history_messages = []
         for msg in req.history:
             if msg.get("role") == "user":
@@ -26,9 +27,18 @@ def chat(req: ChatRequest):
             elif msg.get("role") == "assistant":
                 history_messages.append(AIMessage(content=msg.get("content", "")))
 
-        chatbot = get_chatbot()
-        result = chatbot.invoke({"messages": history_messages + [HumanMessage(content=user_message)]})
-        response = result["messages"][-1].content
+        # 노드 순환 그래프 실행
+        graph = get_graph()
+        result = graph.invoke(
+            {"messages": history_messages + [HumanMessage(content=user_message)]},
+            config={"recursion_limit": 15},
+        )
+
+        # 최종 답변 추출
+        response = result.get("final_report", "")
+        if not response and result.get("messages"):
+            response = result["messages"][-1].content
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
