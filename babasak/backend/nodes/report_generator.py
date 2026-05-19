@@ -18,21 +18,44 @@ def _get_llm_report():
     return _llm_report
 
 
+def _format_price_info(price_info: dict) -> str:
+    """
+    price_info dict를 LLM이 읽기 좋은 텍스트로 변환.
+    raw dict 대신 핵심 데이터(table, text)만 추출하여 전달.
+    """
+    if not price_info or not isinstance(price_info, dict):
+        return str(price_info)
+
+    parts = []
+
+    # 테이블 데이터가 가장 구체적인 정보
+    if price_info.get("table"):
+        parts.append(price_info["table"])
+
+    # Genie의 텍스트 요약
+    if price_info.get("text"):
+        parts.append(price_info["text"])
+
+    # 누락 재료 정보
+    if price_info.get("unavailable"):
+        parts.append(f"시세 DB에 없는 재료: {', '.join(price_info['unavailable'])}")
+
+    return "\n".join(parts) if parts else str(price_info)
+
+
 SYSTEM_PROMPT = (
     "당신은 소상공인을 위한 물가 연동형 메뉴 추천 AI '바바삭' 입니다. "
     "사용자 메시지에 [업종: X, 지역: Y] 형태의 정보가 있으면 해당 업종과 지역에 맞춘 답변을 제공하세요. "
-    "주어진 도구(tools)를 활용하여 질문에 답하세요. "
-    "도구 호출 규칙: "
-    "① 레시피만 요청 시: recipe_db_expert로 먼저 조회하고, 없으면 creative_generator로 생성하세요. 가격 도구는 호출하지 마세요. "
-    "② 레시피와 원가를 함께 요청 시: recipe_db_expert → (없으면) creative_generator로 레시피를 먼저 생성한 뒤, "
-    "식재료 전체(주재료, 채소, 양념류 포함)를 '재료명: 수량' 형식으로 price_expert에 넘겨 원가를 조회하세요. "
-    "원가는 전체 패키지 가격이 아닌 실제 사용량 기준 비례 원가로 계산해야 합니다. "
-    "price_expert에서 결과가 없는 재료는 web_search_price로 검색하세요. "
-    "② 식재료 가격·시세·원가 조회만 요청 시: price_expert로 먼저 조회하고, 데이터가 없으면 web_search_price로 검색하세요. "
-    "web_search_price 결과를 사용할 경우 반드시 도구 결과에 포함된 출처(예: 네이버 쇼핑, CJ프레시웨이, 에이스식자재몰 등)를 그대로 가격 옆에 표기하고, '시세 DB에 없는 재료로, 웹 검색 결과를 참고한 가격입니다'라고 명시하세요. "
-    "음식, 요리, 식재료와 전혀 관련 없는 것(가전제품, 자동차, 부동산 등)의 가격을 물어보면 '식재료에 대한 질문만 답변드릴 수 있습니다'라고 안내하세요. "
-    "커피 원두, 밀가루, 설탕, 버터 등 식음료 재료는 모두 식재료로 간주하고 답변하세요. "
-    "답변은 항상 한국어로, 핵심만 간결하게 작성하세요."
+    "아래 정보를 기반으로 사용자 질문에 답변하세요. "
+    "답변 형식 규칙: "
+    "- 제공된 데이터에 구체적인 수치(가격, 단위, 등급 등)가 있으면 반드시 그 수치를 답변에 포함하세요. 요약만 하지 말고 실제 가격을 보여주세요. "
+    "- 소고기(한우) 가격 정보를 제시할 때는 반드시 등급 순서(1++ -> 1+ -> 1)로 정리하여 표시하세요. "
+    "- 도매 단위에서 실사용량으로 환산한 가격은 '환산가격' 또는 '사용량 기준 환산가'로 명시하세요. "
+    "- 이모지, 장식용 특수문자는 사용하지 마세요. 깔끔한 텍스트로만 답변하세요. "
+    "- web_search_price 결과를 사용할 경우 반드시 출처를 가격 옆에 표기하고, "
+    "'시세 DB에 없는 재료로, 웹 검색 결과를 참고한 가격입니다'라고 명시하세요. "
+    "- 음식, 요리, 식재료와 전혀 관련 없는 것의 가격을 물어보면 '식재료에 대한 질문만 답변드릴 수 있습니다'라고 안내하세요. "
+    "답변은 항상 한국어로 작성하세요."
 )
 
 
@@ -54,12 +77,13 @@ def report_generator_node(state: dict) -> dict:
 
     cost_info = state.get("cost_info", {})
 
-    # 컨텍스트 조합
+    # 컨텍스트 조합 — LLM이 읽기 좋은 형태로 정리
     context_parts = []
     if recipe_info and recipe_info.get("data"):
         context_parts.append(f"[레시피/재료 정보]\n{recipe_info['data']}")
     if price_info:
-        context_parts.append(f"[가격/시세 정보]\n{price_info}")
+        formatted_price = _format_price_info(price_info)
+        context_parts.append(f"[가격/시세 정보]\n{formatted_price}")
     if cost_info and cost_info.get("analysis"):
         context_parts.append(f"[원가 분석]\n{cost_info['analysis']}")
 
@@ -69,7 +93,7 @@ def report_generator_node(state: dict) -> dict:
 
 {context}
 
-위 정보만 활용하여 간결하게 답변하세요. 정보에 없는 내용은 언급하지 마세요."""
+위 정보를 활용하여 답변하세요. 가격 데이터가 있으면 구체적인 수치(원/kg, 등급 등)를 반드시 포함하세요."""
 
     try:
         messages = [
@@ -84,7 +108,7 @@ def report_generator_node(state: dict) -> dict:
         if recipe_info and recipe_info.get("data"):
             final_answer += f"[레시피 정보]\n{recipe_info['data']}\n\n"
         if price_info:
-            final_answer += f"[가격 정보]\n{price_info}\n\n"
+            final_answer += f"[가격 정보]\n{_format_price_info(price_info)}\n\n"
         final_answer += f"\n(자연어 요약 생성 중 오류 발생: {e})"
 
     return {

@@ -226,7 +226,23 @@ def recipe_search_node(state: dict) -> dict:
 
         # === 시나리오 7: 메뉴 키워드 검색 + 재료 상세 (기본) ===
         if menu:
-            recipes = search_recipes(menu, limit=3)
+            recipes = search_recipes(menu, limit=10)  # 조건 필터링 대비 넉넉히 가져옴
+
+            # conditions가 있으면 난이도/인분 등으로 필터링
+            if conditions:
+                filtered = []
+                for r in recipes:
+                    match = True
+                    if conditions.get("difficulty") and r.get("difficulty") != conditions["difficulty"]:
+                        match = False
+                    if conditions.get("servings") and r.get("servings") != conditions["servings"]:
+                        match = False
+                    if match:
+                        filtered.append(r)
+                # 필터 결과가 있으면 사용, 없으면 원본 유지 (fallback)
+                recipes = filtered[:3] if filtered else recipes[:3]
+            else:
+                recipes = recipes[:3]
             for recipe in recipes:
                 ings = get_recipe_ingredients(recipe["id"])
                 detail = get_recipe_detail(recipe["id"])
