@@ -1,4 +1,3 @@
-이 
 import numpy as np
 from databricks_langchain import DatabricksEmbeddings
 
