@@ -8,5 +8,10 @@ neo4j
 requests
 langgraph>=1.1.10
 langchain-core
+langchain
 databricks-langchain
 numpy
+mlflow[databricks]
+python-dotenv
+beautifulsoup4
+langchain-community

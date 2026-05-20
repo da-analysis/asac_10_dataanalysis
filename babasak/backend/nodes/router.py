@@ -63,7 +63,7 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     cost_info = state.get("cost_info", {})
     entities = state.get("entities", {})
 
-    has_recipe = bool(recipe_info)
+    has_recipe = bool(recipe_info.get("data") if isinstance(recipe_info, dict) else recipe_info)
     has_price = bool(price_info)
     has_cost = bool(cost_info)
     has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False
@@ -87,28 +87,30 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     if not has_price and intent == "price":
         return "price_search"
 
-    # 규칙 3: 레시피 있고 가격 없으면 → price_search
+    # ★ [Fix] 규칙 3 (기존 규칙 8): 레시피만 묻는 질문 + 레시피 있음 → report_generator
+    #   가격/원가 의도가 없으면 바로 답변 생성 (price_search 불필요)
+    if has_recipe and intent == "recipe":
+        return "report_generator"
+
+    # 규칙 4 (기존 규칙 3): 레시피 있고 가격 없으면 → price_search
+    #   (여기까지 왔다면 intent가 "cost" 이거나 None → 가격 조회 필요)
     if has_recipe and not has_price:
         return "price_search"
 
-    # 규칙 4: 가격 있고 누락 재료 있으면 → missing_price_search
+    # 규칙 5: 가격 있고 누락 재료 있으면 → missing_price_search
     if has_price and has_unavailable:
         return "missing_price_search"
 
-    # 규칙 5: 레시피+가격 있고 원가 미완 + 원가 의도 → cost_calculator
+    # 규칙 6: 레시피+가격 있고 원가 미완 + 원가 의도 → cost_calculator
     if has_recipe and has_price and not has_cost and intent == "cost":
         return "cost_calculator"
 
-    # 규칙 6: 모든 정보 수집 완료 → report_generator
+    # 규칙 7: 모든 정보 수집 완료 → report_generator
     if has_recipe and has_price and has_cost:
         return "report_generator"
 
-    # 규칙 7: 가격만 묻는 질문 + 가격 있음 → report_generator
+    # 규칙 8: 가격만 묻는 질문 + 가격 있음 → report_generator
     if has_price and intent == "price":
-        return "report_generator"
-
-    # ★ 신규 규칙 8: 레시피만 묻는 질문 + 레시피 있음 → report_generator
-    if has_recipe and intent == "recipe":
         return "report_generator"
 
     return None  # 판단 불가 → LLM fallback
@@ -140,7 +142,7 @@ def router_node(state: dict) -> dict:
     price_info = state.get("price_info", {})
     cost_info = state.get("cost_info", {})
 
-    has_recipe = bool(recipe_info)
+    has_recipe = bool(recipe_info.get("data") if isinstance(recipe_info, dict) else recipe_info)
     has_price = bool(price_info)
     has_cost = bool(cost_info)
     has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False

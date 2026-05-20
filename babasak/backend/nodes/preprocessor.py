@@ -1,6 +1,7 @@
-
 import numpy as np
 from databricks_langchain import DatabricksEmbeddings
+
+from backend.debug_log import archive
 
 # ── Qwen3 한국어 임베딩 모델 (lazy init) ──
 _emb_ko = None
@@ -230,6 +231,7 @@ def preprocessor_node(state: dict) -> dict:
     emb = _get_emb()
 
     query = state['messages'][-1].content
+    archive("preprocessor.input", {"query": query})
     query_vec = np.array(emb.embed_query(query))
 
     # 1. is_valid 판별
@@ -261,6 +263,21 @@ def preprocessor_node(state: dict) -> dict:
             if float(ing_scores[best_idx]) >= ENTITY_THRESHOLD_KO:
                 ingredients = [INGREDIENT_NAMES[best_idx]]
 
+    # 2c. ★ 다중 턴 컨텍스트: 현재 메시지에서 못 잡았으면 이전 히스토리에서 carry-over
+    if is_valid and not menu and not ingredients and len(state['messages']) > 1:
+        for prev_msg in reversed(state['messages'][:-1]):
+            prev_text = getattr(prev_msg, 'content', '') or ''
+            prev_menu = _match_menu_from_query(prev_text)
+            if prev_menu:
+                menu = prev_menu
+                archive("preprocessor.context_carry", {"source": "history", "menu": menu, "from_msg_preview": prev_text[:100]})
+                break
+            prev_ings = _match_ingredients_from_query(prev_text)
+            if prev_ings:
+                ingredients = prev_ings
+                archive("preprocessor.context_carry", {"source": "history", "ingredients": prev_ings, "from_msg_preview": prev_text[:100]})
+                break
+
     # 3. intent 분류 + rewritten_query
     if is_valid:
         intent_scores = cosine_similarity(query_vec, indices['intent'])
@@ -281,8 +298,9 @@ def preprocessor_node(state: dict) -> dict:
 
     # 메뉴명이 있으면 conditions는 보조적 역할만 (메뉴 검색이 우선)
     # 메뉴명 없이 조건만 있을 때만 conditions를 주 라우팅 신호로 사용
-    if menu and conditions:
-        conditions = None  # 메뉴명 우선
+    # 메뉴명이 있어도 conditions를 유지 (recipe_search에서 필터링에 활용)
+    # 예: "초보용 김치찌개" → menu="김치찌개", conditions={"difficulty": "초급"}
+    pass
 
     # entities 구성
     entities = {
@@ -294,6 +312,14 @@ def preprocessor_node(state: dict) -> dict:
         'is_popular': is_popular,
     }
 
+    archive("preprocessor.output", {
+        "query": query,
+        "is_valid": is_valid,
+        "max_valid_score": max_valid,
+        "max_invalid_score": max_invalid,
+        "entities": entities,
+        "rewritten_query": rewritten_query,
+    })
     return {
         'is_valid': is_valid,
         'entities': entities,

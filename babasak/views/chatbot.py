@@ -4,7 +4,8 @@ import requests
 import streamlit as st
 
 
-API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000")
+API_URL = os.getenv("BACKEND_API_URL", "http://localhost:9000")
+
 
 def render():
     if st.button("← 홈으로", key="chatbot_home"):
@@ -26,7 +27,7 @@ def render():
         st.session_state.chat_history.append(("user", user_input))
         with st.chat_message("user"):
             st.write(user_input)
-        with st.spinner("AI가 답변을 생성 중입니다..."):
+        with st.spinner("챗봇이 답변을 생성 중입니다..."):
             bot_response = _fetch_response(user_input)
         st.session_state.chat_history.append(("assistant", bot_response))
         st.rerun()
