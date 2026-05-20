@@ -16,3 +16,5 @@ env:
     value: "01f148e5845f1f68843892ceb53abd32"
   - name: PYTHONUNBUFFERED
     value: "1"
+  - name: MLFLOW_TRACKING_URI
+    value: "databricks"

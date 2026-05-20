@@ -20,6 +20,31 @@ def _get_llm_report():
     return _llm_report
 
 
+def _format_price_info(price_info: dict) -> str:
+    """
+    price_info dict를 LLM이 읽기 좋은 텍스트로 변환.
+    raw dict 대신 핵심 데이터(table, text)만 추출하여 전달.
+    """
+    if not price_info or not isinstance(price_info, dict):
+        return str(price_info)
+
+    parts = []
+
+    # 테이블 데이터가 가장 구체적인 정보
+    if price_info.get("table"):
+        parts.append(price_info["table"])
+
+    # Genie의 텍스트 요약
+    if price_info.get("text"):
+        parts.append(price_info["text"])
+
+    # 누락 재료 정보
+    if price_info.get("unavailable"):
+        parts.append(f"시세 DB에 없는 재료: {', '.join(price_info['unavailable'])}")
+
+    return "\n".join(parts) if parts else str(price_info)
+
+
 SYSTEM_PROMPT = (
     "당신은 소상공인을 위한 물가 연동형 메뉴 추천 AI '바바삭' 입니다. "
     "사용자 메시지에 [업종: X, 지역: Y] 형태의 정보가 있으면 해당 업종과 지역에 맞춘 답변을 제공하세요. "
@@ -73,12 +98,13 @@ def report_generator_node(state: dict) -> dict:
 
     cost_info = state.get("cost_info", {})
 
-    # 컨텍스트 조합
+    # 컨텍스트 조합 — LLM이 읽기 좋은 형태로 정리
     context_parts = []
     if recipe_info and recipe_info.get("data"):
         context_parts.append(f"[레시피/재료 정보]\n{recipe_info['data']}")
     if price_info:
-        context_parts.append(f"[가격/시세 정보]\n{price_info}")
+        formatted_price = _format_price_info(price_info)
+        context_parts.append(f"[가격/시세 정보]\n{formatted_price}")
     if cost_info and cost_info.get("analysis"):
         context_parts.append(f"[원가 분석]\n{cost_info['analysis']}")
 
@@ -88,7 +114,7 @@ def report_generator_node(state: dict) -> dict:
 
 {context}
 
-위 정보만 활용하여 간결하게 답변하세요. 정보에 없는 내용은 언급하지 마세요."""
+위 정보를 활용하여 답변하세요. 가격 데이터가 있으면 구체적인 수치(원/kg, 등급 등)를 반드시 포함하세요."""
 
     try:
         messages = [
@@ -103,7 +129,7 @@ def report_generator_node(state: dict) -> dict:
         if recipe_info and recipe_info.get("data"):
             final_answer += f"[레시피 정보]\n{recipe_info['data']}\n\n"
         if price_info:
-            final_answer += f"[가격 정보]\n{price_info}\n\n"
+            final_answer += f"[가격 정보]\n{_format_price_info(price_info)}\n\n"
         final_answer += f"\n(자연어 요약 생성 중 오류 발생: {e})"
 
     archive("report_generator.output", {

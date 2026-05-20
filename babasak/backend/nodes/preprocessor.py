@@ -1,4 +1,4 @@
-
+이 
 import numpy as np
 from databricks_langchain import DatabricksEmbeddings
 
@@ -299,8 +299,9 @@ def preprocessor_node(state: dict) -> dict:
 
     # 메뉴명이 있으면 conditions는 보조적 역할만 (메뉴 검색이 우선)
     # 메뉴명 없이 조건만 있을 때만 conditions를 주 라우팅 신호로 사용
-    if menu and conditions:
-        conditions = None  # 메뉴명 우선
+    # 메뉴명이 있어도 conditions를 유지 (recipe_search에서 필터링에 활용)
+    # 예: "초보용 김치찌개" → menu="김치찌개", conditions={"difficulty": "초급"}
+    pass
 
     # entities 구성
     entities = {
