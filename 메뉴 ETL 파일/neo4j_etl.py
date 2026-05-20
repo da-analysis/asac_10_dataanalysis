@@ -34,10 +34,10 @@ print("Neo4j Aura 연결")
 
 # COMMAND ----------
 
-기존 데이터를 전부 삭제합니다
+# 기존 데이터를 전부 삭제합니다
 with driver.session() as session:
     session.run("MATCH (n) DETACH DELETE n")
- print("기존 데이터 삭제 완료")
+    print("기존 데이터 삭제 완료")
 
 # COMMAND ----------
 
