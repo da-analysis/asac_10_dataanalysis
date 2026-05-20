@@ -22,8 +22,10 @@ from backend.db import (
     recommend_recipes,
     get_popular_recipes,
 )
+from databricks_langchain import ChatDatabricks
+from langchain_core.messages import SystemMessage, HumanMessage
 
-# 폴백용 키워드 리스트 (preprocessor 실패 시)
+# 폴백용 키워드 리스트 (LLM 장애 시 보험)
 _KNOWN_MENUS = [
     '김치찌개', '된장찌개', '불고기', '순두부찌개', '비빔밥',
     '제육볶음', '김치전', '떡볶이', '잡채', '오므라이스',
@@ -46,9 +48,52 @@ _ALIASES = {
     '돈까쓰': '돈까스', '떡볶히': '떡볶이',
 }
 
+# ── LLM 키워드 추출 (lazy init) ──
+_llm_keyword = None
+
+
+def _get_llm_keyword():
+    """키워드 추출용 경량 LLM (lazy init)"""
+    global _llm_keyword
+    if _llm_keyword is None:
+        _llm_keyword = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0, max_tokens=20)
+    return _llm_keyword
+
+
+def _llm_extract_menu_keyword(query: str) -> str | None:
+    """
+    LLM으로 사용자 쿼리에서 음식/요리명만 추출.
+    preprocessor가 entity 추출에 실패했을 때 fallback으로 사용.
+    """
+    try:
+        messages = [
+            SystemMessage(content=(
+                "사용자 질문에서 요리 또는 음식 이름만 추출하세요. "
+                "음식명만 출력하고 다른 말은 하지 마세요. "
+                "음식명이 여러 개면 쉼표로 구분하세요. "
+                "음식명이 없으면 NONE이라고만 출력하세요."
+            )),
+            HumanMessage(content=query),
+        ]
+        response = _get_llm_keyword().invoke(messages)
+        result = response.content.strip()
+
+        if not result or result.upper() == "NONE":
+            return None
+
+        # 쉼표로 구분된 경우 첫 번째만 사용
+        keyword = result.split(",")[0].strip()
+        # 빈 문자열이나 너무 긴 결과 필터링 (할루시네이션 방지)
+        if not keyword or len(keyword) > 20:
+            return None
+        return keyword
+
+    except Exception:
+        return None
+
 
 def _extract_keywords_from_query(query: str) -> dict:
-    """원본 쿼리에서 메뉴/재료 키워드 직접 추출 (preprocessor fallback용)"""
+    """원본 쿼리에서 메뉴/재료 키워드 직접 추출 (LLM 장애 시 보험용)"""
     found_menu = None
     found_ingredients = []
 
@@ -94,12 +139,19 @@ def recipe_search_node(state: dict) -> dict:
     else:
         ingredients = []
 
-    # fallback: entities 못 잡았으면 원본 쿼리에서 직접 추출
+    # ★ fallback: entities 못 잡았으면 LLM → 고정 리스트 순서로 추출 시도
     if not menu and not ingredients and not is_popular and not conditions:
         query = state["messages"][-1].content if state.get("messages") else ""
-        fallback = _extract_keywords_from_query(query)
-        menu = fallback.get("menu")
-        ingredients = fallback.get("ingredients", [])
+
+        # 1차: LLM으로 음식명 추출
+        llm_keyword = _llm_extract_menu_keyword(query)
+        if llm_keyword:
+            menu = llm_keyword
+        else:
+            # 2차: 고정 리스트 매칭 (LLM 장애 시 보험)
+            fallback = _extract_keywords_from_query(query)
+            menu = fallback.get("menu")
+            ingredients = fallback.get("ingredients", [])
 
     # fallback 후에도 키워드 없으면 인기 레시피로 폴백
     if not menu and not ingredients and not conditions:
@@ -159,13 +211,11 @@ def recipe_search_node(state: dict) -> dict:
 
         # === 시나리오 4: 대체재 제안 ===
         if is_alternative and ingredients:
-            # "두부 대신 쓸 수 있는 거" → 두부 제외 레시피 검색
             target_ingredient = ingredients[0]
             recipes_with = get_recipes_by_ingredient(target_ingredient, limit=5)
             recipes_without_data = []
             for recipe in recipes_with:
-                # 해당 재료 없이 만들 수 있는 유사 레시피 찾기
-                keyword = recipe["name"][:2]  # 레시피명 앞 2글자
+                keyword = recipe["name"][:2]
                 alt_recipes = get_recipes_excluding_ingredient(keyword, target_ingredient, limit=2)
                 for alt in alt_recipes:
                     alt_ings = get_recipe_ingredients(alt["id"])
@@ -177,7 +227,6 @@ def recipe_search_node(state: dict) -> dict:
                     })
             if recipes_without_data:
                 return {"recipe_info": {"data": recipes_without_data[:5], "search_type": "alternative", "replaced": target_ingredient}}
-            # 폴백: 해당 재료가 들어간 레시피라도 반환
             for recipe in recipes_with[:3]:
                 ings = get_recipe_ingredients(recipe["id"])
                 recipe_data.append({
@@ -201,7 +250,6 @@ def recipe_search_node(state: dict) -> dict:
                         "ingredients": ings,
                     })
                 return {"recipe_info": {"data": recipe_data, "search_type": "multi_ingredient"}}
-            # AND 검색 결과 없으면 첫 재료로 폴백
             recipes = get_recipes_by_ingredient(ingredients[0], limit=5)
             for recipe in recipes:
                 recipe_data.append({
@@ -209,7 +257,8 @@ def recipe_search_node(state: dict) -> dict:
                     "id": recipe["id"],
                     "servings": recipe.get("servings"),
                 })
-            return {"recipe_info": {"data": recipe_data, "search_type": "single_ingredient_fallback", "note": f"'{', '.join(ingredients)}' 전체 포함 레시피 없음, '{ingredients[0]}' 기준 검색"}}
+            note = f"'{', '.join(ingredients)}' 전체 포함 레시피 없음, '{ingredients[0]}' 기준 검색"
+            return {"recipe_info": {"data": recipe_data, "search_type": "single_ingredient_fallback", "note": note}}
 
         # === 시나리오 6: 단일 재료 기반 검색 ===
         if ingredients and not menu:
@@ -226,7 +275,21 @@ def recipe_search_node(state: dict) -> dict:
 
         # === 시나리오 7: 메뉴 키워드 검색 + 재료 상세 (기본) ===
         if menu:
-            recipes = search_recipes(menu, limit=3)
+            recipes = search_recipes(menu, limit=10)
+
+            if conditions:
+                filtered = []
+                for r in recipes:
+                    match = True
+                    if conditions.get("difficulty") and r.get("difficulty") != conditions["difficulty"]:
+                        match = False
+                    if conditions.get("servings") and r.get("servings") != conditions["servings"]:
+                        match = False
+                    if match:
+                        filtered.append(r)
+                recipes = filtered[:3] if filtered else recipes[:3]
+            else:
+                recipes = recipes[:3]
             for recipe in recipes:
                 ings = get_recipe_ingredients(recipe["id"])
                 detail = get_recipe_detail(recipe["id"])
