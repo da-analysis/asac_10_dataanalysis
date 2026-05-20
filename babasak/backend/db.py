@@ -1,3 +1,36 @@
+"""
+Neo4j 그래프 RAG 백엔드 — 챗봇용 함수 모음
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+이전 버전 대비 변경 요약 (각 함수 위 주석에 [변경/신규/유지/제거] 표시)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[신규]
+- search_recipes_smart()  : 3단계 fallback (정확매칭 → 토큰분해 → 부분매칭 → 인기)
+- find_similar_recipes()  : 재료 공유도 기반 유사 레시피 추천
+- _load_dictionaries()    : 메뉴/재료 사전을 Neo4j에서 1회 로드해 메모리 캐싱
+- _tokenize()             : 사전 기반 쿼리 토큰 분해
+
+[변경]
+- search_recipes()        : 내부적으로 search_recipes_smart 호출하도록 위임 (alias)
+- 모든 검색 함수 limit 기본값 5 → 3 (멘토 피드백 — top 3 노출)
+- 점수 공식 _SCORE_EXPR 상수로 통일 (view + recommend×100 + scrap×50)
+- get_recipe_detail()     : 반환에 r.steps 추가 (조리단계 그래프에 같이 적재됨)
+
+[유지]
+- get_recipe_ingredients, get_recipes_by_ingredient,
+  get_recipes_by_multiple_ingredients, get_recipes_excluding_ingredient,
+  get_popular_recipes  → 시그니처/동작 거의 그대로 (limit 기본값만 3으로)
+
+[복원]
+- recommend_recipes()          : 한때 제거했다가 recipe_search.py가 import해서
+                                 ImportError로 백엔드 startup 실패 → 재추가
+
+[제거] (호출 빈도 낮거나 활용도 부족)
+- get_all_ingredients()        : 5만개 전체 반환 → 챗봇이 못 씀
+- get_ingredient_by_category() : 카테고리만으로 검색하는 시나리오 거의 없음
+- get_db_stats()               : 디버깅 전용
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
 import os
 from neo4j import GraphDatabase
 
@@ -344,6 +377,55 @@ def get_popular_recipes(limit=3):
                    r.view_count AS view_count, score
             ORDER BY score DESC LIMIT $limit
         """, limit=limit)
+        return [r.data() for r in result]
+
+
+# ============================================================
+# 6. 조건 기반 추천 (recipe_search.py가 import하므로 유지)
+# ============================================================
+
+def recommend_recipes(
+    kind=None,
+    difficulty=None,
+    servings=None,
+    cooking_method=None,
+    limit=3,
+):
+    """[복원] 조건 기반 레시피 추천 (종류/난이도/인분/조리법).
+
+    한때 '안 쓰는 함수'로 제거했었으나, recipe_search.py가 이 함수를 import하고
+    있어서 백엔드 startup이 ImportError로 실패했음. 재추가.
+    이전: limit 기본값 10 → 지금: 3 (멘토 피드백 — top 3 노출).
+    """
+    conditions = []
+    params = {"limit": limit}
+
+    if kind:
+        conditions.append("r.kind = $kind")
+        params["kind"] = kind
+    if difficulty:
+        conditions.append("r.difficulty = $difficulty")
+        params["difficulty"] = difficulty
+    if servings:
+        conditions.append("r.servings = $servings")
+        params["servings"] = servings
+    if cooking_method:
+        conditions.append("r.cooking_method = $cooking_method")
+        params["cooking_method"] = cooking_method
+
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+    with get_driver().session() as session:
+        result = session.run(f"""
+            MATCH (r:Recipe)
+            {where_clause}
+            WITH r, {_SCORE_EXPR} AS score
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
+                   r.kind AS kind, r.cooking_time AS cooking_time,
+                   r.view_count AS view_count, score
+            ORDER BY score DESC LIMIT $limit
+        """, **params)
         return [r.data() for r in result]
 
 
