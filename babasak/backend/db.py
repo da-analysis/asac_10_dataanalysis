@@ -1,36 +1,3 @@
-"""
-Neo4j 그래프 RAG 백엔드 — 챗봇용 함수 모음
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-이전 버전 대비 변경 요약 (각 함수 위 주석에 [변경/신규/유지/제거] 표시)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[신규]
-- search_recipes_smart()  : 3단계 fallback (정확매칭 → 토큰분해 → 부분매칭 → 인기)
-- find_similar_recipes()  : 재료 공유도 기반 유사 레시피 추천
-- _load_dictionaries()    : 메뉴/재료 사전을 Neo4j에서 1회 로드해 메모리 캐싱
-- _tokenize()             : 사전 기반 쿼리 토큰 분해
-
-[변경]
-- search_recipes()        : 내부적으로 search_recipes_smart 호출하도록 위임 (alias)
-- 모든 검색 함수 limit 기본값 5 → 3 (멘토 피드백 — top 3 노출)
-- 점수 공식 _SCORE_EXPR 상수로 통일 (view + recommend×100 + scrap×50)
-- get_recipe_detail()     : 반환에 r.steps 추가 (조리단계 그래프에 같이 적재됨)
-
-[유지]
-- get_recipe_ingredients, get_recipes_by_ingredient,
-  get_recipes_by_multiple_ingredients, get_recipes_excluding_ingredient,
-  get_popular_recipes  → 시그니처/동작 거의 그대로 (limit 기본값만 3으로)
-
-[복원]
-- recommend_recipes()          : 한때 제거했다가 recipe_search.py가 import해서
-                                 ImportError로 백엔드 startup 실패 → 재추가
-
-[제거] (호출 빈도 낮거나 활용도 부족)
-- get_all_ingredients()        : 5만개 전체 반환 → 챗봇이 못 씀
-- get_ingredient_by_category() : 카테고리만으로 검색하는 시나리오 거의 없음
-- get_db_stats()               : 디버깅 전용
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"""
 import os
 from neo4j import GraphDatabase
 
@@ -56,12 +23,6 @@ def get_driver():
 # ============================================================
 
 def _load_dictionaries(menu_limit=2000, ing_limit=1500):
-    """[신규] Neo4j에서 빈도 상위 메뉴명/재료명을 메모리에 캐싱.
-
-    이전 버전: 사전 자체가 없음. 검색은 r.name CONTAINS keyword 단일 쿼리뿐.
-    변경 의도: 멘토 피드백 — '명란김치찌개' 같이 없는 메뉴를 토큰으로 분해해
-              '명란' + '김치찌개'로 부분 매칭하기 위함. 그래프 RAG에서 자연스러움.
-    긴 이름부터 매칭해야 '청양고추'가 '고추'로 먼저 잡히지 않음."""
     global _KNOWN_MENUS, _KNOWN_INGREDIENTS, _DICT_LOADED
     if _DICT_LOADED:
         return
@@ -93,12 +54,6 @@ def _load_dictionaries(menu_limit=2000, ing_limit=1500):
 
 
 def _tokenize(query):
-    """[신규] 쿼리에서 알려진 메뉴/재료 키워드 추출.
-
-    예: '명란김치찌개 매콤한 거' → menu=['김치찌개'], ing=['명란']
-    이전 버전: 토큰화 자체가 없었음. preprocessor가 LLM으로 entity 추출했고
-              실패하면 그냥 빈 응답 반환.
-    반환: (menu_tokens, ingredient_tokens)"""
     _load_dictionaries()
     remaining = query
     menu_tokens = []
@@ -127,23 +82,6 @@ _SCORE_EXPR = "(coalesce(r.view_count,0) + coalesce(r.recommend_count,0)*100 + c
 # ============================================================
 
 def search_recipes_smart(query, limit=3):
-    """[신규] 3단계 fallback으로 레시피 검색.
-
-    이전 search_recipes()는 단순히 r.name CONTAINS keyword 한 줄.
-    없는 메뉴면 빈 결과 → 챗봇이 '못 찾았다'만 답함.
-
-    멘토 피드백 반영:
-      - 없는 메뉴도 유사한 거 찾아주기
-      - LIKE 형식 말고 그래프 traverse로 재료 공유까지 보기
-      - 우선순위 명확하게 (정확매칭 > 토큰+재료 > 토큰만 > 인기)
-
-    1단계: 이름에 query 그대로 포함 (정확/부분)
-    2단계: query를 사전으로 토큰 분해. 메뉴 토큰 매칭 + 재료 토큰 일치 가중(+1000/재료)
-    3단계: 메뉴 토큰 하나만으로 부분 매칭
-    4단계: 그래도 없으면 인기 레시피 fallback (match_type='popular_fallback')
-
-    반환: list of {id, name, servings, difficulty, kind, score, match_type}
-    """
     # 1단계: 이름 부분 매칭
     results = _search_by_name(query, limit)
     if len(results) >= limit:
@@ -182,9 +120,6 @@ def search_recipes_smart(query, limit=3):
 
 
 def _search_by_name(keyword, limit):
-    """[신규] 1단계: 이름 부분 매칭. 인기도 점수 정렬.
-    이전 search_recipes()의 본문이 사실상 이 함수.
-    match_type='name_match' 라벨 추가."""
     with get_driver().session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)
@@ -205,14 +140,6 @@ def _search_by_name(keyword, limit):
 
 
 def _search_by_tokens(menu_tokens, ing_tokens, limit):
-    """[신규] 2단계: 메뉴 토큰 매칭 + 재료 토큰 일치 가중.
-
-    Cypher 핵심:
-      - 메뉴 토큰 중 하나라도 이름에 포함 (ANY)
-      - 그 레시피의 CONTAINS Ingredient 중 ing_tokens 일치하는 갯수(ing_hits)를 셈
-      - 점수 = 인기점수 + ing_hits * 1000
-      이렇게 하면 '명란김치찌개' 검색 시 '명란'까지 들어간 김치찌개가 가장 위로.
-    """
     if not menu_tokens:
         return []
 
@@ -245,8 +172,6 @@ def _search_by_tokens(menu_tokens, ing_tokens, limit):
 # ============================================================
 
 def get_recipe_ingredients(rcp_sno):
-    """[유지] 레시피의 재료 + 수량 조회. 시그니처/Cypher 그대로.
-    Neo4j에는 CONTAINS 관계에 c.quantity 속성이 들어있음 (silver.ingredients_final 기반)."""
     with get_driver().session() as session:
         result = session.run("""
             MATCH (r:Recipe {rcp_sno: $rcp_sno})-[c:CONTAINS]->(i:Ingredient)
@@ -258,9 +183,6 @@ def get_recipe_ingredients(rcp_sno):
 
 
 def get_recipe_detail(rcp_sno):
-    """[변경] 레시피 상세 정보 반환.
-    이전 버전 대비 추가: r.steps (조리단계). ETL에서 cooking_steps를 Recipe.steps로 적재함.
-    챗봇이 '조리법 알려줘' 답할 때 사용."""
     with get_driver().session() as session:
         result = session.run("""
             MATCH (r:Recipe {rcp_sno: $rcp_sno})
@@ -282,8 +204,6 @@ def get_recipe_detail(rcp_sno):
 # ============================================================
 
 def get_recipes_by_ingredient(ingredient_name, limit=3):
-    """[변경] 특정 재료가 들어간 레시피 (인기순).
-    이전: limit 기본값 10. 지금: 3 (멘토 피드백 — top 3 노출)."""
     with get_driver().session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)-[:CONTAINS]->(i:Ingredient {{name: $name}})
@@ -297,8 +217,6 @@ def get_recipes_by_ingredient(ingredient_name, limit=3):
 
 
 def get_recipes_by_multiple_ingredients(ingredients, limit=3):
-    """[변경] 여러 재료가 모두 들어간 레시피.
-    이전: limit 10 → 지금: 3."""
     with get_driver().session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)
@@ -313,8 +231,6 @@ def get_recipes_by_multiple_ingredients(ingredients, limit=3):
 
 
 def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
-    """[변경] 특정 재료를 제외한 레시피 (알레르기 대응).
-    이전: limit 10 → 지금: 3."""
     with get_driver().session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)
@@ -333,18 +249,6 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
 # ============================================================
 
 def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
-    """[신규] 주어진 레시피와 재료를 공유하는 유사 레시피 추천.
-
-    이전 버전: 이런 함수 없었음. 챗봇이 '비슷한 거 보여줘' 답을 못 함.
-    멘토 피드백: '레시피의 재료를 가져오는 게 3번과 4번에서 되어야' = 재료 그래프 활용.
-
-    Cypher 핵심:
-      MATCH (base)-[:CONTAINS]->(i)<-[:CONTAINS]-(other)
-      base와 other가 같은 Ingredient i를 공유하는 패턴
-      shared(공통 재료 수) DESC, 인기 DESC 정렬
-
-    - min_shared: 최소 공통 재료 수 (기본 2개) — 너무 약한 매칭 차단
-    """
     with get_driver().session() as session:
         result = session.run(f"""
             MATCH (base:Recipe {{rcp_sno: $rcp_sno}})-[:CONTAINS]->(i:Ingredient)
@@ -366,8 +270,6 @@ def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
 # ============================================================
 
 def get_popular_recipes(limit=3):
-    """[변경] 전체 인기 레시피 top N.
-    이전: limit 10 → 지금: 3. 점수 공식은 _SCORE_EXPR로 통일."""
     with get_driver().session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)
@@ -391,12 +293,6 @@ def recommend_recipes(
     cooking_method=None,
     limit=3,
 ):
-    """[복원] 조건 기반 레시피 추천 (종류/난이도/인분/조리법).
-
-    한때 '안 쓰는 함수'로 제거했었으나, recipe_search.py가 이 함수를 import하고
-    있어서 백엔드 startup이 ImportError로 실패했음. 재추가.
-    이전: limit 기본값 10 → 지금: 3 (멘토 피드백 — top 3 노출).
-    """
     conditions = []
     params = {"limit": limit}
 
@@ -434,10 +330,6 @@ def recommend_recipes(
 # ============================================================
 
 def search_recipes(keyword, limit=5):
-    """[변경] 기존 코드 호환용. 시그니처는 그대로지만 내부는 search_recipes_smart 호출.
-
-    이전 동작: r.name CONTAINS keyword 단일 쿼리 (못 찾으면 빈 결과)
-    지금 동작: 3단계 fallback (정확 → 토큰 → 부분 → 인기)
-    => recipe_search_node.py 등 기존 호출자가 그대로 import해도 깨지지 않음.
+    return search_recipes_smart(keyword, limit=limit)
     """
     return search_recipes_smart(keyword, limit=limit)
