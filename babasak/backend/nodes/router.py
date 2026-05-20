@@ -63,7 +63,7 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     cost_info = state.get("cost_info", {})
     entities = state.get("entities", {})
 
-    has_recipe = bool(recipe_info)
+    has_recipe = bool(recipe_info.get("data") if isinstance(recipe_info, dict) else recipe_info)
     has_price = bool(price_info)
     has_cost = bool(cost_info)
     has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False
@@ -142,7 +142,7 @@ def router_node(state: dict) -> dict:
     price_info = state.get("price_info", {})
     cost_info = state.get("cost_info", {})
 
-    has_recipe = bool(recipe_info)
+    has_recipe = bool(recipe_info.get("data") if isinstance(recipe_info, dict) else recipe_info)
     has_price = bool(price_info)
     has_cost = bool(cost_info)
     has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False

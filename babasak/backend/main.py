@@ -1,6 +1,12 @@
 import backend.databricks_db as databricks_db
 from fastapi import FastAPI
 from backend.routers import chatbot as chatbot_router
+import mlflow
+
+# mlflow 설정. 
+mlflow.langchain.autolog()
+mlflow.set_experiment('/Shared/babasak_tracing')
+
 
 app = FastAPI()
 app.include_router(chatbot_router.router, prefix="/api/chatbot")
