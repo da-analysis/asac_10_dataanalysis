@@ -47,6 +47,22 @@ def _dedupe(values):
     return list(dict.fromkeys([v for v in values if v]))
 
 
+def _first_text(*values):
+    for value in values:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def _recipe_display_name(recipe):
+    """User-facing recipe name.
+
+    r.rcp_sno/id is kept only for internal lookups. Chatbot rows should expose
+    title/name instead of recipe ids.
+    """
+    return _first_text(recipe.get("title"), recipe.get("name")) or "레시피"
+
+
 def get_driver():
     """Neo4j driver singleton."""
     global _driver
@@ -199,7 +215,7 @@ def search_recipes_by_name(keyword, limit=5):
             WITH r,
                  CASE WHEN r.name = $keyword THEN 1 ELSE 0 END AS exact_hit,
                  {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name,
+            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
                    r.cooking_time AS cooking_time, r.kind AS kind,
                    r.cooking_method AS cooking_method,
@@ -280,7 +296,7 @@ def get_recipes_by_ingredient(ingredient_name, limit=5):
             WITH r, collect(DISTINCT i.name) AS matched_ingredients,
                  count(DISTINCT i) AS relation_score,
                  {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name,
+            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
                    r.cooking_time AS cooking_time, r.kind AS kind,
                    r.view_count AS view_count,
@@ -311,7 +327,7 @@ def get_recipes_by_multiple_ingredients(ingredients, limit=5):
             WITH r, collect(DISTINCT i.name) AS matched_ingredients,
                  {_SCORE_EXPR} AS popularity_score
             WHERE size(matched_ingredients) = size($names)
-            RETURN r.rcp_sno AS id, r.name AS name,
+            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
                    r.cooking_time AS cooking_time, r.kind AS kind,
                    r.view_count AS view_count,
@@ -373,7 +389,7 @@ def find_similar_recipes_by_ingredients(seed_ingredients, exclude_ids=None, limi
                    WHEN union_count = 0 THEN 0.0
                    ELSE toFloat(shared_count) / toFloat(union_count)
                  END AS graph_similarity
-            RETURN r.rcp_sno AS id, r.name AS name,
+            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
                    r.cooking_time AS cooking_time, r.kind AS kind,
                    r.view_count AS view_count,
@@ -441,7 +457,9 @@ def build_graph_relation_context(query, limit=3):
         base_ingredients.extend(ing_names)
         source_recipes.append({
             "id": recipe.get("id"),
-            "name": recipe.get("name"),
+            "name": _recipe_display_name({**recipe, **detail}),
+            "recipe_name": recipe.get("name") or detail.get("name"),
+            "recipe_title": recipe.get("title") or detail.get("title"),
             "servings": recipe.get("servings"),
             "difficulty": recipe.get("difficulty"),
             "cooking_time": recipe.get("cooking_time"),
@@ -533,6 +551,7 @@ def get_chatbot_context(keyword):
     return [{
         "mode": "graph_relation_context",
         "source": "neo4j",
+        "source_label": "Neo4j DB",
         "menu": keyword,
         "margin": 0,
         "ingredients": context["summary_lines"],
@@ -552,12 +571,16 @@ def _format_recipe_rows_for_agent(recipes):
             for ing in ingredients
         ]
         rows.append({
-            "menu": recipe.get("name"),
+            "menu": _recipe_display_name({**recipe, **detail}),
+            "recipe_name": recipe.get("name") or detail.get("name"),
+            "recipe_title": recipe.get("title") or detail.get("title"),
             "margin": 0,
             "ingredients": ing_texts,
-            "difficulty": recipe.get("difficulty"),
-            "servings": recipe.get("servings"),
-            "cooking_time": recipe.get("cooking_time"),
+            "source": "neo4j",
+            "source_label": "Neo4j DB",
+            "difficulty": recipe.get("difficulty") or detail.get("difficulty"),
+            "servings": recipe.get("servings") or detail.get("servings"),
+            "cooking_time": recipe.get("cooking_time") or detail.get("cooking_time"),
             "cooking_method": recipe.get("cooking_method") or detail.get("cooking_method"),
             "view_count": recipe.get("view_count"),
             "steps": detail.get("steps") or recipe.get("steps"),
@@ -579,7 +602,7 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=5):
             WHERE r.name CONTAINS $keyword
               AND NOT (r)-[:CONTAINS]->(:Ingredient {{name: $exclude}})
             WITH r, {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name,
+            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
                    r.cooking_time AS cooking_time, r.kind AS kind,
                    r.view_count AS view_count,
@@ -616,7 +639,7 @@ def recommend_recipes(kind=None, difficulty=None, servings=None, cooking_method=
             MATCH (r:Recipe)
             {where_clause}
             WITH r, {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name,
+            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
                    r.cooking_time AS cooking_time, r.kind AS kind,
                    r.view_count AS view_count,
@@ -635,7 +658,7 @@ def get_popular_recipes(limit=5):
         rows = session.run(f"""
             MATCH (r:Recipe)
             WITH r, {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name,
+            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
                    r.cooking_time AS cooking_time, r.kind AS kind,
                    r.view_count AS view_count,
