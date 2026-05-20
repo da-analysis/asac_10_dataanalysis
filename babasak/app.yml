@@ -1,5 +1,11 @@
 command: ["sh", "start.sh"]
 env:
+  - name: DATABRICKS_HOST
+    value: "https://dbc-b2983598-29d8.cloud.databricks.com"
+  # SP(M2M) OAuth 강제 — user OBO 토큰의 scope 제한 우회.
+  # DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET은 Databricks Apps가 자동 주입.
+  - name: DATABRICKS_AUTH_TYPE
+    value: "oauth-m2m"
   - name: DATABRICKS_WAREHOUSE_ID
     value: ea576f572ba19fea
   - name: BACKEND_API_URL
@@ -14,7 +20,11 @@ env:
     valueFrom: secret-5
   - name: GENIE_SPACE_ID
     value: "01f148e5845f1f68843892ceb53abd32"
+  - name: SEARCH_BACKEND
+    value: "naver"
+  - name: NAVER_CLIENT_ID
+    valueFrom: secret
+  - name: NAVER_CLIENT_SECRET
+    valueFrom: secret-2
   - name: PYTHONUNBUFFERED
     value: "1"
-  - name: MLFLOW_TRACKING_URI
-    value: "databricks"
