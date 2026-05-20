@@ -23,6 +23,50 @@ def get_driver():
 # ============================================================
 
 def _load_dictionaries(menu_limit=2000, ing_limit=1500):
+    global _KNOWN_MENUS, _KNOWN_INGREDIENTS, _DICT_LOADED
+    if _DICT_LOADED:
+        return
+
+    with get_driver().session() as session:
+        # 메뉴: 인기 순 + name이 너무 길지 않은 것
+        menus = session.run("""
+            MATCH (r:Recipe)
+            WHERE r.name IS NOT NULL AND size(r.name) <= 20
+            WITH r.name AS name, count(*) AS cnt
+            ORDER BY cnt DESC LIMIT $limit
+            RETURN name
+        """, limit=menu_limit)
+        _KNOWN_MENUS = [m["name"] for m in menus if m["name"]]
+
+        # 재료: 사용 빈도 순
+        ings = session.run("""
+            MATCH ()-[:CONTAINS]->(i:Ingredient)
+            WITH i.name AS name, count(*) AS cnt
+            ORDER BY cnt DESC LIMIT $limit
+            RETURN name
+        """, limit=ing_limit)
+        _KNOWN_INGREDIENTS = [i["name"] for i in ings if i["name"]]
+
+    # 긴 이름 우선 매칭
+    _KNOWN_MENUS.sort(key=len, reverse=True)
+    _KNOWN_INGREDIENTS.sort(key=len, reverse=True)
+    _DICT_LOADED = True
+
+
+def _tokenize(query):
+    _load_dictionaries()
+    remaining = query
+    menu_tokens = []
+    ing_tokens = []
+    for menu in _KNOWN_MENUS:
+        if menu in remaining:
+            menu_tokens.append(menu)
+            remaining = remaining.replace(menu, " ")
+    for ing in _KNOWN_INGREDIENTS:
+        if ing in remaining:
+            ing_tokens.append(ing)
+            remaining = remaining.replace(ing, " ")
+    return menu_tokens, ing_tokens
     """[신규] Neo4j에서 빈도 상위 메뉴명/재료명을 메모리에 캐싱.
 
     이전 버전: 사전 자체가 없음. 검색은 r.name CONTAINS keyword 단일 쿼리뿐.
@@ -33,6 +77,16 @@ def _load_dictionaries(menu_limit=2000, ing_limit=1500):
     if _DICT_LOADED:
         return
 
+# ============================================================
+# 점수 공식 — 인기도 기반, 모든 검색에서 통일
+# [변경] 이전 버전: 각 함수마다 (r.view_count + r.recommend_count*100 + r.scrap_count*50) 하드코딩
+#       지금 버전: 상수로 빼고 coalesce(...,0) 감싸서 NULL 안전
+# ============================================================
+_SCORE_EXPR = "(coalesce(r.view_count,0) + coalesce(r.recommend_count,0)*100 + coalesce(r.scrap_count,0)*50)"
+
+
+# ============================================================
+# 1. 통합 검색 — search_recipes_smart (핵심 함수)
     with get_driver().session() as session:
         # 메뉴: 인기 순 + name이 너무 길지 않은 것
         menus = session.run("""
@@ -89,6 +143,7 @@ def _tokenize(query):
 _SCORE_EXPR = "(coalesce(r.view_count,0) + coalesce(r.recommend_count,0)*100 + coalesce(r.scrap_count,0)*50)"
 
 
+def search_recipes_smart(query, limit=3):
 # ============================================================
 # 1. 통합 검색 — search_recipes_smart (핵심 함수)
 # ============================================================
@@ -300,6 +355,55 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
 # ============================================================
 
 def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
+    with get_driver().session() as session:
+        result = session.run(f"""
+            MATCH (base:Recipe {{rcp_sno: $rcp_sno}})-[:CONTAINS]->(i:Ingredient)
+            MATCH (other:Recipe)-[:CONTAINS]->(i)
+            WHERE other.rcp_sno <> base.rcp_sno
+            WITH other, count(DISTINCT i) AS shared, {_SCORE_EXPR.replace('r.', 'other.')} AS pop
+            WHERE shared >= $min_shared
+            RETURN other.rcp_sno AS id, other.name AS name,
+                   other.difficulty AS difficulty, other.servings AS servings,
+                   shared, pop AS score
+            ORDER BY shared DESC, pop DESC
+            LIMIT $limit
+        """, rcp_sno=rcp_sno, min_shared=min_shared, limit=limit)
+        return [r.data() for r in result]
+
+
+# ============================================================
+# 5. 인기 레시피
+# ============================================================
+
+def get_popular_recipes(limit=3):
+    with get_driver().session() as session:
+        result = session.run(f"""
+            MATCH (r:Recipe)
+            WITH r, {_SCORE_EXPR} AS score
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
+                   r.view_count AS view_count, score
+            ORDER BY score DESC LIMIT $limit
+        """, limit=limit)
+        return [r.data() for r in result]
+
+
+# ============================================================
+# 6. 조건 기반 추천 (recipe_search.py가 import하므로 유지)
+# ============================================================
+
+def recommend_recipes(
+    kind=None,
+    difficulty=None,
+    servings=None,
+    cooking_method=None,
+    limit=3,
+):
+    conditions = []
+    params = {"limit": limit}
+# ============================================================
+
+def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
     """[신규] 주어진 레시피와 재료를 공유하는 유사 레시피 추천.
 
     이전 버전: 이런 함수 없었음. 챗봇이 '비슷한 거 보여줘' 답을 못 함.
@@ -314,6 +418,15 @@ def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
     """
     with get_driver().session() as session:
         result = session.run(f"""
+            MATCH (r:Recipe)
+            {where_clause}
+            WITH r, {_SCORE_EXPR} AS score
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
+                   r.kind AS kind, r.cooking_time AS cooking_time,
+                   r.view_count AS view_count, score
+            ORDER BY score DESC LIMIT $limit
+        """, **params)
             MATCH (base:Recipe {{rcp_sno: $rcp_sno}})-[:CONTAINS]->(i:Ingredient)
             MATCH (other:Recipe)-[:CONTAINS]->(i)
             WHERE other.rcp_sno <> base.rcp_sno
@@ -352,10 +465,6 @@ def get_popular_recipes(limit=3):
 # ============================================================
 
 def search_recipes(keyword, limit=5):
-    """[변경] 기존 코드 호환용. 시그니처는 그대로지만 내부는 search_recipes_smart 호출.
-
-    이전 동작: r.name CONTAINS keyword 단일 쿼리 (못 찾으면 빈 결과)
-    지금 동작: 3단계 fallback (정확 → 토큰 → 부분 → 인기)
-    => recipe_search_node.py 등 기존 호출자가 그대로 import해도 깨지지 않음.
+    return search_recipes_smart(keyword, limit=limit)
     """
     return search_recipes_smart(keyword, limit=limit)
