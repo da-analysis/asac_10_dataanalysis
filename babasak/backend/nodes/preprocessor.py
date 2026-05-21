@@ -220,6 +220,138 @@ def _detect_popular_intent(query: str) -> bool:
     return any(kw in query for kw in keywords)
 
 
+
+
+# ── LLM 기반 엔티티 추출 (문자열/임베딩 실패 시 fallback) ──
+_llm_entity = None
+
+
+def _get_llm_entity():
+    """엔티티 추출용 경량 LLM (lazy init)"""
+    global _llm_entity
+    if _llm_entity is None:
+        from databricks_langchain import ChatDatabricks
+        _llm_entity = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0, max_tokens=150)
+    return _llm_entity
+
+
+def _llm_extract_entities(query: str) -> dict:
+    """
+    멀티쿼리 + 엔티티 추출 (LLM 1회 호출).
+
+    흐름:
+      1. LLM이 사용자 질문을 3가지로 재해석 (모호함 해소)
+      2. 각 해석에 대해 기존 MENU_NAMES/INGREDIENT_NAMES 문자열 매칭 시도
+      3. 매칭 안 되면 LLM이 직접 추출한 메뉴/재료 사용
+
+    반환: {'menu': str|None, 'ingredients': list[str], 'rewritten': str|None}
+    """
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    try:
+        messages = [
+            SystemMessage(content=(
+                "당신은 식당/요리 질문 분석 전문가입니다.\n"
+                "사용자의 질문이 모호하거나 줄임말일 수 있습니다.\n"
+                "아래 단계를 수행하세요:\n\n"
+                "[1단계] 질문을 3가지 명확한 해석으로 변환하세요.\n"
+                "[2단계] 가장 가능성 높은 해석 1개를 선택하세요.\n"
+                "[3단계] 선택한 해석에서 음식명과 재료를 추출하세요.\n\n"
+                "반드시 아래 형식으로만 답하세요 (다른 말 금지):\n"
+                "해석1: <문장>\n"
+                "해석2: <문장>\n"
+                "해석3: <문장>\n"
+                "선택: <1, 2, 3 중 번호>\n"
+                "메뉴: <음식이름 또는 NONE>\n"
+                "재료: <재료1, 재료2 또는 NONE>\n\n"
+                "예시:\n"
+                "질문: 김찌 좀 싸게 해먹으려면\n"
+                "해석1: 김치찌개를 저렴하게 만드는 방법\n"
+                "해석2: 김치찌개 원가를 절감하는 방법\n"
+                "해석3: 김치찌개 재료 중 저렴한 대체재\n"
+                "선택: 1\n"
+                "메뉴: 김치찌개\n"
+                "재료: NONE\n\n"
+                "질문: 고기류 말고 단백질 보충할 수 있는 거\n"
+                "해석1: 고기 없이 단백질이 풍부한 식재료 추천\n"
+                "해석2: 고기 대신 두부나 계란으로 만들 수 있는 요리\n"
+                "해석3: 채식 단백질 재료 가격 비교\n"
+                "선택: 2\n"
+                "메뉴: NONE\n"
+                "재료: 두부, 계란"
+            )),
+            HumanMessage(content=query),
+        ]
+        response = _get_llm_entity().invoke(messages)
+        text = response.content.strip()
+
+        archive("preprocessor.llm_multiquery", {"query": query, "raw_response": text})
+
+        # 파싱
+        menu = None
+        ingredients = []
+        rewritten = None
+        interpretations = []
+
+        for line in text.split("\n"):
+            line = line.strip()
+            if line.startswith("해석1:") or line.startswith("해석2:") or line.startswith("해석3:"):
+                interpretations.append(line.split(":", 1)[1].strip())
+            elif line.startswith("선택:"):
+                try:
+                    idx = int(line.split(":")[1].strip()) - 1
+                    if 0 <= idx < len(interpretations):
+                        rewritten = interpretations[idx]
+                except (ValueError, IndexError):
+                    pass
+            elif line.startswith("메뉴:"):
+                val = line[3:].strip()
+                if val and val.upper() != "NONE" and len(val) <= 20:
+                    menu = val
+            elif line.startswith("재료:"):
+                val = line[3:].strip()
+                if val and val.upper() != "NONE":
+                    ingredients = [ing.strip() for ing in val.split(",")
+                                   if ing.strip() and len(ing.strip()) <= 10]
+
+        # ★ 핵심: 3개 해석에 대해 기존 문자열 매칭도 시도 (리스트 내 메뉴를 LLM이 풀어쓴 경우 대응)
+        if not menu and interpretations:
+            for interp in interpretations:
+                matched = _match_menu_from_query(interp)
+                if matched:
+                    menu = matched
+                    archive("preprocessor.llm_multi_match", {
+                        "source": "interpretation_string_match",
+                        "menu": menu, "interpretation": interp,
+                    })
+                    break
+
+        if not ingredients and interpretations:
+            for interp in interpretations:
+                matched_ings = _match_ingredients_from_query(interp)
+                if matched_ings:
+                    ingredients = matched_ings
+                    archive("preprocessor.llm_multi_match", {
+                        "source": "interpretation_ingredient_match",
+                        "ingredients": ingredients, "interpretation": interp,
+                    })
+                    break
+
+        archive("preprocessor.llm_extract_result", {
+            "menu": menu,
+            "ingredients": ingredients,
+            "rewritten": rewritten,
+            "num_interpretations": len(interpretations),
+        })
+
+        return {'menu': menu, 'ingredients': ingredients, 'rewritten': rewritten}
+
+    except Exception as e:
+        archive("preprocessor.llm_extract_error", {"error": str(e)})
+        return {'menu': None, 'ingredients': [], 'rewritten': None}
+
+
+
 def preprocessor_node(state: dict) -> dict:
     """
     전처리 노드 (LLM 0회, Qwen3 임베딩).
@@ -277,6 +409,16 @@ def preprocessor_node(state: dict) -> dict:
                 ingredients = prev_ings
                 archive("preprocessor.context_carry", {"source": "history", "ingredients": prev_ings, "from_msg_preview": prev_text[:100]})
                 break
+
+    # 2d. ★ LLM 기반 엔티티 추출 (문자열/임베딩/히스토리 모두 실패 시)
+    if is_valid and not menu and not ingredients:
+        llm_result = _llm_extract_entities(query)
+        if llm_result.get('menu'):
+            menu = llm_result['menu']
+            archive("preprocessor.llm_fallback", {"source": "llm", "menu": menu})
+        if llm_result.get('ingredients'):
+            ingredients = llm_result['ingredients']
+            archive("preprocessor.llm_fallback", {"source": "llm", "ingredients": ingredients})
 
     # 3. intent 분류 + rewritten_query
     if is_valid:

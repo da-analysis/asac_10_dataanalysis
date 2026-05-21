@@ -1,6 +1,8 @@
 from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
+from backend.debug_log import archive
+
 
 def _get_last_human_query(messages: list) -> str:
     """메시지 리스트에서 마지막 HumanMessage의 content를 반환"""
@@ -25,29 +27,39 @@ def _get_llm_router():
 _COST_KEYWORDS = ["원가", "마진", "판매가", "비용", "수익", "1인분 가격"]
 _PRICE_KEYWORDS = ["가격", "시세", "도매가", "얼마", "단가"]
 _RECIPE_KEYWORDS = ["레시피", "재료", "만드는 법", "조리법", "만들기"]
-# === 신규: 제외/대체재/조건/인기 키워드 ===
+# === 제외/대체재/조건/인기 키워드 ===
 _EXCLUDE_KEYWORDS = ["제외", "빼고", "없는", "알레르기", "못 먹"]
 _ALTERNATIVE_KEYWORDS = ["대신", "대체", "바꿀", "대용"]
-_CONDITION_KEYWORDS = ["초급", "쉬운", "간단", "중급", "인분", "국/탕", "찌개", "볶음", "구이"]
+# 주의: "찌개", "국" 같은 일반 단어는 메뉴명에 포함되므로 조건 키워드에서 제외.
+# (preprocessor의 KIND_MAP과 동일 정책 — 메뉴/조건 오감지 방지)
+_CONDITION_KEYWORDS = ["초급", "쉬운", "간단", "중급", "인분", "국/탕", "볶음", "구이"]
 _POPULAR_KEYWORDS = ["인기", "top", "best", "추천순", "랭킹"]
 
 
 def _detect_intent(query: str) -> str | None:
-    """쿼리에서 의도 키워드를 감지하여 힌트 반환"""
-    # 제외/대체재/조건/인기 → recipe 의도
+    """쿼리에서 의도 키워드를 감지하여 힌트 반환.
+
+    우선순위: exclude/alternative > cost > price > recipe > condition/popular
+    명시적 의도(원가, 가격)가 먼저 잡히도록 condition/popular는 맨 뒤에 배치.
+    """
+    # 1순위: 제외/대체재 → recipe (가장 명시적)
     for kw in _EXCLUDE_KEYWORDS + _ALTERNATIVE_KEYWORDS:
         if kw in query:
             return "recipe"
-    for kw in _CONDITION_KEYWORDS + _POPULAR_KEYWORDS:
-        if kw in query:
-            return "recipe"
+    # 2순위: 원가 의도
     for kw in _COST_KEYWORDS:
         if kw in query:
             return "cost"
+    # 3순위: 가격/시세 의도
     for kw in _PRICE_KEYWORDS:
         if kw in query:
             return "price"
+    # 4순위: 레시피 의도
     for kw in _RECIPE_KEYWORDS:
+        if kw in query:
+            return "recipe"
+    # 5순위: 조건/인기 (메뉴명에 포함될 수 있으므로 맨 뒤)
+    for kw in _CONDITION_KEYWORDS + _POPULAR_KEYWORDS:
         if kw in query:
             return "recipe"
     return None
@@ -87,30 +99,28 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     if not has_price and intent == "price":
         return "price_search"
 
-    # ★ [Fix] 규칙 3 (기존 규칙 8): 레시피만 묻는 질문 + 레시피 있음 → report_generator
-    #   가격/원가 의도가 없으면 바로 답변 생성 (price_search 불필요)
-    if has_recipe and intent == "recipe":
-        return "report_generator"
-
-    # 규칙 4 (기존 규칙 3): 레시피 있고 가격 없으면 → price_search
-    #   (여기까지 왔다면 intent가 "cost" 이거나 None → 가격 조회 필요)
+    # 규칙 3: 레시피 있고 가격 없으면 → price_search
     if has_recipe and not has_price:
         return "price_search"
 
-    # 규칙 5: 가격 있고 누락 재료 있으면 → missing_price_search
+    # 규칙 4: 가격 있고 누락 재료 있으면 → missing_price_search
     if has_price and has_unavailable:
         return "missing_price_search"
 
-    # 규칙 6: 레시피+가격 있고 원가 미완 + 원가 의도 → cost_calculator
+    # 규칙 5: 레시피+가격 있고 원가 미완 + 원가 의도 → cost_calculator
     if has_recipe and has_price and not has_cost and intent == "cost":
         return "cost_calculator"
 
-    # 규칙 7: 모든 정보 수집 완료 → report_generator
+    # 규칙 6: 모든 정보 수집 완료 → report_generator
     if has_recipe and has_price and has_cost:
         return "report_generator"
 
-    # 규칙 8: 가격만 묻는 질문 + 가격 있음 → report_generator
+    # 규칙 7: 가격만 묻는 질문 + 가격 있음 → report_generator
     if has_price and intent == "price":
+        return "report_generator"
+
+    # 규칙 8: 레시피만 묻는 질문 + 레시피 있음 → report_generator (맨 마지막)
+    if has_recipe and intent == "recipe":
         return "report_generator"
 
     return None  # 판단 불가 → LLM fallback
@@ -120,10 +130,22 @@ def router_node(state: dict) -> dict:
     """다음 액션을 결정하는 라우터. 규칙 기반 우선, 애매하면 LLM fallback."""
     loop_count = state.get("loop_count", 0) + 1
 
+    archive("router.input", {
+        "loop_count": loop_count,
+        "is_valid": state.get("is_valid", False),
+        "has_recipe_info": bool(state.get("recipe_info")),
+        "has_price_info": bool(state.get("price_info")),
+        "has_cost_info": bool(state.get("cost_info")),
+        "last_action": state.get("next_action", ""),
+        "unavailable_count": len(state.get("price_info", {}).get("unavailable", []) or []) if isinstance(state.get("price_info"), dict) else 0,
+    })
+
     if not state.get("is_valid", False):
+        archive("router.output", {"next_action": "report_generator", "reason": "not_valid"})
         return {"next_action": "report_generator", "loop_count": loop_count}
 
     if loop_count > MAX_LOOP_COUNT:
+        archive("router.output", {"next_action": "report_generator", "reason": "max_loop"})
         return {"next_action": "report_generator", "loop_count": loop_count}
 
     query = _get_last_human_query(state.get("messages", []))
@@ -134,7 +156,9 @@ def router_node(state: dict) -> dict:
         # 중복 호출 방지
         last_action = state.get("next_action", "")
         if rule_result == last_action and rule_result != "report_generator":
+            archive("router.output", {"next_action": "report_generator", "reason": "duplicate_action", "would_repeat": rule_result})
             return {"next_action": "report_generator", "loop_count": loop_count}
+        archive("router.output", {"next_action": rule_result, "reason": "rule_based"})
         return {"next_action": rule_result, "loop_count": loop_count}
 
     # === 2단계: LLM fallback (규칙으로 판단 불가한 경우만) ===
@@ -181,9 +205,17 @@ def router_node(state: dict) -> dict:
 
     # 중복 호출 방지
     last_action = state.get("next_action", "")
+    duplicate = False
     if matched == last_action and matched != "report_generator":
         matched = "report_generator"
+        duplicate = True
 
+    archive("router.output", {
+        "next_action": matched,
+        "reason": "llm_fallback",
+        "llm_decision_raw": decision[:100],
+        "duplicate_forced_to_report": duplicate,
+    })
     return {"next_action": matched, "loop_count": loop_count}
 
 
