@@ -1,28 +1,21 @@
-import numpy as np
-from databricks_langchain import DatabricksEmbeddings
+"""
+preprocessor_node: 멀티쿼리 리트리버 기반 사용자 질문 분석
+
+구조:
+  Phase 0: 빠른 경로 — 문자열 매칭으로 menu+intent 확정 시 LLM 스킵
+  Phase 1: LLM 멀티쿼리 — 질문을 3가지로 재해석 + 통합 엔티티 추출 (1회 호출)
+  Phase 2: Grounding — LLM 출력을 알려진 DB 엔티티에 맞춰 정규화
+  Phase 3: 히스토리 carry-over — 위 전부 실패 시 이전 HumanMessage에서 상속
+"""
+from langchain_core.messages import HumanMessage, SystemMessage
+from databricks_langchain import ChatDatabricks
 
 from backend.debug_log import archive
 
-# ── Qwen3 한국어 임베딩 모델 (lazy init) ──
-_emb_ko = None
-_indices = None
 
-VALID_PATTERNS = [
-    '메뉴 원가 알려줘', '재료 가격', '1인분 비용',
-    '레시피 재료', '식재료 시세', '도매가 조회',
-    '대체재 추천', '원가 분석', '메뉴 가격 책정',
-    '재료 용량', '식당 운영 비용', '마진율 계산',
-    '음식 만드는 법', '조리법 알려줘', '식재료 어디서 사',
-    '나물 가격', '재료 비교', '메뉴 추천',
-    '원가 절감', '대량 구매 가격', '인건비 포함 원가',
-]
-
-INVALID_PATTERNS = [
-    '날씨 어때', '주식 시세', '비트코인 가격',
-    '뉴스 알려줘', '영화 추천', '여행지 추천',
-    '수학 문제 풀어줘', '코드 작성해줘', '번역해줘',
-    '노래 가사', '게임 추천', '택시 불러줘',
-]
+# ═══════════════════════════════════════════════════════════════
+# 알려진 엔티티 리스트 (Grounding + 빠른 경로용)
+# ═══════════════════════════════════════════════════════════════
 
 MENU_NAMES = [
     '김치찌개', '된장찌개', '불고기', '순두부찌개', '비빔밥',
@@ -40,7 +33,6 @@ INGREDIENT_NAMES = [
     '참기름', '식용유', '소금', '후추', '새우',
 ]
 
-# 줄임말/오타 → 정규 메뉴명 매핑
 MENU_ALIASES = {
     '김찌': '김치찌개', '된찌': '된장찌개', '순찌': '순두부찌개',
     '부찌': '부대찌개', '김치찌게': '김치찌개', '된장찌게': '된장찌개',
@@ -48,82 +40,31 @@ MENU_ALIASES = {
     '비빔': '비빔밥', '삼겹': '불고기', '순대국': '순두부찌개',
 }
 
-INTENT_PATTERNS = {
-    '원가': ['원가 알려줘', '얼마야', '가격 얼마', '비용 알려줘', '단가 얼마'],
-    '재료': ['재료 알려줘', '뭐 필요해', '재료 뭐뭐', '레시피 알려줘'],
-    '대체재': ['대신 쓸 수 있는', '대체할', '바꿀 수 있는'],
-    '가격조회': ['가격 알려줘', '도매가', '시세', '얼마인지'],
+# ═══════════════════════════════════════════════════════════════
+# Phase 0: 빠른 경로 — 키워드 기반 intent + 문자열 매칭
+# ═══════════════════════════════════════════════════════════════
+
+_INTENT_KEYWORDS = {
+    'cost_analysis': ['원가', '마진', '판매가', '비용', '수익', '1인분 가격', '단가', '가격 책정'],
+    'price_inquiry': ['도매가', '시세', '도매 시세', '식자재 가격'],
+    'recipe_only': ['만드는 법', '조리법', '레시피', '만들기', '요리법', '조리 순서'],
+    'alternative': ['대신', '대체', '바꿀', '대용', '다른 걸로'],
+    'recommendation': ['추천', '뭐 먹', '어떤 게 좋'],
+    'comparison': ['비교', '어떤 게 싸', '가성비'],
 }
 
-intent_texts = []
-intent_labels = []
-for label, patterns in INTENT_PATTERNS.items():
-    intent_texts.extend(patterns)
-    intent_labels.extend([label] * len(patterns))
-
-VALID_THRESHOLD_KO = 0.38
-ENTITY_THRESHOLD_KO = 0.75  # 직접 언급 없을 때 임베딩 기반 threshold (높게 유지)
-
-# ── 제외/대체재 의도 키워드 ──
-_EXCLUDE_KEYWORDS = ['제외', '빼고', '없는', '알레르기', '못 먹', '빼줘', '없이']
-_ALTERNATIVE_KEYWORDS = ['대신', '대체', '바꿀', '대용', '다른 걸로']
-
-# ── 조건 매핑 (기존 agent.py에서 포팅) ──
-KIND_MAP = {
-    '국/탕': '국/탕', '탕': '국/탕',
-    '반찬': '메인반찬', '밑반찬': '밑반찬', '디저트': '디저트',
-    '면': '면/만두', '볶음': '볶음', '구이': '구이',
-}
-# 주의: '찌개', '국' 같은 너무 일반적인 단어는 메뉴명에 포함되므로 조건 매핑에서 제외
-# ('김치찌개'는 메뉴명이지 조건이 아님)
-
-METHOD_MAP = {
-    '볶음': '볶기', '끓이': '끓이기', '굽': '굽기',
-    '찜': '찌기', '튀김': '튀기기',
-}
+# is_valid 빠른 거부용 (명백히 무관한 질문)
+_INVALID_KEYWORDS = ['날씨', '주식', '비트코인', '뉴스', '영화', '여행', '수학', '코드', '번역', '노래', '게임', '택시']
 
 
-def _get_emb():
-    """임베딩 모델 lazy init"""
-    global _emb_ko
-    if _emb_ko is None:
-        _emb_ko = DatabricksEmbeddings(endpoint='databricks-qwen3-embedding-0-6b')
-    return _emb_ko
-
-
-def _get_indices() -> dict:
-    """
-    인덱스를 lazy하게 빌드하고 캐시.
-    [최적화] 모든 텍스트를 하나로 합쳐 1회 embed_documents 호출 후 슬라이싱.
-    """
-    global _indices
-    if _indices is None:
-        emb = _get_emb()
-        all_texts = VALID_PATTERNS + INVALID_PATTERNS + MENU_NAMES + INGREDIENT_NAMES + intent_texts
-        all_vecs = np.array(emb.embed_documents(all_texts))
-
-        i = 0
-        valid_vecs = all_vecs[i:i + len(VALID_PATTERNS)]; i += len(VALID_PATTERNS)
-        invalid_vecs = all_vecs[i:i + len(INVALID_PATTERNS)]; i += len(INVALID_PATTERNS)
-        menu_vecs = all_vecs[i:i + len(MENU_NAMES)]; i += len(MENU_NAMES)
-        ingredient_vecs = all_vecs[i:i + len(INGREDIENT_NAMES)]; i += len(INGREDIENT_NAMES)
-        intent_vecs = all_vecs[i:i + len(intent_texts)]
-
-        _indices = {
-            'valid': valid_vecs,
-            'invalid': invalid_vecs,
-            'menu': menu_vecs,
-            'ingredient': ingredient_vecs,
-            'intent': intent_vecs,
-        }
-    return _indices
-
-
-def cosine_similarity(query_vec: np.ndarray, index: np.ndarray) -> np.ndarray:
-    """쿼리 벡터와 인덱스 간 코사인 유사도 계산"""
-    query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-10)
-    index_norm = index / (np.linalg.norm(index, axis=1, keepdims=True) + 1e-10)
-    return index_norm @ query_norm
+def _keyword_intent(query: str) -> str | None:
+    """키워드 매칭으로 intent 1차 감지. 명확하면 LLM 스킵 가능."""
+    priority = ['alternative', 'cost_analysis', 'price_inquiry', 'recipe_only', 'recommendation', 'comparison']
+    for intent_name in priority:
+        for kw in _INTENT_KEYWORDS[intent_name]:
+            if kw in query:
+                return intent_name
+    return None
 
 
 def _match_menu_from_query(query: str) -> str | None:
@@ -139,331 +80,407 @@ def _match_menu_from_query(query: str) -> str | None:
 
 def _match_ingredients_from_query(query: str) -> list[str]:
     """문자열 매칭으로 재료 추출 (복수 가능)"""
-    found = []
-    for ing in INGREDIENT_NAMES:
-        if ing in query:
-            found.append(ing)
-    return found
+    return [ing for ing in INGREDIENT_NAMES if ing in query]
 
 
-def _detect_exclude_intent(query: str) -> dict:
+def _is_clearly_invalid(query: str) -> bool:
+    """명백히 무관한 질문은 LLM 호출 없이 빠르게 거부"""
+    return any(kw in query for kw in _INVALID_KEYWORDS)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 1: LLM 멀티쿼리 리트리버 — 통합 추출
+# ═══════════════════════════════════════════════════════════════
+
+_llm = None
+
+
+def _get_llm():
+    global _llm
+    if _llm is None:
+        _llm = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0, max_tokens=200)
+    return _llm
+
+
+_UNIFIED_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입니다.
+사용자의 질문을 분석하여 아래 형식으로 답하세요.
+
+[분석 절차]
+1. 질문을 3가지 관점으로 재해석합니다 (모호함 해소).
+2. 가장 적합한 해석을 선택합니다.
+3. 선택한 해석에서 정보를 추출합니다.
+
+[출력 형식 — 반드시 이 형식만 사용]
+해석1: <재해석 문장>
+해석2: <재해석 문장>
+해석3: <재해석 문장>
+선택: <1|2|3>
+유효: <예|아니오>
+의도: <recipe_only|cost_analysis|price_inquiry|alternative|recommendation|comparison|general>
+메뉴: <음식이름 또는 NONE>
+재료: <재료1, 재료2 또는 NONE>
+제외: <제외할 재료 또는 NONE>
+조건: <난이도/인분/종류/조리법 또는 NONE>
+
+[의도 분류 기준]
+- recipe_only: 레시피, 만드는 법, 조리법, 재료 목록만 원할 때
+- cost_analysis: 원가, 마진, 비용, 가격 책정, 수익률 분석
+- price_inquiry: 특정 재료의 시세/도매가만 단순 조회
+- alternative: 대체재, 다른 재료로 바꾸기
+- recommendation: 메뉴 추천, 뭐 먹을까
+- comparison: 재료/메뉴 가격 비교, 가성비
+- general: 위 어디에도 해당 안 됨
+
+[규칙]
+- 식재료/요리/식당 운영과 무관한 질문이면 유효=아니오, 나머지는 NONE으로 채우세요.
+- 줄임말/오타를 정확한 음식명으로 변환하세요 (예: 김찌→김치찌개, 제육→제육볶음).
+- 재료가 여러 개면 쉼표로 구분하세요.
+
+[예시]
+질문: 김찌 좀 싸게 해먹으려면
+해석1: 김치찌개를 저렴한 재료로 만드는 법
+해석2: 김치찌개 원가를 절감하는 방법
+해석3: 김치찌개 재료 중 저렴한 대체재 추천
+선택: 2
+유효: 예
+의도: cost_analysis
+메뉴: 김치찌개
+재료: NONE
+제외: NONE
+조건: NONE
+
+질문: 비 오는 날 간단한 거
+해석1: 비 오는 날 먹기 좋은 간단한 메뉴 추천
+해석2: 간단하게 만들 수 있는 탕/국 종류 추천
+해석3: 비 오는 날 인기 있는 분식 메뉴
+선택: 1
+유효: 예
+의도: recommendation
+메뉴: NONE
+재료: NONE
+제외: NONE
+조건: 초급"""
+
+
+def _llm_multiquery_extract(query: str) -> dict:
     """
-    제외/대체재 의도 감지.
-    반환: {'exclude': '재료명' or None, 'is_alternative': bool}
+    멀티쿼리 리트리버: 사용자 질문을 3가지로 재해석한 뒤
+    가장 적합한 해석에서 엔티티를 추출.
+
+    반환: {
+        'is_valid': bool,
+        'intent': str,
+        'menu': str|None,
+        'ingredients': list[str],
+        'exclude': str|None,
+        'conditions': dict|None,
+        'rewritten': str|None,
+        'interpretations': list[str],
+    }
     """
-    exclude = None
-    is_alternative = False
-
-    # 대체재 의도
-    for kw in _ALTERNATIVE_KEYWORDS:
-        if kw in query:
-            is_alternative = True
-            break
-
-    # 제외 의도: "X 빼고", "X 제외" 패턴에서 X 추출
-    for kw in _EXCLUDE_KEYWORDS:
-        if kw in query:
-            # 키워드 앞의 재료를 찾기
-            for ing in INGREDIENT_NAMES:
-                if ing in query:
-                    exclude = ing
-                    break
-            break
-
-    return {'exclude': exclude, 'is_alternative': is_alternative}
-
-
-def _detect_conditions(query: str, menu: str | None) -> dict:
-    """
-    조건 기반 추천 의도 감지 (난이도, 인분, 종류, 조리법).
-    주의: 메뉴명이 이미 감지된 경우 메뉴명에 포함된 조건 키워드는 무시.
-    """
-    conditions = {}
-
-    # 메뉴명을 제거한 순수 조건 부분만 분석
-    query_for_cond = query
-    if menu:
-        query_for_cond = query.replace(menu, '')
-
-    # 종류 (메뉴명에 포함된 '찌개', '국' 등은 조건으로 간주하지 않음)
-    for k, v in KIND_MAP.items():
-        if k in query_for_cond:
-            conditions['kind'] = v
-            break
-
-    # 난이도
-    if '초급' in query or '쉬운' in query or '간단' in query:
-        conditions['difficulty'] = '초급'
-    elif '중급' in query:
-        conditions['difficulty'] = '중급'
-    elif '고급' in query or '어려운' in query:
-        conditions['difficulty'] = '고급'
-
-    # 인분
-    for s in ['1인분', '2인분', '3인분', '4인분', '5인분', '6인분이상']:
-        if s in query:
-            conditions['servings'] = s
-            break
-
-    # 조리법
-    for k, v in METHOD_MAP.items():
-        if k in query_for_cond:
-            conditions['cooking_method'] = v
-            break
-
-    return conditions
-
-
-def _detect_popular_intent(query: str) -> bool:
-    """인기 레시피 요청 감지"""
-    keywords = ['인기', 'top', 'best', '많이', '추천순', '베스트', '랭킹']
-    return any(kw in query for kw in keywords)
-
-
-
-
-# ── LLM 기반 엔티티 추출 (문자열/임베딩 실패 시 fallback) ──
-_llm_entity = None
-
-
-def _get_llm_entity():
-    """엔티티 추출용 경량 LLM (lazy init)"""
-    global _llm_entity
-    if _llm_entity is None:
-        from databricks_langchain import ChatDatabricks
-        _llm_entity = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0, max_tokens=150)
-    return _llm_entity
-
-
-def _llm_extract_entities(query: str) -> dict:
-    """
-    멀티쿼리 + 엔티티 추출 (LLM 1회 호출).
-
-    흐름:
-      1. LLM이 사용자 질문을 3가지로 재해석 (모호함 해소)
-      2. 각 해석에 대해 기존 MENU_NAMES/INGREDIENT_NAMES 문자열 매칭 시도
-      3. 매칭 안 되면 LLM이 직접 추출한 메뉴/재료 사용
-
-    반환: {'menu': str|None, 'ingredients': list[str], 'rewritten': str|None}
-    """
-    from langchain_core.messages import SystemMessage, HumanMessage
+    default = {
+        'is_valid': True, 'intent': 'general', 'menu': None,
+        'ingredients': [], 'exclude': None, 'conditions': None,
+        'rewritten': None, 'interpretations': [],
+    }
 
     try:
         messages = [
-            SystemMessage(content=(
-                "당신은 식당/요리 질문 분석 전문가입니다.\n"
-                "사용자의 질문이 모호하거나 줄임말일 수 있습니다.\n"
-                "아래 단계를 수행하세요:\n\n"
-                "[1단계] 질문을 3가지 명확한 해석으로 변환하세요.\n"
-                "[2단계] 가장 가능성 높은 해석 1개를 선택하세요.\n"
-                "[3단계] 선택한 해석에서 음식명과 재료를 추출하세요.\n\n"
-                "반드시 아래 형식으로만 답하세요 (다른 말 금지):\n"
-                "해석1: <문장>\n"
-                "해석2: <문장>\n"
-                "해석3: <문장>\n"
-                "선택: <1, 2, 3 중 번호>\n"
-                "메뉴: <음식이름 또는 NONE>\n"
-                "재료: <재료1, 재료2 또는 NONE>\n\n"
-                "예시:\n"
-                "질문: 김찌 좀 싸게 해먹으려면\n"
-                "해석1: 김치찌개를 저렴하게 만드는 방법\n"
-                "해석2: 김치찌개 원가를 절감하는 방법\n"
-                "해석3: 김치찌개 재료 중 저렴한 대체재\n"
-                "선택: 1\n"
-                "메뉴: 김치찌개\n"
-                "재료: NONE\n\n"
-                "질문: 고기류 말고 단백질 보충할 수 있는 거\n"
-                "해석1: 고기 없이 단백질이 풍부한 식재료 추천\n"
-                "해석2: 고기 대신 두부나 계란으로 만들 수 있는 요리\n"
-                "해석3: 채식 단백질 재료 가격 비교\n"
-                "선택: 2\n"
-                "메뉴: NONE\n"
-                "재료: 두부, 계란"
-            )),
+            SystemMessage(content=_UNIFIED_SYSTEM_PROMPT),
             HumanMessage(content=query),
         ]
-        response = _get_llm_entity().invoke(messages)
+        response = _get_llm().invoke(messages)
         text = response.content.strip()
 
-        archive("preprocessor.llm_multiquery", {"query": query, "raw_response": text})
+        archive("preprocessor.multiquery_raw", {"query": query, "response": text})
 
-        # 파싱
-        menu = None
-        ingredients = []
-        rewritten = None
+        # ── 파싱 ──
+        result = dict(default)
         interpretations = []
+        selected_idx = 0
 
         for line in text.split("\n"):
             line = line.strip()
+            if not line:
+                continue
+
             if line.startswith("해석1:") or line.startswith("해석2:") or line.startswith("해석3:"):
                 interpretations.append(line.split(":", 1)[1].strip())
             elif line.startswith("선택:"):
                 try:
-                    idx = int(line.split(":")[1].strip()) - 1
-                    if 0 <= idx < len(interpretations):
-                        rewritten = interpretations[idx]
+                    selected_idx = int(line.split(":")[1].strip()) - 1
                 except (ValueError, IndexError):
                     pass
+            elif line.startswith("유효:"):
+                val = line.split(":")[1].strip()
+                result['is_valid'] = val in ('예', '네', 'yes', 'true')
+            elif line.startswith("의도:"):
+                val = line.split(":")[1].strip().lower()
+                valid_intents = ['recipe_only', 'cost_analysis', 'price_inquiry',
+                                 'alternative', 'recommendation', 'comparison', 'general']
+                result['intent'] = val if val in valid_intents else 'general'
             elif line.startswith("메뉴:"):
-                val = line[3:].strip()
+                val = line.split(":", 1)[1].strip()
                 if val and val.upper() != "NONE" and len(val) <= 20:
-                    menu = val
+                    result['menu'] = val
             elif line.startswith("재료:"):
-                val = line[3:].strip()
+                val = line.split(":", 1)[1].strip()
                 if val and val.upper() != "NONE":
-                    ingredients = [ing.strip() for ing in val.split(",")
-                                   if ing.strip() and len(ing.strip()) <= 10]
+                    result['ingredients'] = [
+                        ing.strip() for ing in val.split(",")
+                        if ing.strip() and len(ing.strip()) <= 10
+                    ]
+            elif line.startswith("제외:"):
+                val = line.split(":", 1)[1].strip()
+                if val and val.upper() != "NONE":
+                    result['exclude'] = val
+            elif line.startswith("조건:"):
+                val = line.split(":", 1)[1].strip()
+                if val and val.upper() != "NONE":
+                    result['conditions'] = _parse_conditions(val)
 
-        # ★ 핵심: 3개 해석에 대해 기존 문자열 매칭도 시도 (리스트 내 메뉴를 LLM이 풀어쓴 경우 대응)
-        if not menu and interpretations:
-            for interp in interpretations:
-                matched = _match_menu_from_query(interp)
-                if matched:
-                    menu = matched
-                    archive("preprocessor.llm_multi_match", {
-                        "source": "interpretation_string_match",
-                        "menu": menu, "interpretation": interp,
-                    })
-                    break
+        result['interpretations'] = interpretations
+        if 0 <= selected_idx < len(interpretations):
+            result['rewritten'] = interpretations[selected_idx]
 
-        if not ingredients and interpretations:
-            for interp in interpretations:
-                matched_ings = _match_ingredients_from_query(interp)
-                if matched_ings:
-                    ingredients = matched_ings
-                    archive("preprocessor.llm_multi_match", {
-                        "source": "interpretation_ingredient_match",
-                        "ingredients": ingredients, "interpretation": interp,
-                    })
-                    break
-
-        archive("preprocessor.llm_extract_result", {
-            "menu": menu,
-            "ingredients": ingredients,
-            "rewritten": rewritten,
+        archive("preprocessor.multiquery_parsed", {
+            "query": query,
+            "is_valid": result['is_valid'],
+            "intent": result['intent'],
+            "menu": result['menu'],
+            "ingredients": result['ingredients'],
             "num_interpretations": len(interpretations),
+            "selected": result['rewritten'],
         })
 
-        return {'menu': menu, 'ingredients': ingredients, 'rewritten': rewritten}
+        return result
 
     except Exception as e:
-        archive("preprocessor.llm_extract_error", {"error": str(e)})
-        return {'menu': None, 'ingredients': [], 'rewritten': None}
+        archive("preprocessor.multiquery_error", {"query": query, "error": str(e)})
+        return default
 
+
+def _parse_conditions(text: str) -> dict | None:
+    """조건 텍스트를 구조화된 dict로 변환."""
+    conditions = {}
+    text_lower = text.lower()
+
+    # 난이도
+    if '초급' in text or '쉬운' in text or '간단' in text:
+        conditions['difficulty'] = '초급'
+    elif '중급' in text:
+        conditions['difficulty'] = '중급'
+    elif '고급' in text or '어려운' in text:
+        conditions['difficulty'] = '고급'
+
+    # 인분
+    for s in ['1인분', '2인분', '3인분', '4인분', '5인분', '6인분이상']:
+        if s in text:
+            conditions['servings'] = s
+            break
+
+    # 종류
+    kind_map = {'국/탕': '국/탕', '탕': '국/탕', '반찬': '메인반찬', '볶음': '볶음', '구이': '구이', '면': '면/만두'}
+    for k, v in kind_map.items():
+        if k in text:
+            conditions['kind'] = v
+            break
+
+    return conditions if conditions else None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 2: Grounding — LLM 출력을 알려진 DB 엔티티에 정규화
+# ═══════════════════════════════════════════════════════════════
+
+def _ground_menu(menu: str | None) -> str | None:
+    """LLM이 추출한 메뉴명을 알려진 이름으로 정규화."""
+    if not menu:
+        return None
+    # 정확히 알려진 메뉴면 그대로
+    if menu in MENU_NAMES:
+        return menu
+    # ALIASES에 있으면 정규화
+    if menu in MENU_ALIASES:
+        return MENU_ALIASES[menu]
+    # 부분 매칭 시도 (LLM이 "김치찌개요리" 같이 길게 쓸 수 있음)
+    for m in MENU_NAMES:
+        if m in menu or menu in m:
+            return m
+    # 알려지지 않은 메뉴도 허용 (Neo4j에 있을 수 있음)
+    return menu
+
+
+def _ground_ingredients(ingredients: list[str]) -> list[str]:
+    """LLM이 추출한 재료명을 알려진 이름으로 정규화."""
+    if not ingredients:
+        return []
+    grounded = []
+    for ing in ingredients:
+        # 정확히 알려진 재료면 그대로
+        if ing in INGREDIENT_NAMES:
+            grounded.append(ing)
+            continue
+        # 부분 매칭
+        matched = False
+        for known in INGREDIENT_NAMES:
+            if known in ing or ing in known:
+                grounded.append(known)
+                matched = True
+                break
+        if not matched:
+            grounded.append(ing)  # 알려지지 않은 재료도 허용
+    return grounded
+
+
+# ═══════════════════════════════════════════════════════════════
+# Phase 3: 히스토리 carry-over — 최후 수단
+# ═══════════════════════════════════════════════════════════════
+
+def _carry_from_history(messages: list) -> tuple[str | None, list[str]]:
+    """이전 HumanMessage에서 메뉴/재료를 상속. AIMessage는 제외."""
+    menu = None
+    ingredients = []
+
+    for prev_msg in reversed(messages[:-1]):
+        if not isinstance(prev_msg, HumanMessage):
+            continue
+        prev_text = getattr(prev_msg, 'content', '') or ''
+        prev_menu = _match_menu_from_query(prev_text)
+        if prev_menu:
+            menu = prev_menu
+            archive("preprocessor.history_carry", {"menu": menu, "from": prev_text[:80]})
+            break
+        prev_ings = _match_ingredients_from_query(prev_text)
+        if prev_ings:
+            ingredients = prev_ings
+            archive("preprocessor.history_carry", {"ingredients": prev_ings, "from": prev_text[:80]})
+            break
+
+    return menu, ingredients
+
+
+# ═══════════════════════════════════════════════════════════════
+# 메인 노드 함수
+# ═══════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════
+# 결과 조립 헬퍼
+# ═══════════════════════════════════════════════════════════════
+
+def _build_result(*, is_valid, menu, ingredients, intent, query,
+                  exclude=None, conditions=None,
+                  is_alternative=False, is_popular=False) -> dict:
+    """표준 출력 형식으로 결과 조립."""
+    entities = {
+        'menu': menu,
+        'ingredient': ingredients if ingredients else None,
+        'intent': intent,
+        'exclude': exclude,
+        'is_alternative': is_alternative,
+        'conditions': conditions,
+        'is_popular': is_popular,
+    }
+
+    # rewritten_query 생성
+    if menu and intent:
+        rewritten_query = f'{menu} {intent}'
+    elif ingredients and intent:
+        rewritten_query = f'{", ".join(ingredients)} {intent}'
+    elif intent:
+        rewritten_query = f'{intent} 조회'
+    else:
+        rewritten_query = query
+
+    return {
+        'is_valid': is_valid,
+        'entities': entities,
+        'rewritten_query': rewritten_query,
+    }
 
 
 def preprocessor_node(state: dict) -> dict:
     """
-    전처리 노드 (LLM 0회, Qwen3 임베딩).
-    1단계: 문자열 매칭 (빠름, 정확)
-    2단계: 임베딩 유사도 (느림, fuzzy)
-    3단계: 제외/조건/인기 의도 감지 (신규)
-    """
-    indices = _get_indices()
-    emb = _get_emb()
+    멀티쿼리 리트리버 기반 전처리 노드.
 
+    Phase 1: LLM 멀티쿼리 (1순위) — 3가지 재해석 + 통합 엔티티/의도 추출
+    Phase 2: Grounding — LLM 출력을 알려진 DB 엔티티에 정규화
+    Phase 3: 히스토리 carry-over — LLM이 엔티티 못 찾았을 때 이전 대화에서 상속
+
+    ※ 명백히 무관한 질문만 빠르게 거부 (is_valid=False)
+    """
     query = state['messages'][-1].content
     archive("preprocessor.input", {"query": query})
-    query_vec = np.array(emb.embed_query(query))
 
-    # 1. is_valid 판별
-    valid_scores = cosine_similarity(query_vec, indices['valid'])
-    invalid_scores = cosine_similarity(query_vec, indices['invalid'])
-    max_valid = float(valid_scores.max())
-    max_invalid = float(invalid_scores.max())
-    is_valid = max_valid >= VALID_THRESHOLD_KO and max_valid > max_invalid
+    # ═══ 사전 필터: 명백히 무관한 질문은 LLM 호출 없이 즉시 거부 ═══
+    if _is_clearly_invalid(query):
+        archive("preprocessor.output", {"phase": "pre_invalid", "query": query})
+        return {
+            'is_valid': False,
+            'entities': {'menu': None, 'ingredient': None, 'intent': 'general',
+                         'exclude': None, 'is_alternative': False,
+                         'conditions': None, 'is_popular': False},
+            'rewritten_query': '식당 운영/메뉴/원가 관련 질문이 아닙니다',
+        }
 
-    # 2. entity 추출: 문자열 매칭 우선 → 임베딩 보조
-    menu = None
-    ingredients = []  # ★ 복수 재료 지원
+    # ═══ Phase 1: LLM 멀티쿼리 리트리버 (1순위, ~1.5초) ═══
+    # 사용자 질문을 3가지로 재해석하여 정확한 의도 파악
+    llm_result = _llm_multiquery_extract(query)
 
-    if is_valid:
-        # 2a. 문자열 매칭 (줄임말/오타 포함)
+    if not llm_result['is_valid']:
+        archive("preprocessor.output", {"phase": "1_invalid", "query": query})
+        return {
+            'is_valid': False,
+            'entities': {'menu': None, 'ingredient': None, 'intent': 'general',
+                         'exclude': None, 'is_alternative': False,
+                         'conditions': None, 'is_popular': False},
+            'rewritten_query': '식당 운영/메뉴/원가 관련 질문이 아닙니다',
+        }
+
+    # ═══ Phase 2: Grounding (0ms) ═══
+    # LLM 출력을 알려진 DB 엔티티에 맞춰 정규화
+    menu = _ground_menu(llm_result['menu'])
+    ingredients = _ground_ingredients(llm_result['ingredients'])
+    intent = llm_result['intent']
+    exclude = llm_result.get('exclude')
+    conditions = llm_result.get('conditions')
+    is_alternative = (intent == 'alternative')
+    is_popular = any(kw in query for kw in ['인기', 'top', 'best', '추천순', '랭킹'])
+
+    # 문자열 매칭으로 LLM이 놓친 엔티티 보강 (보조 역할)
+    if not menu:
         menu = _match_menu_from_query(query)
-        ingredients = _match_ingredients_from_query(query)
+    if not ingredients:
+        fast_ings = _match_ingredients_from_query(query)
+        if fast_ings:
+            ingredients = fast_ings
+    if not intent or intent == 'general':
+        kw_intent = _keyword_intent(query)
+        if kw_intent:
+            intent = kw_intent
 
-        # 2b. 문자열 매칭 실패 시 임베딩 유사도로 보조 (높은 threshold)
-        if not menu:
-            menu_scores = cosine_similarity(query_vec, indices['menu'])
-            best_idx = int(menu_scores.argmax())
-            if float(menu_scores[best_idx]) >= ENTITY_THRESHOLD_KO:
-                menu = MENU_NAMES[best_idx]
+    # ═══ Phase 3: 히스토리 carry-over (0ms, 최후 수단) ═══
+    # LLM도 메뉴/재료를 못 찾았을 때만 이전 HumanMessage에서 상속
+    if not menu and not ingredients:
+        hist_menu, hist_ings = _carry_from_history(state['messages'])
+        if hist_menu:
+            menu = hist_menu
+        if hist_ings:
+            ingredients = hist_ings
 
-        if not ingredients:
-            ing_scores = cosine_similarity(query_vec, indices['ingredient'])
-            best_idx = int(ing_scores.argmax())
-            if float(ing_scores[best_idx]) >= ENTITY_THRESHOLD_KO:
-                ingredients = [INGREDIENT_NAMES[best_idx]]
-
-    # 2c. ★ 다중 턴 컨텍스트: 현재 메시지에서 못 잡았으면 이전 히스토리에서 carry-over
-    if is_valid and not menu and not ingredients and len(state['messages']) > 1:
-        for prev_msg in reversed(state['messages'][:-1]):
-            prev_text = getattr(prev_msg, 'content', '') or ''
-            prev_menu = _match_menu_from_query(prev_text)
-            if prev_menu:
-                menu = prev_menu
-                archive("preprocessor.context_carry", {"source": "history", "menu": menu, "from_msg_preview": prev_text[:100]})
-                break
-            prev_ings = _match_ingredients_from_query(prev_text)
-            if prev_ings:
-                ingredients = prev_ings
-                archive("preprocessor.context_carry", {"source": "history", "ingredients": prev_ings, "from_msg_preview": prev_text[:100]})
-                break
-
-    # 2d. ★ LLM 기반 엔티티 추출 (문자열/임베딩/히스토리 모두 실패 시)
-    if is_valid and not menu and not ingredients:
-        llm_result = _llm_extract_entities(query)
-        if llm_result.get('menu'):
-            menu = llm_result['menu']
-            archive("preprocessor.llm_fallback", {"source": "llm", "menu": menu})
-        if llm_result.get('ingredients'):
-            ingredients = llm_result['ingredients']
-            archive("preprocessor.llm_fallback", {"source": "llm", "ingredients": ingredients})
-
-    # 3. intent 분류 + rewritten_query
-    if is_valid:
-        intent_scores = cosine_similarity(query_vec, indices['intent'])
-        intent = intent_labels[int(intent_scores.argmax())]
-        if menu:
-            rewritten_query = f'{menu} {intent}'
-        elif ingredients:
-            rewritten_query = f'{", ".join(ingredients)} {intent}'
-        else:
-            rewritten_query = f'{intent} 조회'
-    else:
-        rewritten_query = '식당 운영/메뉴/원가 관련 질문이 아닙니다'
-
-    # 4. ★ 신규: 제외/대체재 의도, 조건, 인기 감지
-    exclude_info = _detect_exclude_intent(query)
-    conditions = _detect_conditions(query, menu)  # 메뉴명 전달하여 오감지 방지
-    is_popular = _detect_popular_intent(query)
-
-    # 메뉴명이 있으면 conditions는 보조적 역할만 (메뉴 검색이 우선)
-    # 메뉴명 없이 조건만 있을 때만 conditions를 주 라우팅 신호로 사용
-    # 메뉴명이 있어도 conditions를 유지 (recipe_search에서 필터링에 활용)
-    # 예: "초보용 김치찌개" → menu="김치찌개", conditions={"difficulty": "초급"}
-    pass
-
-    # entities 구성
-    entities = {
-        'menu': menu,
-        'ingredient': ingredients if ingredients else None,  # list or None
-        'exclude': exclude_info['exclude'],
-        'is_alternative': exclude_info['is_alternative'],
-        'conditions': conditions if conditions else None,
-        'is_popular': is_popular,
-    }
-
+    # ═══ 결과 반환 ═══
     archive("preprocessor.output", {
-        "query": query,
-        "is_valid": is_valid,
-        "max_valid_score": max_valid,
-        "max_invalid_score": max_invalid,
-        "entities": entities,
-        "rewritten_query": rewritten_query,
+        "phase": "1_llm",
+        "menu": menu, "ingredients": ingredients, "intent": intent,
+        "exclude": exclude, "rewritten": llm_result.get('rewritten'),
+        "interpretations": llm_result.get('interpretations', []),
     })
-    return {
-        'is_valid': is_valid,
-        'entities': entities,
-        'rewritten_query': rewritten_query
-    }
+
+    return _build_result(
+        is_valid=True, menu=menu, ingredients=ingredients,
+        intent=intent, query=query, exclude=exclude,
+        conditions=conditions, is_alternative=is_alternative,
+        is_popular=is_popular,
+    )
+

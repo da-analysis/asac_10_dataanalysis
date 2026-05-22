@@ -23,51 +23,19 @@ def _get_llm_router():
     return _llm_router
 
 
-# === 원가 관련 키워드 ===
-_COST_KEYWORDS = ["원가", "마진", "판매가", "비용", "수익", "1인분 가격"]
-_PRICE_KEYWORDS = ["가격", "시세", "도매가", "얼마", "단가"]
-_RECIPE_KEYWORDS = ["레시피", "재료", "만드는 법", "조리법", "만들기"]
-# === 제외/대체재/조건/인기 키워드 ===
-_EXCLUDE_KEYWORDS = ["제외", "빼고", "없는", "알레르기", "못 먹"]
-_ALTERNATIVE_KEYWORDS = ["대신", "대체", "바꿀", "대용"]
-# 주의: "찌개", "국" 같은 일반 단어는 메뉴명에 포함되므로 조건 키워드에서 제외.
-# (preprocessor의 KIND_MAP과 동일 정책 — 메뉴/조건 오감지 방지)
-_CONDITION_KEYWORDS = ["초급", "쉬운", "간단", "중급", "인분", "국/탕", "볶음", "구이"]
-_POPULAR_KEYWORDS = ["인기", "top", "best", "추천순", "랭킹"]
+# ═══════════════════════════════════════════════════════════════
+# C4+C5: preprocessor의 intent를 직접 사용 (기존 _detect_intent 제거)
+# ═══════════════════════════════════════════════════════════════
 
-
-def _detect_intent(query: str) -> str | None:
-    """쿼리에서 의도 키워드를 감지하여 힌트 반환.
-
-    우선순위: exclude/alternative > cost > price > recipe > condition/popular
-    명시적 의도(원가, 가격)가 먼저 잡히도록 condition/popular는 맨 뒤에 배치.
-    """
-    # 1순위: 제외/대체재 → recipe (가장 명시적)
-    for kw in _EXCLUDE_KEYWORDS + _ALTERNATIVE_KEYWORDS:
-        if kw in query:
-            return "recipe"
-    # 2순위: 원가 의도
-    for kw in _COST_KEYWORDS:
-        if kw in query:
-            return "cost"
-    # 3순위: 가격/시세 의도
-    for kw in _PRICE_KEYWORDS:
-        if kw in query:
-            return "price"
-    # 4순위: 레시피 의도
-    for kw in _RECIPE_KEYWORDS:
-        if kw in query:
-            return "recipe"
-    # 5순위: 조건/인기 (메뉴명에 포함될 수 있으므로 맨 뒤)
-    for kw in _CONDITION_KEYWORDS + _POPULAR_KEYWORDS:
-        if kw in query:
-            return "recipe"
-    return None
+# intent가 price pipeline을 필요로 하는지 판별
+_NEEDS_PRICE_INTENTS = {"cost_analysis", "price_inquiry", "comparison"}
+_RECIPE_ONLY_INTENTS = {"recipe_only", "recommendation", "alternative"}
 
 
 def _rule_based_route(state: dict, query: str) -> str | None:
     """
     규칙 기반 라우팅. 명확한 경우 LLM 호출 없이 결정.
+    ★ C4: preprocessor가 분류한 intent를 사용하여 불필요한 price_search 스킵.
     None 반환 시 LLM fallback.
     """
     recipe_info = state.get("recipe_info", {})
@@ -80,7 +48,8 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     has_cost = bool(cost_info)
     has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False
 
-    intent = _detect_intent(query)
+    # ★ C5: preprocessor가 분류한 intent 직접 사용 (기존 _detect_intent 제거)
+    intent = entities.get("intent", "general")
 
     # ★ 신규 규칙: 제외/대체재/조건/인기 의도는 직접 recipe_search로
     if not has_recipe:
@@ -92,23 +61,26 @@ def _rule_based_route(state: dict, query: str) -> str | None:
             return "recipe_search"
 
     # 규칙 1: 레시피 필요한데 없으면 → recipe_search
-    if not has_recipe and intent in ("recipe", "cost"):
+    if not has_recipe and intent in ("recipe_only", "cost_analysis", "recommendation", "alternative"):
         return "recipe_search"
 
     # 규칙 2: 가격만 묻는 질문 + 가격 없으면 → price_search
-    if not has_price and intent == "price":
+    if not has_price and intent == "price_inquiry":
         return "price_search"
 
-    # 규칙 3: 레시피 있고 가격 없으면 → price_search
+    # ★ 규칙 3 (C4 핵심 수정): 레시피 있을 때, intent에 따라 분기
     if has_recipe and not has_price:
-        return "price_search"
+        if intent in _NEEDS_PRICE_INTENTS:
+            return "price_search"
+        # recipe_only, recommendation, alternative, general → 가격 불필요, 바로 report
+        return "report_generator"
 
     # 규칙 4: 가격 있고 누락 재료 있으면 → missing_price_search
     if has_price and has_unavailable:
         return "missing_price_search"
 
     # 규칙 5: 레시피+가격 있고 원가 미완 + 원가 의도 → cost_calculator
-    if has_recipe and has_price and not has_cost and intent == "cost":
+    if has_recipe and has_price and not has_cost and intent == "cost_analysis":
         return "cost_calculator"
 
     # 규칙 6: 모든 정보 수집 완료 → report_generator
@@ -116,11 +88,11 @@ def _rule_based_route(state: dict, query: str) -> str | None:
         return "report_generator"
 
     # 규칙 7: 가격만 묻는 질문 + 가격 있음 → report_generator
-    if has_price and intent == "price":
+    if has_price and intent == "price_inquiry":
         return "report_generator"
 
-    # 규칙 8: 레시피만 묻는 질문 + 레시피 있음 → report_generator (맨 마지막)
-    if has_recipe and intent == "recipe":
+    # 규칙 8: 레시피만 묻는 질문 + 레시피 있음 → report_generator
+    if has_recipe and intent in ("recipe_only", "recommendation", "alternative"):
         return "report_generator"
 
     return None  # 판단 불가 → LLM fallback
@@ -137,6 +109,7 @@ def router_node(state: dict) -> dict:
         "has_price_info": bool(state.get("price_info")),
         "has_cost_info": bool(state.get("cost_info")),
         "last_action": state.get("next_action", ""),
+        "intent": state.get("entities", {}).get("intent", "unknown"),
         "unavailable_count": len(state.get("price_info", {}).get("unavailable", []) or []) if isinstance(state.get("price_info"), dict) else 0,
     })
 
