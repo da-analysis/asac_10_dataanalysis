@@ -28,7 +28,7 @@ def _get_llm_router():
 # ═══════════════════════════════════════════════════════════════
 
 # intent가 price pipeline을 필요로 하는지 판별
-_NEEDS_PRICE_INTENTS = {"cost_analysis", "price_inquiry", "comparison"}
+_NEEDS_PRICE_INTENTS = {"cost_analysis", "price_inquiry"}
 _RECIPE_ONLY_INTENTS = {"recipe_only", "recommendation", "alternative"}
 
 
@@ -60,11 +60,15 @@ def _rule_based_route(state: dict, query: str) -> str | None:
         if entities.get("is_popular"):
             return "recipe_search"
 
+    # ★ 규칙 0: fallback — preprocessor가 엔티티 추출 실패 시 바로 report
+    if intent == "fallback":
+        return "report_generator"
+
     # 규칙 1: 레시피 필요한데 없으면 → recipe_search
     if not has_recipe and intent in ("recipe_only", "cost_analysis", "recommendation", "alternative"):
         return "recipe_search"
 
-    # 규칙 2: 가격만 묻는 질문 + 가격 없으면 → price_search
+    # 규칙 2: 가격/비교 질문 + 가격 없으면 → price_search
     if not has_price and intent == "price_inquiry":
         return "price_search"
 

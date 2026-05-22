@@ -50,7 +50,6 @@ _INTENT_KEYWORDS = {
     'recipe_only': ['만드는 법', '조리법', '레시피', '만들기', '요리법', '조리 순서'],
     'alternative': ['대신', '대체', '바꿀', '대용', '다른 걸로'],
     'recommendation': ['추천', '뭐 먹', '어떤 게 좋'],
-    'comparison': ['비교', '어떤 게 싸', '가성비'],
 }
 
 # is_valid 빠른 거부용 (명백히 무관한 질문)
@@ -59,7 +58,7 @@ _INVALID_KEYWORDS = ['날씨', '주식', '비트코인', '뉴스', '영화', '�
 
 def _keyword_intent(query: str) -> str | None:
     """키워드 매칭으로 intent 1차 감지. 명확하면 LLM 스킵 가능."""
-    priority = ['alternative', 'cost_analysis', 'price_inquiry', 'recipe_only', 'recommendation', 'comparison']
+    priority = ['alternative', 'cost_analysis', 'price_inquiry', 'recipe_only', 'recommendation']
     for intent_name in priority:
         for kw in _INTENT_KEYWORDS[intent_name]:
             if kw in query:
@@ -116,7 +115,7 @@ _UNIFIED_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입�
 해석3: <재해석 문장>
 선택: <1|2|3>
 유효: <예|아니오>
-의도: <recipe_only|cost_analysis|price_inquiry|alternative|recommendation|comparison|general>
+의도: <recipe_only|cost_analysis|price_inquiry|alternative|recommendation|general>
 메뉴: <음식이름 또는 NONE>
 재료: <재료1, 재료2 또는 NONE>
 제외: <제외할 재료 또는 NONE>
@@ -128,7 +127,6 @@ _UNIFIED_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입�
 - price_inquiry: 특정 재료의 시세/도매가만 단순 조회
 - alternative: 대체재, 다른 재료로 바꾸기
 - recommendation: 메뉴 추천, 뭐 먹을까
-- comparison: 재료/메뉴 가격 비교, 가성비
 - general: 위 어디에도 해당 안 됨
 
 [규칙]
@@ -217,7 +215,7 @@ def _llm_multiquery_extract(query: str) -> dict:
             elif line.startswith("의도:"):
                 val = line.split(":")[1].strip().lower()
                 valid_intents = ['recipe_only', 'cost_analysis', 'price_inquiry',
-                                 'alternative', 'recommendation', 'comparison', 'general']
+                                 'alternative', 'recommendation', 'general']
                 result['intent'] = val if val in valid_intents else 'general'
             elif line.startswith("메뉴:"):
                 val = line.split(":", 1)[1].strip()
@@ -371,7 +369,8 @@ def _carry_from_history(messages: list) -> tuple[str | None, list[str]]:
 
 def _build_result(*, is_valid, menu, ingredients, intent, query,
                   exclude=None, conditions=None,
-                  is_alternative=False, is_popular=False) -> dict:
+                  is_alternative=False, is_popular=False,
+                  rewritten=None) -> dict:
     """표준 출력 형식으로 결과 조립."""
     entities = {
         'menu': menu,
@@ -383,8 +382,10 @@ def _build_result(*, is_valid, menu, ingredients, intent, query,
         'is_popular': is_popular,
     }
 
-    # rewritten_query 생성
-    if menu and intent:
+    # rewritten_query: LLM 자연어 재해석 우선, 없으면 기계적 조합
+    if rewritten:
+        rewritten_query = rewritten
+    elif menu and intent:
         rewritten_query = f'{menu} {intent}'
     elif ingredients and intent:
         rewritten_query = f'{", ".join(ingredients)} {intent}'
@@ -469,6 +470,19 @@ def preprocessor_node(state: dict) -> dict:
         if hist_ings:
             ingredients = hist_ings
 
+    # ═══ Fallback 감지: 모든 단계에서 엔티티 추출 실패 ═══
+    if not menu and not ingredients and intent == 'general':
+        archive("preprocessor.output", {
+            "phase": "fallback", "query": query,
+            "reason": "no_entities_extracted",
+        })
+        return _build_result(
+            is_valid=True, menu=None, ingredients=None,
+            intent='fallback', query=query, exclude=None,
+            conditions=None, is_alternative=False, is_popular=False,
+            rewritten="질문을 정확히 이해하지 못했습니다. 메뉴명이나 재료명을 포함해서 다시 질문해주세요.",
+        )
+
     # ═══ 결과 반환 ═══
     archive("preprocessor.output", {
         "phase": "1_llm",
@@ -482,5 +496,6 @@ def preprocessor_node(state: dict) -> dict:
         intent=intent, query=query, exclude=exclude,
         conditions=conditions, is_alternative=is_alternative,
         is_popular=is_popular,
+        rewritten=llm_result.get('rewritten'),
     )
 

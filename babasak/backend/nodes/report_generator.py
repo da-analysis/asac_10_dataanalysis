@@ -95,11 +95,18 @@ def report_generator_node(state: dict) -> dict:
     price_info = state.get("price_info", {})
     entities = state.get("entities", {})
     user_query = _get_last_human_query(state.get("messages", []))
+    rewritten_query = state.get("rewritten_query", "")
+    intent = entities.get("intent", "")
 
     cost_info = state.get("cost_info", {})
 
     # 컨텍스트 조합 — LLM이 읽기 좋은 형태로 정리
     context_parts = []
+
+    # ★ preprocessor 분석 결과를 맨 앞에 배치 (답변 포커스 결정)
+    if rewritten_query and rewritten_query != user_query:
+        context_parts.append(f"[분석된 의도]\n질문 해석: {rewritten_query}\n의도 유형: {intent}")
+
     if recipe_info and recipe_info.get("data"):
         context_parts.append(f"[레시피/재료 정보]\n{recipe_info['data']}")
     if price_info:
@@ -114,7 +121,7 @@ def report_generator_node(state: dict) -> dict:
 
 {context}
 
-위 정보를 활용하여 답변하세요. 가격 데이터가 있으면 구체적인 수치(원/kg, 등급 등)를 반드시 포함하세요."""
+위 정보를 활용하여 답변하세요. [분석된 의도]가 있으면 그 해석에 맞춰 답변의 초점을 잡으세요. 가격 데이터가 있으면 구체적인 수치(원/kg, 등급 등)를 반드시 포함하세요."""
 
     try:
         messages = [
