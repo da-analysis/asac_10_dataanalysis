@@ -1,61 +1,358 @@
-from databricks_langchain import ChatDatabricks
-from langchain_core.messages import SystemMessage, HumanMessage
+"""
+레시피 재료 + 가격 데이터를 바탕으로 원가를 계산하는 노드.
+
+설계:
+  - 가격 매칭/계산은 코드로 (결정적)
+  - LLM은 결과 표/요약 포맷팅만 (창의성 영역)
+
+가격 소스 우선순위:
+  1. price_info["structured_prices"][재료명]   ← LLM 정제로 만든 신뢰 가능한 dict
+  2. price_info["text"]에서 정규식으로 KAMIS 단가 추출 (Genie 응답)
+  3. 위 모두 없으면 "시세 미확인"
+
+사용량 환산:
+  - 코드 상수 _UNIT_TABLE (1큰술=15g 등) + 개당 무게(_PER_PIECE_GRAMS)
+  - 매칭 안 되는 단위는 "사용량 미상"으로 표시
+"""
+import re
 
 from backend.debug_log import archive
 
-_llm = None
 
-def _get_llm():
-    global _llm
-    if _llm is None:
-        _llm = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.1)
-    return _llm
+# ════════════════════════════════════════════════════════════════
+# 사용량 → 그램 환산 테이블
+# ════════════════════════════════════════════════════════════════
+
+# 부피·중량 단위 (재료 무관 공통)
+_UNIT_TABLE = {
+    "큰술": 15.0, "테이블스푼": 15.0, "ts": 15.0, "스푼": 15.0, "T": 15.0,
+    "작은술": 5.0, "티스푼": 5.0, "tsp": 5.0, "t": 5.0,
+    "컵": 200.0, "cup": 200.0,
+    "kg": 1000.0,
+    "g": 1.0,
+    "ml": 1.0,
+    "l": 1000.0, "L": 1000.0,
+    "꼬집": 1.0,
+    "줌": 5.0,
+}
+
+# 개당 무게 추정 (재료별)
+_PER_PIECE_GRAMS = {
+    "양파": 200.0,
+    "대파": 100.0,
+    "쪽파": 30.0,
+    "감자": 150.0,
+    "당근": 150.0,
+    "애호박": 250.0,
+    "호박": 250.0,
+    "오이": 200.0,
+    "토마토": 200.0,
+    "고추": 7.0,
+    "청양고추": 7.0,
+    "풋고추": 10.0,
+    "홍고추": 10.0,
+    "마늘": 5.0,
+    "두부": 300.0,  # 1모 기준
+    "계란": 60.0,
+    "달걀": 60.0,
+    "참치": 150.0,  # 1캔 기준
+    "다시마": 5.0,  # 1조각 기준
+    "황태머리": 50.0,
+}
+
+# 정성 표현 → 그램
+_QUALITATIVE_GRAMS = {
+    "약간": 1.0, "소량": 1.0, "조금": 1.0,
+    "적당량": 3.0, "취향껏": 3.0,
+}
+
+# 분수 패턴: "1/2", "1/3", "2/3" 등
+_FRACTION_RE = re.compile(r"^(\d+)\s*/\s*(\d+)$")
+# 수량 + 단위: "1큰술", "1.5kg", "200g", "1/2모", "5개" 등
+_QUANTITY_RE = re.compile(
+    r"^\s*(?P<num>\d+(?:\.\d+)?|\d+\s*/\s*\d+)\s*(?P<unit>[가-힣A-Za-z]+)?\s*$"
+)
 
 
-def _extract_ingredients(recipe_info: dict) -> str:
-    """recipe_info에서 레시피별로 재료명+수량을 분리해서 반환.
+def _parse_number(s: str) -> float | None:
+    """'1', '1.5', '1/2' → float."""
+    s = s.strip()
+    m = _FRACTION_RE.match(s)
+    if m:
+        num, den = int(m.group(1)), int(m.group(2))
+        return num / den if den else None
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
-    각 레시피를 인기 순위(데이터 정렬 순서)로 섹션 구분하여
-    cost_calculator LLM이 레시피 단위로 원가를 계산할 수 있게 함.
+
+def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | None, str]:
+    """사용량 텍스트 → 그램. (grams, reason) 튜플 반환.
+
+    reason은 디버깅용으로 어떤 경로로 환산했는지 표시.
+    환산 실패 시 (None, 사유).
     """
-    if not recipe_info:
-        return "정보 없음"
+    if not quantity:
+        return (None, "no_quantity")
+    q = quantity.strip()
 
-    data = recipe_info.get("data", recipe_info)
-    if isinstance(data, list):
-        sections = []
-        for idx, recipe in enumerate(data, start=1):
-            if not isinstance(recipe, dict):
-                continue
-            menu_name = recipe.get("menu") or recipe.get("name") or f"레시피 {idx}"
-            header = f"### [인기 {idx}위] {menu_name}"
-            lines = [header]
-            for ing in recipe.get("ingredients", []):
-                name = ing.get("name", "")
-                # Neo4j db.py는 "quantity"로 반환, 옛 코드는 "amount"였음 — 둘 다 호환
-                amount = ing.get("quantity") or ing.get("amount") or ""
-                if name:
-                    lines.append(f"- {name}: {amount}" if amount else f"- {name}")
-            sections.append("\n".join(lines))
-        return "\n\n".join(sections) if sections else str(data)[:500]
-    return str(data)[:500]
+    # 정성 표현
+    for kw, g in _QUALITATIVE_GRAMS.items():
+        if kw in q:
+            return (g, f"qualitative:{kw}")
+
+    # 숫자 + 단위 분리
+    m = _QUANTITY_RE.match(q)
+    if not m:
+        # 단위 없이 숫자만 들어오면 '개'로 추정
+        num = _parse_number(q)
+        if num is not None:
+            ppg = _PER_PIECE_GRAMS.get(ingredient_name)
+            if ppg:
+                return (num * ppg, f"bare_number_piece:{ppg}g/개")
+        return (None, f"unparsed:{q}")
+
+    num = _parse_number(m.group("num"))
+    if num is None:
+        return (None, f"bad_number:{m.group('num')}")
+    unit = (m.group("unit") or "").strip()
+
+    # 공통 부피/중량 단위
+    if unit in _UNIT_TABLE:
+        return (num * _UNIT_TABLE[unit], f"unit:{unit}")
+
+    # 개수 단위(개/모/대/장/포기/쪽/캔/조각 등)
+    if unit in ("개", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통"):
+        ppg = _PER_PIECE_GRAMS.get(ingredient_name)
+        if ppg:
+            return (num * ppg, f"piece:{ppg}g/{unit}")
+        return (None, f"piece_unit_no_table:{ingredient_name}/{unit}")
+
+    # 단위 없음
+    if not unit:
+        ppg = _PER_PIECE_GRAMS.get(ingredient_name)
+        if ppg:
+            return (num * ppg, f"no_unit_piece:{ppg}g")
+        return (None, "no_unit_no_table")
+
+    return (None, f"unknown_unit:{unit}")
 
 
-def _extract_prices(price_info: dict) -> str:
-    """price_info에서 단가 정보만 추출"""
-    if not price_info:
-        return "정보 없음"
+# ════════════════════════════════════════════════════════════════
+# 가격 추출: structured_prices(LLM 정제) + KAMIS 텍스트
+# ════════════════════════════════════════════════════════════════
 
-    parts = []
+# Genie/네이버 텍스트에서 단가를 뽑는 패턴들.
+# "고춧가루: 약 ₩2,100/kg", "**고춧가루(1kg)**의 ... 36,900원" 같은 다양한 표기 대응.
+_PRICE_LINE_PATTERNS = [
+    # "재료명: ... ₩12,345/kg" 또는 "재료명: ... 12,345원/kg"
+    re.compile(r"(?P<name>[가-힣]+)[^\n]*?(?:₩|약\s*₩)?\s*(?P<price>[\d,]+)\s*원?\s*/\s*kg"),
+    # "재료명 ... 12,345원/100g" → /kg 환산
+    re.compile(r"(?P<name>[가-힣]+)[^\n]*?(?P<price>[\d,]+)\s*원\s*/\s*100\s*g"),
+]
+
+
+def _build_price_map(price_info: dict) -> dict[str, dict]:
+    """price_info에서 {재료명: {price_per_kg, source, confidence}} 추출.
+
+    우선순위: structured_prices(있으면 그대로) > text 정규식 파싱.
+    """
+    if not isinstance(price_info, dict):
+        return {}
+
+    price_map: dict[str, dict] = {}
+
+    # 1순위: structured_prices
+    structured = price_info.get("structured_prices") or {}
+    for name, info in structured.items():
+        ppk = info.get("price_per_kg") if isinstance(info, dict) else None
+        if ppk:
+            price_map[name] = {
+                "price_per_kg": int(ppk),
+                "source": "naver_llm",
+                "confidence": info.get("confidence", "medium"),
+                "note": info.get("note"),
+            }
+
+    # 2순위: text/table에서 KAMIS 등 정규식 추출 (structured에 없는 재료만)
+    raw_text = ""
     if price_info.get("text"):
-        parts.append(price_info["text"])
+        raw_text += price_info["text"] + "\n"
+        # text에서 한 줄 단위로 처리하면 패턴이 더 잘 잡힘
     if price_info.get("table"):
-        parts.append(price_info["table"])
-    return "\n".join(parts) if parts else str(price_info)[:500]
+        raw_text += price_info["table"] + "\n"
 
+    # 단순 "재료명: ... NNN원/kg" 같은 라인 스캔
+    for line in raw_text.split("\n"):
+        # /100g → /kg 환산
+        m100 = _PRICE_LINE_PATTERNS[1].search(line)
+        if m100:
+            name = m100.group("name")
+            if name in price_map:
+                continue
+            try:
+                p100 = int(m100.group("price").replace(",", ""))
+                price_map[name] = {
+                    "price_per_kg": p100 * 10,
+                    "source": "text_parse_100g",
+                    "confidence": "low",
+                }
+            except ValueError:
+                pass
+            continue
+
+        m = _PRICE_LINE_PATTERNS[0].search(line)
+        if m:
+            name = m.group("name")
+            if name in price_map:
+                continue
+            try:
+                ppk = int(m.group("price").replace(",", ""))
+                if 100 <= ppk <= 500_000:
+                    price_map[name] = {
+                        "price_per_kg": ppk,
+                        "source": "text_parse_kg",
+                        "confidence": "medium",
+                    }
+            except ValueError:
+                pass
+
+    return price_map
+
+
+def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
+    """재료명 → 가격 dict. 정확 매칭 → 부분 매칭(포함관계) 순서로 시도."""
+    if ingredient_name in price_map:
+        return price_map[ingredient_name]
+    # 부분 매칭: "다진마늘" → "깐마늘" 같은 케이스는 alias 단계에서 처리되지만,
+    # 그래도 가격 키와 입력 키가 다를 수 있음. 토큰 포함 관계로 보조 매칭.
+    for key, info in price_map.items():
+        if key in ingredient_name or ingredient_name in key:
+            return info
+    return None
+
+
+# ════════════════════════════════════════════════════════════════
+# 레시피별 원가 계산
+# ════════════════════════════════════════════════════════════════
+
+def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
+    """한 레시피의 재료별 원가 계산.
+
+    Returns:
+      {
+        "menu": "김치찌개",
+        "rank": 1,
+        "items": [
+            {"name": "두부", "quantity": "1/2모", "grams": 150.0,
+             "price_per_kg": 10000, "cost": 1500, "source": "naver_llm", "confidence": "high"},
+            ...
+        ],
+        "total_cost": int,
+        "unconfirmed_count": int,
+      }
+    """
+    items_out = []
+    total = 0
+    unconfirmed = 0
+
+    for ing in recipe.get("ingredients", []):
+        if not isinstance(ing, dict):
+            continue
+        name = ing.get("name", "").strip()
+        if not name:
+            continue
+        quantity = (ing.get("quantity") or ing.get("amount") or "").strip()
+
+        price_info = _lookup_price(name, price_map)
+        grams, qty_reason = _quantity_to_grams(quantity, name)
+
+        if price_info and grams is not None:
+            cost = int(price_info["price_per_kg"] * grams / 1000)
+            items_out.append({
+                "name": name,
+                "quantity": quantity,
+                "grams": round(grams, 1),
+                "price_per_kg": price_info["price_per_kg"],
+                "cost": cost,
+                "source": price_info.get("source"),
+                "confidence": price_info.get("confidence"),
+                "qty_reason": qty_reason,
+            })
+            total += cost
+        else:
+            unconfirmed += 1
+            items_out.append({
+                "name": name,
+                "quantity": quantity,
+                "grams": grams,
+                "price_per_kg": price_info["price_per_kg"] if price_info else None,
+                "cost": None,
+                "source": price_info.get("source") if price_info else None,
+                "confidence": price_info.get("confidence") if price_info else "none",
+                "qty_reason": qty_reason,
+                "missing_reason": (
+                    "no_price" if not price_info
+                    else "no_quantity_conversion"
+                ),
+            })
+
+    return {
+        "menu": recipe.get("menu") or recipe.get("name") or "이름없음",
+        "rank": recipe.get("_rank"),
+        "servings": recipe.get("servings"),
+        "difficulty": recipe.get("difficulty"),
+        "items": items_out,
+        "total_cost": total,
+        "unconfirmed_count": unconfirmed,
+    }
+
+
+def _format_recipe_section(calc: dict) -> str:
+    """한 레시피의 계산 결과를 markdown 표로."""
+    header = f"## [인기 {calc['rank']}위] {calc['menu']}"
+    meta = []
+    if calc.get("servings"):
+        meta.append(f"분량 {calc['servings']}")
+    if calc.get("difficulty"):
+        meta.append(f"난이도 {calc['difficulty']}")
+    sub = " · ".join(meta)
+
+    lines = [header]
+    if sub:
+        lines.append(f"_{sub}_")
+    lines.append("")
+    lines.append("| 재료 | 사용량 | 단가(원/kg) | 원가 |")
+    lines.append("|---|---:|---:|---:|")
+    for it in calc["items"]:
+        ppk = f"{it['price_per_kg']:,}" if it.get("price_per_kg") else "—"
+        if it["cost"] is not None:
+            cost = f"{it['cost']:,}원"
+        else:
+            cost = "시세/사용량 미확인"
+        qty = it.get("quantity") or "-"
+        lines.append(f"| {it['name']} | {qty} | {ppk} | {cost} |")
+
+    total = calc["total_cost"]
+    margin_price = int(total / 0.7) if total else 0  # 마진 30%
+    lines.append("")
+    lines.append(f"**총 원가:** {total:,}원" + (
+        f"  (시세/사용량 미확인 재료 {calc['unconfirmed_count']}개 제외)"
+        if calc["unconfirmed_count"] else ""
+    ))
+    if total:
+        lines.append(f"**1인분 원가:** {total:,}원")
+        lines.append(f"**권장 판매가 (마진 30%):** {margin_price:,}원")
+    return "\n".join(lines)
+
+
+# ════════════════════════════════════════════════════════════════
+# 노드 진입점
+# ════════════════════════════════════════════════════════════════
 
 def cost_calculator_node(state: dict) -> dict:
-    """레시피 재료 + 가격 데이터를 바탕으로 사용량 기준 원가를 계산합니다."""
+    """레시피 재료 + 가격 데이터를 코드로 매칭하여 원가를 계산합니다."""
     recipe_info = state.get("recipe_info", {})
     price_info = state.get("price_info", {})
 
@@ -63,60 +360,66 @@ def cost_calculator_node(state: dict) -> dict:
         "has_recipe": bool(recipe_info),
         "has_price": bool(price_info),
         "price_source": price_info.get("estimation_source") if isinstance(price_info, dict) else None,
+        "num_structured_prices": len(price_info.get("structured_prices") or {}) if isinstance(price_info, dict) else 0,
     })
 
     if not recipe_info or not price_info:
-        archive("cost_calculator.output", {"reason": "insufficient_data", "error": "레시피 또는 가격 정보 부족"})
+        archive("cost_calculator.output", {"reason": "insufficient_data"})
         return {"cost_info": {"error": "레시피 또는 가격 정보 부족"}}
 
-    # 필요한 필드만 추출 (토큰 절약)
-    ingredients_text = _extract_ingredients(recipe_info)
-    prices_text = _extract_prices(price_info)
+    # 가격 맵 구축
+    price_map = _build_price_map(price_info)
+    archive("cost_calculator.price_map", {
+        "num_prices": len(price_map),
+        "ingredients": list(price_map.keys()),
+        "sources": {
+            src: [k for k, v in price_map.items() if v.get("source") == src]
+            for src in ("naver_llm", "text_parse_kg", "text_parse_100g")
+        },
+    })
 
-    prompt = f"""다음은 사용자가 요청한 메뉴와 관련된 **인기 순 레시피 여러 개**입니다.
-**각 레시피를 독립적으로** 원가 계산하세요. 절대 레시피끼리 재료를 합산하지 마세요.
+    # 레시피별 계산 (rank 부여)
+    recipes = recipe_info.get("data") if isinstance(recipe_info, dict) else recipe_info
+    if not isinstance(recipes, list):
+        recipes = [recipes] if recipes else []
 
-[레시피별 재료 및 사용량]
-{ingredients_text}
+    calc_results = []
+    for idx, recipe in enumerate(recipes, start=1):
+        if not isinstance(recipe, dict):
+            continue
+        recipe = {**recipe, "_rank": idx}
+        calc_results.append(_calc_recipe_cost(recipe, price_map))
 
-[시세 (모든 레시피 공통)]
-{prices_text}
+    archive("cost_calculator.calc", {
+        "num_recipes": len(calc_results),
+        "totals": [c["total_cost"] for c in calc_results],
+        "unconfirmed_counts": [c["unconfirmed_count"] for c in calc_results],
+    })
 
-[단위 변환표 — 반드시 이 값을 사용]
-- 1큰술 = 15g = 15ml = 0.015kg
-- 1작은술 = 5g = 5ml = 0.005kg
-- 1스푼 = 1큰술 = 15g
-- 1컵 = 200g = 200ml = 0.2kg
-- 1꼬집 = 약 1g
-- 1개 = 재료마다 다름 (양파 1개 ≈ 200g, 대파 1대 ≈ 100g, 청양고추 1개 ≈ 7g, 애호박 1개 ≈ 250g 등 상식적 추정)
+    # 마크다운 조합
+    sections = [_format_recipe_section(c) for c in calc_results]
 
-[계산 규칙]
-1. 레시피마다 별도 섹션으로 작성 (인기 순위 유지)
-2. **시세가 kg 단위로 주어지면 사용량(g)을 0.001 곱해서 kg으로 변환 후 단가 곱셈**
-   예: 맛술 1큰술 = 15g = 0.015kg, 단가 3,268원/kg → 원가 = 3,268 × 0.015 = 약 49원
-3. 시세 자체가 없는 재료만 "시세 미확인" 표시
-4. **"약간/적당량/1줌" 같은 정성적 표현은 1g~5g로 추정해서 계산** (정확하지 않아도 계산하기, 미확인 처리 금지)
-5. 레시피별로 총 원가 → 1인분 원가 → 마진 30% 권장 판매가 산출
-6. **절대 여러 레시피의 재료를 합치지 말 것** (각각 다른 변형 레시피임)
+    # 인기 순위별 비교 요약
+    if len(calc_results) > 1:
+        non_zero = [(c["rank"], c["menu"], c["total_cost"])
+                    for c in calc_results if c["total_cost"] > 0]
+        if non_zero:
+            cheapest = min(non_zero, key=lambda x: x[2])
+            summary = (
+                f"\n---\n**요약:** 인기 {cheapest[0]}위 '{cheapest[1]}'이(가) "
+                f"총 원가 {cheapest[2]:,}원으로 가장 저렴합니다."
+            )
+            sections.append(summary)
 
-[출력 형식 — 각 레시피마다 반복]
-## [인기 N위] 레시피명
-**재료별 원가** (표: 재료 / 사용량 / 단가 / 원가)
-**총 원가**: X원
-**1인분 원가**: Y원
-**권장 판매가 (마진 30%)**: Z원
+    result = "\n\n".join(sections) if sections else "원가 계산 결과 없음"
 
-마지막에 인기 순위별 원가 비교 요약 한 줄 추가."""
+    archive("cost_calculator.output", {
+        "success": True,
+        "result_preview": result[:400],
+        "num_sections": len(sections),
+    })
 
-    try:
-        messages = [
-            SystemMessage(content="당신은 식당 원가 분석 전문가입니다. 정확한 수치로 계산하세요."),
-            HumanMessage(content=prompt)
-        ]
-        result = _get_llm().invoke(messages).content
-        archive("cost_calculator.output", {"success": True, "result_preview": result[:400]})
-    except Exception as e:
-        result = f"원가 계산 실패: {str(e)}"
-        archive("cost_calculator.error", {"error": str(e)})
-
-    return {"cost_info": {"analysis": result}}
+    return {"cost_info": {
+        "analysis": result,
+        "calc_results": calc_results,  # report_generator/디버깅용 raw
+    }}
