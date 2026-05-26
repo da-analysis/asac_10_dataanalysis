@@ -6,13 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from backend.debug_log import archive
-
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
-}
+from backend.catalog import resolve_ingredient
 
 _NAVER_RATE_LOCK = threading.Lock()
 _NAVER_LAST_REQUEST_AT = 0.0
@@ -218,14 +212,47 @@ def naver_search(ingredients_text: str) -> str:
                 return f"{item}: 네이버 API 오류 (status {r.status_code})"
 
             items_raw = r.json().get("items", [])
-            prices = [int(it["lprice"]) for it in items_raw if it.get("lprice")]
-            per_kg = _per_kg_prices(items_raw)  # 단위 환산 가능한 것만
+
+            # ─── 핵심 토큰 검증 ───────────────────────────────────────
+            # 검색어와 응답 title을 매칭. alias의 db_name 첫 토큰(없으면 입력 첫 토큰)이
+            # title에 포함된 것만 남김. 가격은 500~500,000원 범위만 통과.
+            # 예: "돼지고기 앞다리살" 검색에 "한돈 삼겹살" 결과가 와도 '돼지고기' 토큰 없으면 탈락.
+            resolved = resolve_ingredient(item)
+            key_name = resolved.db_name or item
+            # 첫 토큰: 공백 기준 첫 단어. 단일 단어면 그대로.
+            key_token = key_name.split()[0] if key_name else item
+            kept = []
+            rejected_titles = []
+            for it in items_raw:
+                try:
+                    lprice = int(it.get("lprice", 0))
+                except (TypeError, ValueError):
+                    lprice = 0
+                if lprice < 500 or lprice > 500_000:
+                    rejected_titles.append((_clean_title(it.get("title", ""))[:60], "price_out_of_range"))
+                    continue
+                title_clean = _clean_title(it.get("title", ""))
+                if key_token and key_token not in title_clean:
+                    rejected_titles.append((title_clean[:60], "token_mismatch"))
+                    continue
+                kept.append(it)
+            archive("naver_search.title_validation", {
+                "item": item,
+                "key_token": key_token,
+                "kept": len(kept),
+                "rejected": len(items_raw) - len(kept),
+                "rejected_sample": rejected_titles[:3],
+            })
+
+            prices = [int(it["lprice"]) for it in kept if it.get("lprice")]
+            per_kg = _per_kg_prices(kept)  # 단위 환산 가능한 것만
             archive("naver_search.parsed_prices", {
                 "item": item,
-                "num_items": len(items_raw),
+                "num_items_raw": len(items_raw),
+                "num_items_kept": len(kept),
                 "prices": prices,
                 "per_kg_prices": per_kg,
-                "titles": [_clean_title(it.get("title", ""))[:60] for it in items_raw[:3]],
+                "titles": [_clean_title(it.get("title", ""))[:60] for it in kept[:3]],
             })
             if not prices:
                 return f"{item}: 검색 결과 없음"
@@ -255,86 +282,11 @@ def naver_search(ingredients_text: str) -> str:
 
 
 # ────────────────────────────────────────────────────────────
-# 버전 3 : CJ프레시웨이 + 에이스식자재몰 크롤링  (SEARCH_BACKEND=crawl)
-# ────────────────────────────────────────────────────────────
-
-def _extract_min_price(text: str) -> int | None:
-    matches = re.findall(r'[\d,]+', text)
-    values = []
-    for m in matches:
-        val = int(m.replace(",", ""))
-        if 500 <= val <= 500_000:
-            values.append(val)
-    return min(values) if values else None
-
-
-def _crawl_cj(item: str) -> str | None:
-    try:
-        from bs4 import BeautifulSoup
-        r = requests.get(
-            "https://www.cjfls.co.kr/search",
-            params={"searchKeyword": item},
-            headers=_HEADERS,
-            timeout=7,
-        )
-        soup = BeautifulSoup(r.text, "html.parser")
-        for img in soup.find_all("img", src=lambda s: s and "price" in s.lower()):
-            price = _extract_min_price(img.parent.get_text(" ", strip=True))
-            if price:
-                return f"₩{price:,} (CJ프레시웨이)"
-    except Exception:
-        pass
-    return None
-
-
-def _crawl_ace(item: str) -> str | None:
-    try:
-        from bs4 import BeautifulSoup
-        r = requests.get(
-            "https://www.acemall.asia/goods/goods_search.php",
-            params={"keyword": item},
-            headers=_HEADERS,
-            timeout=7,
-        )
-        soup = BeautifulSoup(r.text, "html.parser")
-        # <strong> 태그에 가격이 있음
-        for tag in soup.find_all("strong"):
-            text = tag.get_text(strip=True).replace(",", "")
-            if text.isdigit():
-                val = int(text)
-                if 500 <= val <= 500_000:
-                    return f"₩{val:,} (에이스식자재몰)"
-    except Exception:
-        pass
-    return None
-
-
-def crawl_search(ingredients_text: str) -> str:
-    ingredients = _parse_ingredients(ingredients_text)
-    if not ingredients:
-        return "검색할 재료가 없습니다."
-
-    def _crawl_one(item: str) -> str:
-        price = _crawl_cj(item) or _crawl_ace(item)
-        return f"{item}: {price}" if price else f"{item}: 검색 결과 없음"
-
-    with ThreadPoolExecutor(max_workers=min(len(ingredients), 5)) as ex:
-        results = list(ex.map(_crawl_one, ingredients))
-
-    return (
-        "\n".join(results)
-        + "\n\n※ 위 가격은 식자재몰 기준이며, KAMIS DB에 없는 재료에 한해 참고용으로 제공됩니다."
-    )
-
-
-# ────────────────────────────────────────────────────────────
 # 디스패처  ←  app.yml의 SEARCH_BACKEND 값으로 버전 전환
 # ────────────────────────────────────────────────────────────
 
 def search(ingredients_text: str) -> str:
-    backend = os.getenv("SEARCH_BACKEND", "duckduckgo")
+    backend = os.getenv("SEARCH_BACKEND", "naver")
     if backend == "naver":
         return naver_search(ingredients_text)
-    if backend == "crawl":
-        return crawl_search(ingredients_text)
-    return duckduckgo_search(ingredients_text)  # 기본값 (롤백용)
+    return duckduckgo_search(ingredients_text)  # 롤백용

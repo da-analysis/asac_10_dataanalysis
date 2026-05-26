@@ -15,3 +15,4 @@ mlflow[databricks]
 python-dotenv
 beautifulsoup4
 langchain-community
+pyyaml

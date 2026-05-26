@@ -39,13 +39,22 @@ def _split_naver_by_ingredient(unavailable: list[str], naver_text: str) -> tuple
 def missing_price_search_node(state: dict) -> dict:
     """
     price_search에서 누락된 재료의 가격을 보충 검색합니다.
-    1순위: 네이버 쇼핑 검색 (SEARCH_BACKEND=naver, 기본값)
-    2순위: LLM 기반 추정 (네이버 실패 시 폴백)
+    1순위: 네이버 쇼핑 검색 (SEARCH_BACKEND=naver, 기본값) — title 핵심토큰 검증 포함
+    2순위: LLM 기반 추정 (네이버에서 못 찾은 재료 최종 폴백)
     결과를 price_info에 병합하여 반환.
     """
     price_info = state.get("price_info", {})
     unavailable = price_info.get("unavailable", [])
-    archive("missing_price_search.input", {"unavailable": unavailable, "num_unavailable": len(unavailable)})
+    loop_count = state.get("loop_count", 0)
+    # 재료별 trace_id — price_search가 만든 게 있으면 그대로, 없으면 같은 형식으로 생성.
+    # 한 재료의 전체 흐름을 동일 ID로 grep할 수 있게 형식 통일.
+    upstream_trace_ids = price_info.get("trace_ids", {}) if isinstance(price_info, dict) else {}
+    trace_ids = {ing: upstream_trace_ids.get(ing, f"{loop_count}:{ing}") for ing in unavailable}
+    archive("missing_price_search.input", {
+        "unavailable": unavailable,
+        "num_unavailable": len(unavailable),
+        "trace_ids": trace_ids,
+    })
 
     if not unavailable:
         archive("missing_price_search.output", {"reason": "no_unavailable_skipped"})
@@ -79,7 +88,7 @@ def missing_price_search_node(state: dict) -> dict:
                     + "\n※ 네이버 쇼핑 소매가 기준, KAMIS DB에 없는 재료에 한해 참고용으로 제공됩니다."
                 )
                 updated_price_info["estimation_source"] = "naver"
-            # 여전히 못 찾은 재료만 LLM 폴백으로 전달
+            # 여전히 못 찾은 재료만 다음 폴백으로 전달
             unavailable = still_missing
             updated_price_info["unavailable"] = still_missing
             if not still_missing:
@@ -91,7 +100,7 @@ def missing_price_search_node(state: dict) -> dict:
             archive("missing_price_search.naver_error", {"error": str(e)})
             state.setdefault("error_log", []).append(f"missing_price_search.naver: {str(e)}")
 
-    # ── 2순위: LLM 기반 추정 (네이버 실패/비활성 시) ──
+    # ── 2순위: LLM 기반 추정 (네이버 실패/비활성 시 최종 폴백) ──
     sys_prompt = """당신은 한국 식재료 도매 시세 전문가입니다.
 아래 재료들의 대략적인 도매 가격을 추정해주세요.
 
@@ -130,7 +139,11 @@ def missing_price_search_node(state: dict) -> dict:
         # unavailable을 비워서 router가 다시 이 노드로 보내지 않게 함
         updated_price_info["unavailable"] = []
 
-        archive("missing_price_search.output", {"source": "llm", "result_preview": estimated_text[:300]})
+        archive("missing_price_search.output", {
+            "source": "llm",
+            "trace_ids": [trace_ids.get(i, i) for i in unavailable],
+            "result_preview": estimated_text[:300],
+        })
         return {"price_info": updated_price_info}
 
     except Exception as e:
