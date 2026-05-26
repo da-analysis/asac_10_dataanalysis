@@ -1,10 +1,4 @@
 # Databricks notebook source
-# MAGIC %md
-# MAGIC # Neo4j 메뉴 데이터 ETL
-# MAGIC Databricks → Neo4j Aura로 메뉴/재료 데이터 로드
-
-# COMMAND ----------
-
 # MAGIC %pip install neo4j --quiet
 
 # COMMAND ----------
@@ -41,39 +35,53 @@ print("Neo4j Aura 연결")
 # COMMAND ----------
 
 # 기존 데이터를 전부 삭제합니다
-# with driver.session() as session:
-#     session.run("MATCH (n) DETACH DELETE n")
-# print("기존 데이터 삭제 완료")
+with driver.session() as session:
+    session.run("MATCH (n) DETACH DELETE n")
+    print("기존 데이터 삭제 완료")
+기존 데이터를 전부 삭제합니다
+with driver.session() as session:
+    session.run("MATCH (n) DETACH DELETE n")
+ print("기존 데이터 삭제 완료")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 3. 샘플 데이터 준비
+# MAGIC
+# MAGIC - 레시피: `silver.10000recipe.recipes`
+# MAGIC - 재료: **`silver.10000recipe.ingredients_final`** (51번 최종본)
 
 # COMMAND ----------
 
-# 레시피 샘플링 레시피 메뉴 5만개 넣을시, 관계 약 40만개로 노드 8만, 관계 40
-# 이유 => 노드수 20만개 관계수 40만개 제한
-SAMPLE_SIZE = 50000
+# 노드수 20만/관계수 40만 제한 고려 — 레시피 5만개 샘플
+SAMPLE_SIZE = 45000
 
 recipes_df = spark.sql(f"""
-    SELECT * FROM silver.`10000recipe`.recipes 
-    WHERE CKG_NM IS NOT NULL 
+    SELECT * FROM silver.`10000recipe`.recipes
+    WHERE CKG_NM IS NOT NULL
     LIMIT {SAMPLE_SIZE}
 """)
 
 recipe_ids = [row.RCP_SNO for row in recipes_df.select("RCP_SNO").collect()]
 recipe_ids_str = ",".join([str(x) for x in recipe_ids])
 
+# v2: ingredients_final 사용 — 깔끔한 core_name + quantity_text만
+# 같은 (RCP_SNO, core_name)이 여러 row면 첫번째 quantity만 사용 (대표)
 ingredients_df = spark.sql(f"""
-    SELECT i.*, m.lv1, m.lv2, m.freq
-    FROM silver.`10000recipe`.ingredients i
-    LEFT JOIN silver.`10000recipe`.ingredient_master m
-    ON i.canonical_name = m.std_name
-    WHERE i.RCP_SNO IN ({recipe_ids_str})
+    SELECT
+        RCP_SNO,
+        core_name,
+        FIRST(lv1) AS lv1,
+        FIRST(lv2) AS lv2,
+        FIRST(NULLIF(quantity_text, '')) AS quantity_text
+    FROM silver.`10000recipe`.ingredients_final
+    WHERE RCP_SNO IN ({recipe_ids_str})
+      AND core_name IS NOT NULL
+      AND core_name != ''
+    GROUP BY RCP_SNO, core_name
 """)
 
-unique_ingredients = ingredients_df.select("canonical_name", "lv1", "lv2").dropDuplicates(["canonical_name"])
+unique_ingredients = ingredients_df.select("core_name", "lv1", "lv2").dropDuplicates(["core_name"])
 
 print(f"레시피 => {recipes_df.count()}개")
 print(f"재료 매핑 => {ingredients_df.count()}개")
@@ -146,7 +154,7 @@ ing_list = [row.asDict() for row in unique_ingredients.collect()]
 with driver.session() as session:
     session.run("""
         UNWIND $items AS item
-        MERGE (i:Ingredient {name: item.canonical_name})
+        MERGE (i:Ingredient {name: item.core_name})
         SET i.lv1 = item.lv1,
             i.lv2 = item.lv2
     """, items=ing_list)
@@ -156,11 +164,18 @@ print(f"Ingredient 노드 {len(ing_list)}개 생성")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 7. CONTAINS 관계 생성
+# MAGIC ## 7. CONTAINS 관계 생성 (수량/조리상태 메타 포함)
+# MAGIC
+# MAGIC 관계 속성:
+# MAGIC - `quantity` (legacy, 기존 호환용 → quantity_text와 동일)
+# MAGIC - `quantity_text`: 사용자가 본 원본 표시 (예: "1큰술", "1/2개")
+# MAGIC - `quantity_g`: g 환산값 (원가 계산용)
+# MAGIC - `quantity_count`, `quantity_unit`: 개수 단위 (예: 1.0 / "개")
+# MAGIC - `cooking_state`: 다진/구운/채썬 등
 
 # COMMAND ----------
 
-rel_list = [row.asDict() for row in ingredients_df.select("RCP_SNO", "canonical_name", "quantity").collect()]
+rel_list = [row.asDict() for row in ingredients_df.collect()]
 
 for i in range(0, len(rel_list), 2000):
     batch = rel_list[i:i+2000]
@@ -168,9 +183,9 @@ for i in range(0, len(rel_list), 2000):
         session.run("""
             UNWIND $items AS item
             MATCH (r:Recipe {rcp_sno: item.RCP_SNO})
-            MATCH (i:Ingredient {name: item.canonical_name})
+            MATCH (i:Ingredient {name: item.core_name})
             MERGE (r)-[c:CONTAINS]->(i)
-            SET c.quantity = item.quantity
+            SET c.quantity = item.quantity_text
         """, items=batch)
     print(f"  CONTAINS: {min(i+2000, len(rel_list))}/{len(rel_list)}")
 
@@ -196,16 +211,16 @@ with driver.session() as session:
         count = result.single()["count"]
         print(f"  {label:20s}: {count:>8,}개")
 
-print("[\n샘플(김치찌개로 샘플)]")
+print("\n[샘플 (김치찌개로 샘플)]")
 with driver.session() as session:
     result = session.run("""
         MATCH (r:Recipe)-[c:CONTAINS]->(i:Ingredient)
         WHERE r.name CONTAINS '김치찌개'
-        RETURN r.name, i.name, c.quantity
+        RETURN r.name AS name, i.name AS ing, c.quantity AS qty
         LIMIT 10
     """)
     for record in result:
-        print(f"  {record['r.name']} → {record['i.name']} ({record['c.quantity']})")
+        print(f"  {record['name']} → {record['ing']} ({record['qty'] or '수량없음'})")
 
 # COMMAND ----------
 
@@ -242,7 +257,7 @@ for i in range(0, len(steps_list), 500):
         """, items=batch)
     print(f"  Steps: {min(i+500, len(steps_list))}/{len(steps_list)}")
 
-print(f"✅ 조리단계 {len(steps_list)}개 레시피에 추가 완료!")
+print(f"조리단계 {len(steps_list)}개 레시피에 추가 완료")
 
 # COMMAND ----------
 
