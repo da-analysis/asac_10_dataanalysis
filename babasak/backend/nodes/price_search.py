@@ -1,4 +1,5 @@
 import os
+import time
 import re
 import pandas as pd
 import mlflow
@@ -11,8 +12,10 @@ from backend.debug_log import archive
 GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID", "01f148e5845f1f68843892ceb53abd32")
 
 # Genie 한 번에 조회할 재료 수 제한 (작게 잡을수록 SQL 생성 안정성 ↑)
+#_GENIE_BATCH_SIZE = 5
 _GENIE_BATCH_SIZE = 5
 # Genie 동시 호출 워커 수 (Databricks rate limit 고려)
+#_GENIE_MAX_WORKERS = 3
 _GENIE_MAX_WORKERS = 3
 
 # negation 패턴: Genie가 "X는 조회되지 않았습니다" 식으로 말할 때 잡기 위함
@@ -44,6 +47,21 @@ _KNOWN_PREFIXES = [
 ]
 
 
+# WorkspaceClient 재사용을 위한 전역 변수 (커넥션 풀링 효과)
+_workspace_client = None
+
+def _get_workspace_client():
+    global _workspace_client
+    if _workspace_client is None:
+        _workspace_client = WorkspaceClient()
+    return _workspace_client
+
+
+# --- 빠른 응답과 일관성을 위한 인메모리 캐시 (용량 제한 및 TTL 적용) ---
+_batch_cache = {}
+_MAX_CACHE_SIZE = 100       # 최대 100개의 배치 묶음만 기억
+_CACHE_TTL_SECONDS = 3600   # 1시간(3600초)이 지나면 만료
+
 def _simplify_ingredient(name: str) -> str | None:
     """구체적 부위·수식어 제거 후 단순화된 재료명 반환. 이미 단순하면 None.
 
@@ -66,7 +84,7 @@ def _simplify_ingredient(name: str) -> str | None:
 
 
 def _ask_genie(question: str, conversation_id: str = None) -> dict:
-    w = WorkspaceClient()
+    w = _get_workspace_client()
     result = {"text": None, "sql": None, "dataframe": None, "conversation_id": None}
 
     if conversation_id is None:
@@ -234,18 +252,28 @@ def price_search_node(state: dict) -> dict:
 
         def _build_query(batch_items: list[str]) -> str:
             return (
-                "다음 재료들에 대해서만 최근 도매가를 조회해줘. "
-                "반드시 실제 DB에 있는 데이터만 보고해줘. DB에 없는 재료는 '없음'으로 표시해줘. 추정값 사용 금지. "
-                "응답은 반드시 다음 형식을 포함해줘:\n"
-                "  '조회된 재료는 X, Y, Z입니다.'\n"
-                "  '나머지 재료(A, B, C)는 DB에 데이터가 없어 없음으로 분류됩니다.'\n"
-                "그 다음 각 재료별 가격을 자세히 알려줘. "
+                "다음 재료들의 최근 도매가를 정확히 조회해줘. "
+                "규칙 1: 실제 DB에 있는 데이터만 사용하고 추정값은 절대 금지. "
+                "규칙 2: 응답의 시작 부분에 반드시 아래와 똑같은 형식의 문장을 포함해줘:\n"
+                "조회된 재료는 X, Y, Z입니다.\n"
+                "나머지 재료(A, B, C)는 데이터가 없습니다.\n"
+                "규칙 3: 그 다음 각 재료별 가격 정보를 알려줘. "
                 f"재료 목록: {', '.join(batch_items)}"
             )
 
         def _process_batch(idx_batch: tuple) -> tuple:
             """배치 1개를 Genie에 질의. (idx, result_dict, batch, err_str|None) 반환."""
             idx, batch = idx_batch
+            
+            # --- 1. 캐시 확인 (반복 질문 시 즉시 반환) ---
+            cache_key = tuple(sorted(batch))
+            if cache_key in _batch_cache:
+                cached_time, cached_result = _batch_cache[cache_key]
+                if time.time() - cached_time < _CACHE_TTL_SECONDS:
+                    return (idx, cached_result, batch, None)
+                else:
+                    del _batch_cache[cache_key]  # 시간이 지나 만료된 캐시 삭제
+
             query = _build_query(batch)
             archive("price_search.genie_query", {"batch_index": idx, "batch_items": batch, "query": query})
             try:
@@ -257,6 +285,15 @@ def price_search_node(state: dict) -> dict:
                         "has_sql": bool(result.get("sql")),
                         "has_dataframe": result.get("dataframe") is not None,
                     })
+                
+                # --- 2. 검색 성공 시 캐시에 결과 저장 ---
+                if result.get("text") or result.get("dataframe") is not None:
+                    if len(_batch_cache) >= _MAX_CACHE_SIZE:
+                        # 용량 초과 시 가장 오래된 항목(FIFO) 삭제
+                        oldest_key = next(iter(_batch_cache))
+                        del _batch_cache[oldest_key]
+                    _batch_cache[cache_key] = (time.time(), result)
+
                 return (idx, result, batch, None)
             except Exception as batch_exc:
                 return (idx, None, batch, str(batch_exc))
