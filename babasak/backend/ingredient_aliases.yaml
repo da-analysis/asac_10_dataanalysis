@@ -1,0 +1,397 @@
+# ─────────────────────────────────────────────────────────────────────
+# 재료명 alias 테이블
+# 사용자/레시피 표기 → silver.ingredient.ingredient의 표준 (재료명, 단위)
+#
+# 형식:
+#   <입력명>: {db_name: <DB 재료명>, db_unit: <DB 단위>}   # 매칭 사용
+#   <입력명>: null                                          # ambiguous (자동 매칭 금지)
+#
+# 단위 선택 원칙:
+#   1) 1kg 우선 (cost_calculator가 ₩/kg로 계산하므로 환산 단순)
+#   2) 없으면 가장 작은 kg 단위 (대용량은 도매가/소매가 갭 큼)
+#   3) kg 단위 자체가 없으면 개/마리/단/포기 (_PER_PIECE_GRAMS와 매칭 필요)
+#
+# 운영 원칙:
+# - 카탈로그(silver.ingredient.ingredient distinct 결과)에 실제 있는 (재료명, 단위)만 매핑.
+# - 카탈로그에 없는 가공품/조미료/육수는 null로 명시 → 곧장 네이버로 폴백.
+# - archive 로그에서 unmatched_ingredients 자주 나오는 것부터 PR로 추가.
+# ─────────────────────────────────────────────────────────────────────
+
+aliases:
+  # ═════════════════════════════════════════════════════════════════
+  # 채소
+  # ═════════════════════════════════════════════════════════════════
+  가지:        {db_name: 가지,         db_unit: 200g}
+  갓:          {db_name: 갓,           db_unit: 1kg}
+  감자:        {db_name: 감자,         db_unit: 1kg}
+  고구마:      {db_name: 고구마,       db_unit: 1kg}
+  깻잎:        {db_name: 깻잎,         db_unit: 100g}
+  단호박:      {db_name: 단호박,       db_unit: 1kg}
+  당근:        {db_name: 당근,         db_unit: 1kg}
+  대파:        {db_name: 대파,         db_unit: 1kg}
+  파:          {db_name: 대파,         db_unit: 1kg}
+  쪽파:        {db_name: 쪽파,         db_unit: 1kg}
+  무:          {db_name: 무,           db_unit: 1개}
+  무우:        {db_name: 무,           db_unit: 1개}
+  미나리:      {db_name: 미나리,       db_unit: 1kg}
+  배추:        {db_name: 배추,         db_unit: 1포기}
+  알배기배추:  {db_name: 알배기배추,   db_unit: 1포기}
+  알배추:      {db_name: 알배기배추,   db_unit: 1포기}
+  얼갈이배추:  {db_name: 얼갈이배추,   db_unit: 1kg}
+  얼갈이:      {db_name: 얼갈이배추,   db_unit: 1kg}
+  부추:        {db_name: 부추,         db_unit: 1kg}
+  브로콜리:    {db_name: 브로콜리,     db_unit: 1개}
+  상추:        {db_name: 상추,         db_unit: 100g}
+  적상추:      {db_name: 적상추,       db_unit: 100g}
+  양상추:      {db_name: 양상추,       db_unit: 100g}
+  생강:        {db_name: 생강,         db_unit: 1kg}
+  시금치:      {db_name: 시금치,       db_unit: 1kg}
+  애호박:      {db_name: 애호박,       db_unit: 1개}
+  쥬키니:      {db_name: 쥬키니,       db_unit: 1개}
+  주키니:      {db_name: 쥬키니,       db_unit: 1개}
+  양배추:      {db_name: 양배추,       db_unit: 1kg}
+  양파:        {db_name: 양파,         db_unit: 1kg}
+  연근:        {db_name: 연근,         db_unit: 100g}
+  열무:        {db_name: 열무,         db_unit: 1kg}
+  오이:        {db_name: 오이,         db_unit: 1개}
+  우엉:        {db_name: 우엉,         db_unit: 300g}
+  케일:        {db_name: 케일,         db_unit: 100g}
+  콩나물:      {db_name: 콩나물,       db_unit: 300g}
+  토마토:      {db_name: 토마토,       db_unit: 1kg}
+  방울토마토:  {db_name: 방울토마토,   db_unit: 1kg}
+  파프리카:    {db_name: 파프리카,     db_unit: 200g}
+  피망:        {db_name: 피망,         db_unit: 100g}
+  청경채:      {db_name: 청경채,       db_unit: 150g}
+  절임배추:    {db_name: 절임배추,     db_unit: 20kg}
+
+  # ── 마늘 계열 (모두 깐마늘로 매핑) ──
+  깐마늘:      {db_name: 깐마늘,       db_unit: 1kg}
+  마늘:        {db_name: 깐마늘,       db_unit: 1kg}
+  다진마늘:    {db_name: 깐마늘,       db_unit: 1kg}
+  간마늘:      {db_name: 깐마늘,       db_unit: 1kg}
+  으깬마늘:    {db_name: 깐마늘,       db_unit: 1kg}
+  편마늘:      {db_name: 깐마늘,       db_unit: 1kg}
+  피마늘:      {db_name: 피마늘,       db_unit: 10kg}
+
+  # ── 고추 계열 ──
+  풋고추:      {db_name: 풋고추,       db_unit: 4kg}
+  붉은고추:    {db_name: 붉은고추,     db_unit: 100g}
+  홍고추:      {db_name: 붉은고추,     db_unit: 100g}
+  건고추:      {db_name: 건고추,       db_unit: 600g}
+  말린고추:    {db_name: 건고추,       db_unit: 600g}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 버섯
+  # ═════════════════════════════════════════════════════════════════
+  느타리버섯:  {db_name: 느타리버섯,   db_unit: 2kg}
+  느타리:      {db_name: 느타리버섯,   db_unit: 2kg}
+  새송이버섯:  {db_name: 새송이버섯,   db_unit: 2kg}
+  새송이:      {db_name: 새송이버섯,   db_unit: 2kg}
+  양송이버섯:  {db_name: 양송이버섯,   db_unit: 100g}
+  양송이:      {db_name: 양송이버섯,   db_unit: 100g}
+  팽이버섯:    {db_name: 팽이버섯,     db_unit: 150g}
+  팽이:        {db_name: 팽이버섯,     db_unit: 150g}
+  표고버섯:    {db_name: 표고버섯,     db_unit: 100g}
+  표고:        {db_name: 표고버섯,     db_unit: 100g}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 곡물 / 콩
+  # ═════════════════════════════════════════════════════════════════
+  쌀:          {db_name: 쌀,           db_unit: 2kg}
+  찹쌀:        {db_name: 찹쌀,         db_unit: 1kg}
+  현미:        {db_name: 현미,         db_unit: 1kg}
+  보리:        {db_name: 보리,         db_unit: 800g}
+  귀리:        {db_name: 귀리,         db_unit: 1kg}
+  메밀:        {db_name: 메밀,         db_unit: 1kg}
+  기장:        {db_name: 기장,         db_unit: 400g}
+  수수:        {db_name: 수수,         db_unit: 400g}
+  율무:        {db_name: 율무,         db_unit: 400g}
+  혼합곡:      {db_name: 혼합곡,       db_unit: 800g}
+  잡곡:        {db_name: 혼합곡,       db_unit: 800g}
+  콩:          {db_name: 콩,           db_unit: 500g}
+  대두:        {db_name: 콩,           db_unit: 500g}
+  녹두:        {db_name: 녹두,         db_unit: 500g}
+  팥:          {db_name: 팥,           db_unit: 500g}
+  들깨:        {db_name: 들깨,         db_unit: 23kg}
+  참깨:        {db_name: 참깨,         db_unit: 500g}
+  땅콩:        {db_name: 땅콩,         db_unit: 100g}
+  아몬드:      {db_name: 아몬드,       db_unit: 100g}
+  호두:        {db_name: 호두,         db_unit: 100g}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 과일
+  # ═════════════════════════════════════════════════════════════════
+  사과:        {db_name: 사과,         db_unit: 2kg}
+  배:          {db_name: 배,           db_unit: 300g}
+  감귤:        {db_name: 감귤,         db_unit: 3kg}
+  귤:          {db_name: 감귤,         db_unit: 3kg}
+  단감:        {db_name: 단감,         db_unit: 500g}
+  감:          {db_name: 단감,         db_unit: 500g}
+  딸기:        {db_name: 딸기,         db_unit: 500g}
+  포도:        {db_name: 포도,         db_unit: 1kg}
+  거봉:        {db_name: 거봉,         db_unit: 2kg}
+  샤인머스켓:  {db_name: 샤인머스켓,   db_unit: 2kg}
+  복숭아:      {db_name: 복숭아,       db_unit: 4kg}
+  참외:        {db_name: 참외,         db_unit: 1kg}
+  수박:        {db_name: 수박,         db_unit: 1개}
+  멜론:        {db_name: 멜론,         db_unit: 1개}
+  파인애플:    {db_name: 파인애플,     db_unit: 1개}
+  바나나:      {db_name: 바나나,       db_unit: 100g}
+  망고:        {db_name: 망고,         db_unit: 1개}
+  레몬:        {db_name: 레몬,         db_unit: 10개}
+  오렌지:      {db_name: 오렌지,       db_unit: 10개}
+  자몽:        {db_name: 자몽,         db_unit: 10개}
+  아보카도:    {db_name: 아보카도,     db_unit: 1개}
+  체리:        {db_name: 체리,         db_unit: 100g}
+  블루베리:    {db_name: 블루베리,     db_unit: 100g}
+  건블루베리:  {db_name: 건블루베리,   db_unit: 100g}
+  건포도:      {db_name: 건포도,       db_unit: 100g}
+  참다래:      {db_name: 참다래,       db_unit: 10개}
+  키위:        {db_name: 참다래,       db_unit: 10개}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 육류 / 가금
+  # ═════════════════════════════════════════════════════════════════
+  # 카탈로그엔 "돼지고기 100g", "닭고기 1kg", "소고기 100g"만 있고 부위별 없음.
+  # 입력이 "돼지고기"/"소고기"처럼 단독이면 매칭, 부위명까지 붙으면 ambiguous로.
+  돼지고기:    {db_name: 돼지고기,     db_unit: 100g}
+  소고기:      {db_name: 소고기,       db_unit: 100g}
+  쇠고기:      {db_name: 소고기,       db_unit: 100g}
+  닭고기:      {db_name: 닭고기,       db_unit: 1kg}
+  닭:          {db_name: 닭고기,       db_unit: 1kg}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 수산물
+  # ═════════════════════════════════════════════════════════════════
+  갈치:        {db_name: 갈치,         db_unit: 1kg}
+  고등어:      {db_name: 고등어,       db_unit: 1손}
+  고등어필렛:  {db_name: 고등어필렛,   db_unit: 1kg}
+  꽁치:        {db_name: 꽁치,         db_unit: 5마리}
+  명태:        {db_name: 명태,         db_unit: 1kg}
+  동태:        {db_name: 명태,         db_unit: 1kg}
+  북어:        {db_name: 북어,         db_unit: 10마리}
+  황태:        {db_name: 북어,         db_unit: 10마리}
+  삼치:        {db_name: 삼치,         db_unit: 1kg}
+  부세:        {db_name: 부세,         db_unit: 1마리}
+  조기:        {db_name: 조기,         db_unit: 1마리}
+  참조기:      {db_name: 참조기,       db_unit: 1마리}
+  수입조기:    {db_name: 수입조기,     db_unit: 1마리}
+  전어:        {db_name: 전어,         db_unit: 5마리}
+  연어필렛:    {db_name: 연어필렛,     db_unit: 250g}
+  연어:        {db_name: 연어필렛,     db_unit: 250g}
+  오징어:      {db_name: 오징어,       db_unit: 1마리}
+  물오징어:    {db_name: 물오징어,     db_unit: 1마리}
+  마른오징어:  {db_name: 마른오징어,   db_unit: 10마리}
+  새우:        {db_name: 새우,         db_unit: 2kg}
+  대하:        {db_name: 대하,         db_unit: 100g}
+  꽃게:        {db_name: 꽃게,         db_unit: 1kg}
+  가리비:      {db_name: 가리비,       db_unit: 1kg}
+  굴:          {db_name: 굴,           db_unit: 1kg}
+  바지락:      {db_name: 바지락,       db_unit: 1kg}
+  홍합:        {db_name: 홍합,         db_unit: 1kg}
+  전복:        {db_name: 전복,         db_unit: 1kg}
+
+  # ── 건어물 / 젓갈 ──
+  마른멸치:    {db_name: 마른멸치,     db_unit: 2kg}
+  멸치:        {db_name: 마른멸치,     db_unit: 2kg}
+  국물멸치:    {db_name: 마른멸치,     db_unit: 2kg}
+  다시멸치:    {db_name: 마른멸치,     db_unit: 2kg}
+  마른미역:    {db_name: 마른미역,     db_unit: 1kg}
+  미역:        {db_name: 마른미역,     db_unit: 1kg}
+  김:          {db_name: 김,           db_unit: 10장}
+  건다시마:    {db_name: 건다시마,     db_unit: 1kg}
+  다시마:      {db_name: 건다시마,     db_unit: 1kg}
+  새우젓:      {db_name: 새우젓,       db_unit: 1kg}
+  오징어젓:    {db_name: 오징어젓,     db_unit: 400g}
+  오징어젓갈:  {db_name: 오징어젓갈,   db_unit: 150g}
+  멸치액젓:    {db_name: 멸치액젓,     db_unit: 1kg}
+  액젓:        {db_name: 멸치액젓,     db_unit: 1kg}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 계란 / 유제품
+  # ═════════════════════════════════════════════════════════════════
+  계란:        {db_name: 계란,         db_unit: 10개}
+  달걀:        {db_name: 계란,         db_unit: 10개}
+  우유:        {db_name: 우유,         db_unit: 1L}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 기타 가공
+  # ═════════════════════════════════════════════════════════════════
+  훈제오리:    {db_name: 훈제오리,     db_unit: 400g}
+  천일염:      {db_name: 천일염,       db_unit: 5kg}
+
+  # ═════════════════════════════════════════════════════════════════
+  # 명시적 ambiguous (단독으론 자동 매칭 금지 — Genie 스킵 → 곧장 네이버)
+  # ═════════════════════════════════════════════════════════════════
+  # 부위 명시 필요 (카탈로그엔 부위별 행이 없지만 사용자가 부위명을 적으면
+  # 일반 단가로 산정하는 게 부정확할 수 있음 → null로 두면 부위명 그대로 네이버)
+  # 위에서 "돼지고기"/"소고기"/"닭고기"는 matched로 받았으니 부위명만 ambiguous.
+  돼지고기 앞다리살:   null
+  돼지고기 뒷다리살:   null
+  돼지고기 목살:       null
+  돼지고기 삼겹살:     null
+  돼지고기 등심:       null
+  돼지고기 안심:       null
+  소고기 양지:         null
+  소고기 사태:         null
+  소고기 등심:         null
+  소고기 안심:         null
+  소고기 갈비:         null
+  닭가슴살:            null
+  닭다리:              null
+  닭날개:              null
+  닭안심:              null
+  앞다리살:            null
+  뒷다리살:            null
+  목살:                null
+  삼겹살:              null
+
+  # 부위/종류 미상의 일반어 (어떤 카탈로그 행에도 단독으론 매칭 부적합)
+  고추:        null
+  생선:        null
+  해산물:      null
+  버섯:        null
+  나물:        null
+  채소:        null
+  야채:        null
+  과일:        null
+
+  # 카탈로그에 없는 가공품/조미료/육수/장류 (Genie에 물어도 답 못 함)
+  # → null로 두면 곧장 네이버로 폴백되어 시간 절약
+  두부:                null
+  순두부:              null
+  연두부:              null
+  부침두부:            null
+  찌개두부:            null
+  유부:                null
+  콩나물국:            null
+  된장:                null
+  고추장:              null
+  쌈장:                null
+  청국장:              null
+  간장:                null
+  국간장:              null
+  진간장:              null
+  양조간장:            null
+  맛간장:              null
+  소금:                null
+  굵은소금:            null
+  꽃소금:              null
+  설탕:                null
+  황설탕:              null
+  흑설탕:              null
+  올리고당:            null
+  물엿:                null
+  꿀:                  null
+  매실액:              null
+  매실청:              null
+  식초:                null
+  사과식초:            null
+  현미식초:            null
+  후추:                null
+  통후추:              null
+  후춧가루:            null
+  생강가루:            null
+  마늘가루:            null
+  양파가루:            null
+  카레가루:            null
+  카레:                null
+  계피:                null
+  계피가루:            null
+  소스:                null
+  굴소스:              null
+  돈까스소스:          null
+  스테이크소스:        null
+  케첩:                null
+  마요네즈:            null
+  머스타드:            null
+  와사비:              null
+  타바스코:            null
+  스리라차:            null
+  참기름:              null
+  들기름:              null
+  올리브유:            null
+  포도씨유:            null
+  식용유:              null
+  카놀라유:            null
+  콩기름:              null
+  옥수수유:            null
+  버터:                null
+  마가린:              null
+  크림:                null
+  생크림:              null
+  요거트:              null
+  치즈:                null
+  슬라이스치즈:        null
+  모짜렐라:            null
+  파마산:              null
+  체다치즈:            null
+  청주:                null
+  맛술:                null
+  미림:                null
+  미향:                null
+  요리주:              null
+  소주:                null
+  와인:                null
+  레드와인:            null
+  화이트와인:          null
+  육수:                null
+  멸치육수:            null
+  사골육수:            null
+  닭육수:              null
+  채소육수:            null
+  멸치국물:            null
+  김치국물:            null
+  대파우려낸물:        null
+  황태육수:            null
+  다시마육수:          null
+  김치:                null
+  깍두기:              null
+  총각김치:            null
+  열무김치:            null
+  배추김치:            null
+  포기김치:            null
+  볶음김치:            null
+  묵은지:              null
+  황태머리:            null
+  황태채:              null
+  북어채:              null
+  황태포:              null
+  떡:                  null
+  떡국떡:              null
+  가래떡:              null
+  떡볶이떡:            null
+  당면:                null
+  국수:                null
+  소면:                null
+  중면:                null
+  칼국수면:            null
+  우동면:              null
+  라면사리:            null
+  쫄면:                null
+  냉면:                null
+  파스타:              null
+  스파게티:            null
+  밀가루:              null
+  부침가루:            null
+  튀김가루:            null
+  빵가루:              null
+  전분:                null
+  감자전분:            null
+  옥수수전분:          null
+  깨소금:              null
+  통깨:                null
+  볶은깨:              null
+  고춧가루:            {db_name: 고춧가루, db_unit: 1kg}  # 카탈로그에 있음
+  파슬리:              null
+  바질:                null
+  로즈마리:            null
+  타임:                null
+  오레가노:            null
+  넛맥:                null
+  청고추:              null
+  꽈리고추:            null
+  오이고추:            null
+  아삭이고추:          null
+  청양고추:            null  # 카탈로그엔 없음 (풋고추/붉은고추만 있음)
+  방울양배추:          null

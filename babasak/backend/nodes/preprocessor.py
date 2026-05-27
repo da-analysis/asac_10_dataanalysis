@@ -367,11 +367,51 @@ def _carry_from_history(messages: list) -> tuple[str | None, list[str]]:
 # 결과 조립 헬퍼
 # ═══════════════════════════════════════════════════════════════
 
+# ─────────────────────────────────────────────────────────────
+# 신규 entities 키 — 유사 추천 / 1:1 대체재 의도 키워드 매칭
+# (recipe_search.py 시나리오 8/9가 이 키들을 사용)
+# ─────────────────────────────────────────────────────────────
+
+_SIMILAR_KEYWORDS = ["비슷한", "유사한", "닮은", "비슷하게", "같은 종류", "유사", "비슷"]
+
+# "X 대신 Y" / "X 대체" / "X 빼고 뭐" 같은 패턴에서 X(대체할 재료) 추출
+import re as _re
+_SUBSTITUTE_PAT = _re.compile(
+    r'([가-힣]{2,10})\s*(?:대신|대체|말고|없으면|빼고)',
+)
+
+
+def _detect_is_similar(query: str) -> bool:
+    if not query:
+        return False
+    return any(kw in query for kw in _SIMILAR_KEYWORDS)
+
+
+def _detect_substitute_for(query: str, ingredients=None) -> str | None:
+    """'돼지고기 대신 뭐 써?' → '돼지고기' 추출.
+    1순위: 정규식 패턴 매칭, 2순위: 알려진 재료 + 대체 키워드 동시 등장."""
+    if not query:
+        return None
+    m = _SUBSTITUTE_PAT.search(query)
+    if m:
+        return m.group(1).strip()
+    # fallback: ingredients 중 하나 + 대체 키워드 동시 등장
+    if ingredients:
+        has_kw = any(kw in query for kw in ["대신", "대체", "빼고", "없으면"])
+        if has_kw:
+            return ingredients[0]
+    return None
+
+
 def _build_result(*, is_valid, menu, ingredients, intent, query,
                   exclude=None, conditions=None,
                   is_alternative=False, is_popular=False,
                   rewritten=None) -> dict:
     """표준 출력 형식으로 결과 조립."""
+    # 신규: 유사 추천 / 1:1 대체재 의도 감지 (recipe_search.py 시나리오 8/9용)
+    is_similar = _detect_is_similar(query)
+    substitute_for = _detect_substitute_for(query, ingredients)
+
     entities = {
         'menu': menu,
         'ingredient': ingredients if ingredients else None,
@@ -380,6 +420,10 @@ def _build_result(*, is_valid, menu, ingredients, intent, query,
         'is_alternative': is_alternative,
         'conditions': conditions,
         'is_popular': is_popular,
+        # 신규 키
+        'is_similar': is_similar,
+        'reference_menu': menu if is_similar else None,
+        'substitute_for': substitute_for,
     }
 
     # rewritten_query: LLM 자연어 재해석 우선, 없으면 기계적 조합
@@ -421,7 +465,9 @@ def preprocessor_node(state: dict) -> dict:
             'is_valid': False,
             'entities': {'menu': None, 'ingredient': None, 'intent': 'general',
                          'exclude': None, 'is_alternative': False,
-                         'conditions': None, 'is_popular': False},
+                         'conditions': None, 'is_popular': False,
+                         'is_similar': False, 'reference_menu': None,
+                         'substitute_for': None},
             'rewritten_query': '식당 운영/메뉴/원가 관련 질문이 아닙니다',
         }
 
@@ -435,7 +481,9 @@ def preprocessor_node(state: dict) -> dict:
             'is_valid': False,
             'entities': {'menu': None, 'ingredient': None, 'intent': 'general',
                          'exclude': None, 'is_alternative': False,
-                         'conditions': None, 'is_popular': False},
+                         'conditions': None, 'is_popular': False,
+                         'is_similar': False, 'reference_menu': None,
+                         'substitute_for': None},
             'rewritten_query': '식당 운영/메뉴/원가 관련 질문이 아닙니다',
         }
 

@@ -7,16 +7,12 @@ _KNOWN_MENUS = []
 _KNOWN_INGREDIENTS = []
 _DICT_LOADED = False
 
-_SCORE_EXPR = (
-    "coalesce(r.view_count,0) + "
-    "coalesce(r.recommend_count,0) * 100 + "
-    "coalesce(r.scrap_count,0) * 50"
-)
+_SCORE_EXPR = "(coalesce(r.view_count,0) + coalesce(r.recommend_count,0)*100 + coalesce(r.scrap_count,0)*50)"
 
-_QUERY_WORDS = [
+_QUERY_STOPWORDS = [
     "레시피", "요리", "메뉴", "음식", "추천", "알려줘", "찾아줘",
     "들어간", "들어가는", "넣은", "넣는", "사용한", "사용하는",
-    "포함", "있는", "으로 만든", "로 만든", "만든", "만들",
+    "포함", "있는", "으로", "로", "만든", "만들",
 ]
 
 _INGREDIENT_ALIASES = {
@@ -38,33 +34,22 @@ def _compact(text):
 
 def _strip_query_words(text):
     cleaned = str(text or "")
-    for word in sorted(_QUERY_WORDS, key=len, reverse=True):
+    for word in sorted(_QUERY_STOPWORDS, key=len, reverse=True):
         cleaned = cleaned.replace(word, " ")
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
-def _dedupe(values):
-    return list(dict.fromkeys([v for v in values if v]))
-
-
-def _first_text(*values):
-    for value in values:
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return None
-
-
-def _recipe_display_name(recipe):
-    """User-facing recipe name.
-
-    r.rcp_sno/id is kept only for internal lookups. Chatbot rows should expose
-    title/name instead of recipe ids.
-    """
-    return _first_text(recipe.get("title"), recipe.get("name")) or "레시피"
+def _merge_results(base, extra, limit):
+    seen = {r.get("id") for r in base}
+    for row in extra:
+        if row.get("id") not in seen and len(base) < limit:
+            base.append(row)
+            seen.add(row.get("id"))
+    return base
 
 
 def get_driver():
-    """Neo4j driver singleton."""
+    """Neo4j 드라이버 싱글톤."""
     global _driver
     if _driver is None:
         uri = os.environ.get("NEO4J_URI")
@@ -72,15 +57,15 @@ def get_driver():
         password = os.environ.get("NEO4J_PASSWORD")
         if not uri or not user or password is None:
             raise RuntimeError(
-                "Neo4j 환경변수 누락: "
-                "NEO4J_URI / NEO4J_USERNAME(또는 NEO4J_USER) / NEO4J_PASSWORD"
+                "Neo4j 환경변수 누락. "
+                "NEO4J_URI / NEO4J_USERNAME(또는 NEO4J_USER) / NEO4J_PASSWORD 가 모두 설정돼야 함."
             )
         _driver = GraphDatabase.driver(uri, auth=(user, password))
     return _driver
 
 
 def get_session():
-    """Use NEO4J_DATABASE when present; otherwise use the default database."""
+    """NEO4J_DATABASE가 있으면 사용하고, 없으면 기본 DB를 사용."""
     database = os.environ.get("NEO4J_DATABASE")
     if database:
         return get_driver().session(database=database)
@@ -88,51 +73,106 @@ def get_session():
 
 
 # ============================================================
-# Dictionaries / query parsing
+# 사전 로딩 / 토크나이저
 # ============================================================
 
-def _load_dictionaries(menu_limit=3000, ing_limit=8000):
-    """Load recipe-name and ingredient dictionaries from the graph."""
+def _load_dictionaries(menu_limit=2000, ing_limit=5000):
+    """빈도 상위 메뉴명/재료명을 Neo4j에서 읽어 메모리에 캐싱."""
     global _KNOWN_MENUS, _KNOWN_INGREDIENTS, _DICT_LOADED
     if _DICT_LOADED:
         return
 
     with get_session() as session:
-        menu_rows = session.run("""
+        menus = session.run("""
             MATCH (r:Recipe)
-            WHERE r.name IS NOT NULL AND size(r.name) <= 25
+            WHERE r.name IS NOT NULL AND size(r.name) <= 20
             WITH r.name AS name, count(*) AS cnt
-            ORDER BY cnt DESC
-            LIMIT $limit
+            ORDER BY cnt DESC LIMIT $limit
             RETURN name
         """, limit=menu_limit)
-        _KNOWN_MENUS = [row["name"] for row in menu_rows if row["name"]]
+        _KNOWN_MENUS = [m["name"] for m in menus if m["name"]]
 
-        ing_rows = session.run("""
-            MATCH (:Recipe)-[:CONTAINS]->(i:Ingredient)
-            WHERE i.name IS NOT NULL
+        ings = session.run("""
+            MATCH ()-[:CONTAINS]->(i:Ingredient)
             WITH i.name AS name, count(*) AS cnt
-            ORDER BY cnt DESC
-            LIMIT $limit
+            ORDER BY cnt DESC LIMIT $limit
             RETURN name
         """, limit=ing_limit)
-        _KNOWN_INGREDIENTS = [row["name"] for row in ing_rows if row["name"]]
+        _KNOWN_INGREDIENTS = [i["name"] for i in ings if i["name"]]
 
     _KNOWN_MENUS = sorted(set(_KNOWN_MENUS), key=len, reverse=True)
     _KNOWN_INGREDIENTS = sorted(set(_KNOWN_INGREDIENTS), key=len, reverse=True)
     _DICT_LOADED = True
 
 
-def extract_graph_query_parts(query):
-    """Split a query into base recipe/menu tokens and modifier ingredients.
+def _tokenize(query):
+    """쿼리에서 알려진 메뉴/재료 키워드 추출."""
+    _load_dictionaries()
+    remaining = query or ""
+    compact_remaining = _compact(remaining)
+    menu_tokens = []
+    ing_tokens = []
 
-    Example:
-    - "명란김치찌개" -> base_menus=["김치찌개"], modifier_ingredients=["명란"]
-    - "두부 들어간 요리" -> base_menus=[], modifier_ingredients=["두부"]
+    for menu in _KNOWN_MENUS:
+        if menu in remaining:
+            menu_tokens.append(menu)
+            remaining = remaining.replace(menu, " ")
+
+    for ing in _KNOWN_INGREDIENTS:
+        ing_compact = _compact(ing)
+        if not ing_compact:
+            continue
+        if ing in remaining or ing_compact in compact_remaining:
+            ing_tokens.append(ing)
+            remaining = remaining.replace(ing, " ")
+            compact_remaining = compact_remaining.replace(ing_compact, " ")
+
+    return list(dict.fromkeys(menu_tokens)), list(dict.fromkeys(ing_tokens))
+
+
+def _resolve_ingredient_candidates(text, limit=5):
+    """자연어/롱테일 재료 표현을 DB의 Ingredient.name 후보로 변환."""
+    _load_dictionaries()
+    raw = text or ""
+    cleaned = _strip_query_words(raw)
+    raw_compact = _compact(raw)
+    cleaned_compact = _compact(cleaned)
+    candidates = []
+
+    alias = _INGREDIENT_ALIASES.get(cleaned_compact) or _INGREDIENT_ALIASES.get(raw_compact)
+    if alias:
+        candidates.append(alias)
+
+    # exact 우선
+    for ing in _KNOWN_INGREDIENTS:
+        ing_compact = _compact(ing)
+        if ing_compact and ing_compact in {raw_compact, cleaned_compact}:
+            candidates.append(ing)
+
+    # substring fallback: "당근손가락길이만큼" -> "당근"
+    for ing in _KNOWN_INGREDIENTS:
+        ing_compact = _compact(ing)
+        if not ing_compact or len(ing_compact) < 2:
+            continue
+        if ing_compact in raw_compact or ing_compact in cleaned_compact:
+            candidates.append(ing)
+        elif len(cleaned_compact) >= 2 and cleaned_compact in ing_compact:
+            candidates.append(ing)
+        if len(dict.fromkeys(candidates)) >= limit:
+            break
+
+    return list(dict.fromkeys(candidates))[:limit]
+
+
+def _extract_graph_parts(query):
+    """없는 메뉴를 조합하기 위한 base menu + modifier ingredient 추출.
+
+    예: "마라김치찌개" -> base_menus=["김치찌개"], modifier_terms=["마라"],
+        modifier_ingredients=["마라소스", ...]
     """
     _load_dictionaries()
     raw = query or ""
-    raw_compact = _compact(_strip_query_words(raw))
+    raw_compact = _compact(raw)
     remaining_compact = raw_compact
 
     base_menus = []
@@ -141,329 +181,80 @@ def extract_graph_query_parts(query):
         if menu_compact and menu_compact in remaining_compact:
             base_menus.append(menu)
             remaining_compact = remaining_compact.replace(menu_compact, " ")
-            break
 
-    modifier_ingredients = []
-    ingredient_scan_text = remaining_compact if base_menus else raw_compact
-    for ing in _KNOWN_INGREDIENTS:
-        ing_compact = _compact(ing)
-        if not ing_compact:
-            continue
-        if ing_compact in ingredient_scan_text:
-            modifier_ingredients.append(ing)
-            ingredient_scan_text = ingredient_scan_text.replace(ing_compact, " ")
-
-    if not modifier_ingredients:
-        alias = _INGREDIENT_ALIASES.get(raw_compact)
-        if alias:
-            modifier_ingredients.append(alias)
-
-    remaining_terms = [
-        term for term in re.split(r"\s+", ingredient_scan_text.strip())
+    modifier_terms = [
+        term for term in re.split(r"\s+", remaining_compact.strip())
         if len(term) >= 2
     ]
 
+    modifier_ingredients = []
+    for term in modifier_terms:
+        modifier_ingredients.extend(_resolve_ingredient_candidates(term, limit=3))
+
+    # "마라 김치찌개"처럼 공백이 있는 쿼리도 잡기 위해 원문 토큰도 한 번 더 본다.
+    for token in re.split(r"\s+", _strip_query_words(raw)):
+        token_compact = _compact(token)
+        if len(token_compact) >= 2 and token_compact not in [_compact(m) for m in base_menus]:
+            modifier_ingredients.extend(_resolve_ingredient_candidates(token_compact, limit=2))
+
     return {
-        "query": raw,
-        "base_menus": _dedupe(base_menus),
-        "modifier_ingredients": _dedupe(modifier_ingredients),
-        "remaining_terms": _dedupe(remaining_terms),
+        "base_menus": list(dict.fromkeys(base_menus)),
+        "modifier_terms": list(dict.fromkeys(modifier_terms)),
+        "modifier_ingredients": list(dict.fromkeys(modifier_ingredients)),
     }
 
 
-def resolve_ingredient_candidates(text, limit=5):
-    """Resolve a messy ingredient phrase to Ingredient.name candidates."""
-    _load_dictionaries()
-    raw_compact = _compact(_strip_query_words(text))
-    candidates = []
-
-    alias = _INGREDIENT_ALIASES.get(raw_compact)
-    if alias:
-        candidates.append(alias)
-
-    for ing in _KNOWN_INGREDIENTS:
-        ing_compact = _compact(ing)
-        if ing_compact and ing_compact == raw_compact:
-            candidates.append(ing)
-
-    for ing in _KNOWN_INGREDIENTS:
-        ing_compact = _compact(ing)
-        if not ing_compact or len(ing_compact) < 2:
-            continue
-        if ing_compact in raw_compact or raw_compact in ing_compact:
-            candidates.append(ing)
-        if len(_dedupe(candidates)) >= limit:
-            break
-
-    return _dedupe(candidates)[:limit]
-
-
-# ============================================================
-# Core relation queries
-# ============================================================
-
-def search_recipes_by_name(keyword, limit=5):
-    """Recipe-name candidate search. Popularity is only a recipe tie-breaker."""
-    keyword = (keyword or "").strip()
-    if not keyword:
-        return []
-
-    with get_session() as session:
-        rows = session.run(f"""
-            MATCH (r:Recipe)
-            WHERE r.name = $keyword OR r.name CONTAINS $keyword
-            WITH r,
-                 CASE WHEN r.name = $keyword THEN 1 ELSE 0 END AS exact_hit,
-                 {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
-                   r.servings AS servings, r.difficulty AS difficulty,
-                   r.cooking_time AS cooking_time, r.kind AS kind,
-                   r.cooking_method AS cooking_method,
-                   r.view_count AS view_count,
-                   r.steps AS steps,
-                   popularity_score,
-                   exact_hit,
-                   CASE WHEN exact_hit = 1 THEN 'exact_name' ELSE 'name_contains' END AS match_type
-            ORDER BY exact_hit DESC, popularity_score DESC
-            LIMIT $limit
-        """, keyword=keyword, limit=limit)
-        return [row.data() for row in rows]
-
-
-def get_recipe_ingredients(rcp_sno):
-    """Ingredients of a recipe. Uses directed Recipe -> Ingredient edge."""
-    with get_session() as session:
-        rows = session.run("""
-            MATCH (r:Recipe {rcp_sno: $rcp_sno})-[c:CONTAINS]->(i:Ingredient)
-            WITH i, c,
-                 CASE
-                   WHEN c.quantity_text IS NOT NULL AND trim(toString(c.quantity_text)) <> ''
-                     THEN c.quantity_text
-                   WHEN c.quantity IS NOT NULL AND trim(toString(c.quantity)) <> ''
-                     THEN c.quantity
-                   WHEN c.quantity_count IS NOT NULL
-                     THEN toString(c.quantity_count) + coalesce(c.quantity_unit, '')
-                   ELSE ''
-                 END AS display_quantity
-            RETURN i.name AS name,
-                   display_quantity AS quantity,
-                   c.quantity_text AS quantity_text,
-                   c.quantity_g AS quantity_g,
-                   c.quantity_count AS quantity_count,
-                   c.quantity_unit AS quantity_unit,
-                   i.lv1 AS category,
-                   i.lv2 AS subcategory
-            ORDER BY i.lv1, i.name
-        """, rcp_sno=rcp_sno)
-        return [row.data() for row in rows]
-
-
-def get_recipe_detail(rcp_sno):
-    """Recipe metadata including cooking steps."""
-    with get_session() as session:
-        row = session.run("""
-            MATCH (r:Recipe {rcp_sno: $rcp_sno})
-            RETURN r.rcp_sno AS id,
-                   r.name AS name,
-                   r.title AS title,
-                   r.servings AS servings,
-                   r.difficulty AS difficulty,
-                   r.cooking_time AS cooking_time,
-                   r.cooking_method AS cooking_method,
-                   r.kind AS kind,
-                   r.situation AS situation,
-                   r.main_ingredient AS main_ingredient,
-                   r.view_count AS view_count,
-                   r.recommend_count AS recommend_count,
-                   r.scrap_count AS scrap_count,
-                   r.description AS description,
-                   r.image_url AS image_url,
-                   r.steps AS steps
-        """, rcp_sno=rcp_sno).single()
-        return row.data() if row else None
-
-
-def get_recipes_by_ingredient(ingredient_name, limit=5):
-    """Recipes containing an ingredient. Popularity is a tie-breaker, not relation score."""
-    candidates = resolve_ingredient_candidates(ingredient_name, limit=5)
-    if not candidates:
-        return []
-
-    with get_session() as session:
-        rows = session.run(f"""
-            MATCH (i:Ingredient)<-[:CONTAINS]-(r:Recipe)
-            WHERE i.name IN $names
-            WITH r, collect(DISTINCT i.name) AS matched_ingredients,
-                 count(DISTINCT i) AS relation_score,
-                 {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
-                   r.servings AS servings, r.difficulty AS difficulty,
-                   r.cooking_time AS cooking_time, r.kind AS kind,
-                   r.view_count AS view_count,
-                   r.steps AS steps,
-                   matched_ingredients,
-                   relation_score,
-                   popularity_score,
-                   'ingredient_relation' AS match_type
-            ORDER BY relation_score DESC, popularity_score DESC
-            LIMIT $limit
-        """, names=candidates, limit=limit)
-        return [row.data() for row in rows]
-
-
-def get_recipes_by_multiple_ingredients(ingredients, limit=5):
-    """Recipes containing all requested ingredients."""
-    resolved = []
-    for ing in ingredients or []:
-        resolved.extend(resolve_ingredient_candidates(ing, limit=1))
-    resolved = _dedupe(resolved)
-    if not resolved:
-        return []
-
-    with get_session() as session:
-        rows = session.run(f"""
-            MATCH (i:Ingredient)<-[:CONTAINS]-(r:Recipe)
-            WHERE i.name IN $names
-            WITH r, collect(DISTINCT i.name) AS matched_ingredients,
-                 {_SCORE_EXPR} AS popularity_score
-            WHERE size(matched_ingredients) = size($names)
-            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
-                   r.servings AS servings, r.difficulty AS difficulty,
-                   r.cooking_time AS cooking_time, r.kind AS kind,
-                   r.view_count AS view_count,
-                   r.steps AS steps,
-                   matched_ingredients,
-                   size(matched_ingredients) AS relation_score,
-                   popularity_score,
-                   'multi_ingredient_relation' AS match_type
-            ORDER BY relation_score DESC, popularity_score DESC
-            LIMIT $limit
-        """, names=resolved, limit=limit)
-        return [row.data() for row in rows]
-
-
 def get_related_ingredients(ingredient_names, limit=12):
-    """Ingredients frequently co-occurring with the given ingredients.
-
-    This is an ingredient relation query, so view_count is intentionally not used.
-    """
-    names = _dedupe(ingredient_names or [])
-    if not names:
+    """특정 재료와 같은 레시피에 자주 등장하는 재료 관계."""
+    if not ingredient_names:
         return []
 
     with get_session() as session:
-        rows = session.run("""
-            MATCH (seed:Ingredient)<-[:CONTAINS]-(r:Recipe)-[:CONTAINS]->(co:Ingredient)
-            WHERE seed.name IN $names AND NOT co.name IN $names
-            WITH co.name AS name, co.lv1 AS category, count(DISTINCT r) AS co_recipe_count
-            RETURN name, category, co_recipe_count
-            ORDER BY co_recipe_count DESC
+        result = session.run("""
+            MATCH (r:Recipe)-[:CONTAINS]->(seed:Ingredient)
+            WHERE seed.name IN $names
+            MATCH (r)-[:CONTAINS]->(co:Ingredient)
+            WHERE NOT co.name IN $names
+            WITH co.name AS name, co.lv1 AS category, count(DISTINCT r) AS recipe_count
+            ORDER BY recipe_count DESC
             LIMIT $limit
-        """, names=names, limit=limit)
-        return [row.data() for row in rows]
+            RETURN name, category, recipe_count
+        """, names=ingredient_names, limit=limit)
+        return [r.data() for r in result]
 
-
-def find_similar_recipes_by_ingredients(seed_ingredients, exclude_ids=None, limit=5):
-    """Graph similarity by shared ingredients, not simple LIKE search."""
-    seed_ingredients = _dedupe(seed_ingredients or [])
-    exclude_ids = exclude_ids or []
-    if not seed_ingredients:
-        return []
-
-    with get_session() as session:
-        rows = session.run(f"""
-            MATCH (r:Recipe)-[:CONTAINS]->(i:Ingredient)
-            WHERE i.name IN $seed_ingredients
-              AND NOT r.rcp_sno IN $exclude_ids
-            WITH r, collect(DISTINCT i.name) AS shared_ingredients
-            MATCH (r)-[:CONTAINS]->(all_i:Ingredient)
-            WITH r, shared_ingredients,
-                 count(DISTINCT all_i) AS recipe_ingredient_count,
-                 size(shared_ingredients) AS shared_count,
-                 size($seed_ingredients) AS seed_count,
-                 {_SCORE_EXPR} AS popularity_score
-            WITH r, shared_ingredients, recipe_ingredient_count, shared_count, popularity_score,
-                 seed_count + recipe_ingredient_count - shared_count AS union_count
-            WITH r, shared_ingredients, recipe_ingredient_count, shared_count, popularity_score,
-                 CASE
-                   WHEN union_count = 0 THEN 0.0
-                   ELSE toFloat(shared_count) / toFloat(union_count)
-                 END AS graph_similarity
-            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
-                   r.servings AS servings, r.difficulty AS difficulty,
-                   r.cooking_time AS cooking_time, r.kind AS kind,
-                   r.view_count AS view_count,
-                   r.steps AS steps,
-                   shared_ingredients,
-                   shared_count,
-                   recipe_ingredient_count,
-                   graph_similarity,
-                   popularity_score,
-                   'ingredient_similarity' AS match_type
-            ORDER BY graph_similarity DESC, shared_count DESC, popularity_score DESC
-            LIMIT $limit
-        """, seed_ingredients=seed_ingredients, exclude_ids=exclude_ids, limit=limit)
-        return [row.data() for row in rows]
-
-
-def find_similar_recipes(rcp_sno, limit=5, min_shared=2):
-    """Recipes similar to a given recipe by shared ingredients."""
-    ingredients = [ing["name"] for ing in get_recipe_ingredients(rcp_sno)]
-    rows = find_similar_recipes_by_ingredients(ingredients, exclude_ids=[rcp_sno], limit=limit)
-    return [row for row in rows if row.get("shared_count", 0) >= min_shared]
-
-
-# ============================================================
-# GraphRAG context
-# ============================================================
 
 def build_graph_relation_context(query, limit=3):
-    """Return relation context only. No recipe creation happens here."""
-    parts = extract_graph_query_parts(query)
+    """DB에 정확한 레시피가 없을 때 Neo4j 관계로 조합 근거를 만든다.
+
+    이 함수는 완성 레시피를 창작하지 않는다.
+    Neo4j에서 base recipe, modifier ingredient, co-occurring ingredient 관계만 반환한다.
+    """
+    parts = _extract_graph_parts(query)
     base_menus = parts["base_menus"]
     modifier_ingredients = parts["modifier_ingredients"]
 
-    base_recipes = []
-    for menu in base_menus[:1]:
-        base_recipes.extend(search_recipes_by_name(menu, limit=limit))
-    base_recipes = base_recipes[:limit]
+    if not base_menus:
+        return []
+
+    base_menu = base_menus[0]
+    base_recipes = _search_by_name(base_menu, limit)
+    if not base_recipes:
+        return []
+
+    related = get_related_ingredients(modifier_ingredients, limit=12)
 
     modifier_recipes = []
     for ing in modifier_ingredients[:3]:
         modifier_recipes.extend(get_recipes_by_ingredient(ing, limit=2))
 
-    if not base_recipes and modifier_ingredients:
-        return {
-            "mode": "ingredient_recipe_relation",
-            "source": "neo4j",
-            "query": query,
-            "modifier_ingredients": modifier_ingredients,
-            "recipes": get_recipes_by_multiple_ingredients(modifier_ingredients[:3], limit=limit)
-                       if len(modifier_ingredients) > 1
-                       else get_recipes_by_ingredient(modifier_ingredients[0], limit=limit),
-            "related_ingredients": get_related_ingredients(modifier_ingredients, limit=12),
-        }
-
-    if not base_recipes:
-        return {}
-
-    base_ids = [recipe["id"] for recipe in base_recipes if recipe.get("id") is not None]
-    base_ingredients = []
-    source_recipes = []
+    source_blocks = []
     for recipe in base_recipes:
-        detail = get_recipe_detail(recipe["id"]) or {}
         ingredients = get_recipe_ingredients(recipe["id"])
-        ing_names = [ing["name"] for ing in ingredients if ing.get("name")]
-        base_ingredients.extend(ing_names)
-        source_recipes.append({
+        source_blocks.append({
             "id": recipe.get("id"),
-            "name": _recipe_display_name({**recipe, **detail}),
-            "recipe_name": recipe.get("name") or detail.get("name"),
-            "recipe_title": recipe.get("title") or detail.get("title"),
+            "name": recipe.get("name"),
             "servings": recipe.get("servings"),
             "difficulty": recipe.get("difficulty"),
-            "cooking_time": recipe.get("cooking_time"),
-            "steps": detail.get("steps") or recipe.get("steps"),
             "ingredients": [
                 f"{ing.get('name')}: {ing.get('quantity')}"
                 if ing.get("quantity") else ing.get("name")
@@ -471,152 +262,365 @@ def build_graph_relation_context(query, limit=3):
             ],
         })
 
-    seed_ingredients = _dedupe(modifier_ingredients + base_ingredients)
-    similar_recipes = find_similar_recipes_by_ingredients(
-        seed_ingredients,
-        exclude_ids=base_ids,
-        limit=limit,
-    )
-    related_ingredients = get_related_ingredients(modifier_ingredients, limit=12)
-
-    summary_lines = [
-        "GRAPH_CONTEXT_ONLY",
-        f"[query] {query}",
-        f"[base_menus] {', '.join(base_menus) if base_menus else '-'}",
-        f"[modifier_ingredients] {', '.join(modifier_ingredients) if modifier_ingredients else '-'}",
-        "[source_recipes] "
+    relation_lines = [
+        f"[조합 요청] {query}",
+        f"[기본 메뉴] {base_menu}",
+    ]
+    if modifier_ingredients:
+        relation_lines.append(f"[추가 재료 후보] {', '.join(modifier_ingredients[:5])}")
+    if related:
+        relation_lines.append(
+            "[추가 재료와 같이 자주 나오는 재료] "
+            + ", ".join(f"{r['name']}({r['recipe_count']})" for r in related[:10])
+        )
+    relation_lines.append(
+        "[기본 레시피 재료] "
         + " / ".join(
             f"{src['name']}: {', '.join(src['ingredients'][:12])}"
-            for src in source_recipes[:2]
-        ),
-    ]
-    if related_ingredients:
-        summary_lines.append(
-            "[co_occurring_ingredients] "
-            + ", ".join(
-                f"{row['name']}({row['co_recipe_count']})"
-                for row in related_ingredients[:10]
-            )
+            for src in source_blocks[:2]
         )
-    if similar_recipes:
-        summary_lines.append(
-            "[similar_recipes_by_shared_ingredients] "
-            + ", ".join(
-                f"{row['name']}({row['shared_count']} shared)"
-                for row in similar_recipes[:5]
-            )
-        )
-
-    return {
-        "mode": "graph_relation_context",
-        "source": "neo4j",
-        "status": "exact_recipe_not_found",
-        "query": query,
-        "base_menus": base_menus,
-        "modifier_ingredients": modifier_ingredients,
-        "source_recipes": source_recipes,
-        "modifier_recipes": modifier_recipes[:5],
-        "related_ingredients": related_ingredients,
-        "similar_recipes": similar_recipes,
-        "summary_lines": summary_lines,
-    }
-
-
-# ============================================================
-# Compatibility functions used by agent.py
-# ============================================================
-
-def search_recipes(keyword, limit=5):
-    """Existing import compatibility."""
-    return search_recipes_by_name(keyword, limit=limit)
-
-
-def get_chatbot_context(keyword):
-    """Context consumed by recipe_db_expert.
-
-    Exact/name matches return recipe rows. Missing composite recipes return
-    Neo4j relation context rows, not LLM-created recipes.
-    """
-    direct_rows = search_recipes_by_name(keyword, limit=5)
-    if direct_rows:
-        return _format_recipe_rows_for_agent(direct_rows)
-
-    context = build_graph_relation_context(keyword, limit=3)
-    if not context:
-        return []
-
-    if context.get("mode") == "ingredient_recipe_relation":
-        return _format_recipe_rows_for_agent(context.get("recipes", []))
+    )
+    if modifier_recipes:
+        seen = []
+        for recipe in modifier_recipes:
+            if recipe.get("name") not in seen:
+                seen.append(recipe.get("name"))
+        relation_lines.append("[추가 재료 사용 레시피 예시] " + ", ".join(seen[:5]))
 
     return [{
         "mode": "graph_relation_context",
         "source": "neo4j",
-        "source_label": "Neo4j DB",
-        "menu": keyword,
+        "status": "exact_recipe_not_found",
+        "menu": query,
         "margin": 0,
-        "ingredients": context["summary_lines"],
-        "steps": None,
-        "graph_context": context,
+        "ingredients": relation_lines,
+        "base_menu": base_menu,
+        "modifier_terms": parts["modifier_terms"],
+        "modifier_ingredients": modifier_ingredients,
+        "related_ingredients": related,
+        "source_recipes": source_blocks,
+        "modifier_recipes": modifier_recipes[:5],
     }]
 
 
-def _format_recipe_rows_for_agent(recipes):
-    rows = []
-    for recipe in recipes:
-        detail = get_recipe_detail(recipe["id"]) or {}
-        ingredients = get_recipe_ingredients(recipe["id"])
-        ing_texts = [
-            f"{ing.get('name')}: {ing.get('quantity')}"
-            if ing.get("quantity") else ing.get("name")
-            for ing in ingredients
-        ]
-        rows.append({
-            "menu": _recipe_display_name({**recipe, **detail}),
-            "recipe_name": recipe.get("name") or detail.get("name"),
-            "recipe_title": recipe.get("title") or detail.get("title"),
-            "margin": 0,
-            "ingredients": ing_texts,
-            "source": "neo4j",
-            "source_label": "Neo4j DB",
-            "difficulty": recipe.get("difficulty") or detail.get("difficulty"),
-            "servings": recipe.get("servings") or detail.get("servings"),
-            "cooking_time": recipe.get("cooking_time") or detail.get("cooking_time"),
-            "cooking_method": recipe.get("cooking_method") or detail.get("cooking_method"),
-            "view_count": recipe.get("view_count"),
-            "steps": detail.get("steps") or recipe.get("steps"),
-            "description": detail.get("description"),
-            "match_type": recipe.get("match_type"),
-            "matched_ingredients": recipe.get("matched_ingredients", []),
-            "graph_similarity": recipe.get("graph_similarity"),
-            "shared_ingredients": recipe.get("shared_ingredients", []),
-        })
-    return rows
+# ============================================================
+# 1. 통합 검색
+# ============================================================
+
+def search_recipes_smart(query, limit=3, fallback_popular=False):
+    """레시피명/재료명 기반 통합 검색.
+
+    기존 코드와 다른 핵심:
+    - 재료만 있는 쿼리도 검색함: "두부 들어간 요리" -> 두부 레시피
+    - 기본적으로 인기 레시피 fallback을 하지 않음.
+      그래야 DB에 없을 때 챗봇이 "없다"고 판단할 수 있음.
+    """
+    results = _search_by_name(query, limit)
+    if len(results) >= limit:
+        return results
+
+    menu_tokens, ing_tokens = _tokenize(query)
+
+    if menu_tokens:
+        token_results = _search_by_tokens(menu_tokens, ing_tokens, limit)
+        results = _merge_results(results, token_results, limit)
+        if len(results) >= limit:
+            return results
+
+        fallback = _search_by_name(menu_tokens[0], limit)
+        for row in fallback:
+            row["match_type"] = "partial_token"
+        results = _merge_results(results, fallback, limit)
+        if len(results) >= limit:
+            return results
+
+    if ing_tokens:
+        if len(ing_tokens) == 1:
+            ingredient_results = get_recipes_by_ingredient(ing_tokens[0], limit)
+        else:
+            ingredient_results = get_recipes_by_multiple_ingredients(ing_tokens[:3], limit)
+        results = _merge_results(results, ingredient_results, limit)
+
+    if not results and fallback_popular:
+        results = get_popular_recipes(limit)
+        for row in results:
+            row["match_type"] = "popular_fallback"
+
+    return results
 
 
-def get_recipes_excluding_ingredient(keyword, exclude, limit=5):
-    candidates = resolve_ingredient_candidates(exclude, limit=1)
-    exclude_name = candidates[0] if candidates else exclude
+def _search_by_name(keyword, limit):
+    """이름 부분 매칭. 인기도 정렬."""
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return []
+
     with get_session() as session:
-        rows = session.run(f"""
+        result = session.run(f"""
             MATCH (r:Recipe)
-            WHERE r.name CONTAINS $keyword
-              AND NOT (r)-[:CONTAINS]->(:Ingredient {{name: $exclude}})
-            WITH r, {_SCORE_EXPR} AS popularity_score
+            WHERE r.name CONTAINS $kw
+            WITH r, {_SCORE_EXPR} AS score
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.servings AS servings, r.difficulty AS difficulty,
+                   r.kind AS kind, r.cooking_time AS cooking_time,
+                   r.view_count AS view_count, score
+            ORDER BY score DESC
+            LIMIT $limit
+        """, kw=keyword, limit=limit)
+        rows = []
+        for r in result:
+            d = r.data()
+            d["match_type"] = "name_match"
+            rows.append(d)
+        return rows
+
+
+def _search_by_tokens(menu_tokens, ing_tokens, limit):
+    """메뉴 토큰 매칭 + 재료 토큰 일치당 +1000점 가중."""
+    if not menu_tokens:
+        return []
+
+    with get_session() as session:
+        result = session.run(f"""
+            MATCH (r:Recipe)
+            WHERE ANY(t IN $menus WHERE r.name CONTAINS t)
+            OPTIONAL MATCH (r)-[:CONTAINS]->(i:Ingredient)
+            WHERE i.name IN $ings
+            WITH r, count(DISTINCT i) AS ing_hits, {_SCORE_EXPR} AS base_score
+            WITH r, base_score + ing_hits * 1000 AS score, ing_hits
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.servings AS servings, r.difficulty AS difficulty,
+                   r.kind AS kind, r.cooking_time AS cooking_time,
+                   r.view_count AS view_count, score, ing_hits
+            ORDER BY score DESC
+            LIMIT $limit
+        """, menus=menu_tokens, ings=ing_tokens, limit=limit)
+        rows = []
+        for r in result:
+            d = r.data()
+            d["match_type"] = "token_match"
+            rows.append(d)
+        return rows
+
+
+# ============================================================
+# 2. 레시피 상세/재료
+# ============================================================
+
+def get_recipe_ingredients(rcp_sno):
+    """레시피의 재료 + 수량 조회."""
+    with get_session() as session:
+        result = session.run("""
+            MATCH (r:Recipe {rcp_sno: $rcp_sno})-[c:CONTAINS]->(i:Ingredient)
+            RETURN i.name AS name, coalesce(c.quantity, c.quantity_text, '') AS quantity,
+                   i.lv1 AS category, i.lv2 AS subcategory
+            ORDER BY i.lv1, i.name
+        """, rcp_sno=rcp_sno)
+        return [r.data() for r in result]
+
+
+def get_recipe_detail(rcp_sno):
+    """레시피 상세 정보."""
+    with get_session() as session:
+        result = session.run("""
+            MATCH (r:Recipe {rcp_sno: $rcp_sno})
             RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
                    r.servings AS servings, r.difficulty AS difficulty,
+                   r.cooking_time AS cooking_time, r.cooking_method AS cooking_method,
+                   r.kind AS kind, r.situation AS situation,
+                   r.main_ingredient AS main_ingredient,
+                   r.view_count AS view_count, r.recommend_count AS recommend_count,
+                   r.scrap_count AS scrap_count, r.description AS description,
+                   r.image_url AS image_url, r.steps AS steps
+        """, rcp_sno=rcp_sno)
+        record = result.single()
+        return record.data() if record else None
+
+
+# ============================================================
+# 3. 재료 기반 검색
+# ============================================================
+
+def get_recipes_by_ingredient(ingredient_name, limit=3):
+    """특정 재료가 들어간 레시피. 자연어 표현도 처리."""
+    candidates = _resolve_ingredient_candidates(ingredient_name, limit=5)
+    if not candidates:
+        return []
+
+    with get_session() as session:
+        result = session.run(f"""
+            MATCH (r:Recipe)-[:CONTAINS]->(i:Ingredient)
+            WHERE i.name IN $names
+            WITH r, collect(DISTINCT i.name) AS matched_ingredients, {_SCORE_EXPR} AS score
+            RETURN DISTINCT r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
                    r.cooking_time AS cooking_time, r.kind AS kind,
-                   r.view_count AS view_count,
-                   r.steps AS steps,
-                   popularity_score,
-                   'exclude_ingredient' AS match_type
-            ORDER BY popularity_score DESC
-            LIMIT $limit
+                   r.view_count AS view_count, score, matched_ingredients
+            ORDER BY score DESC LIMIT $limit
+        """, names=candidates, limit=limit)
+        rows = [r.data() for r in result]
+        for row in rows:
+            row["match_type"] = "ingredient_match"
+        return rows
+
+
+def get_recipes_by_multiple_ingredients(ingredients, limit=3):
+    """여러 재료가 모두 들어간 레시피."""
+    resolved = []
+    for ing in ingredients:
+        candidates = _resolve_ingredient_candidates(ing, limit=1)
+        if candidates:
+            resolved.append(candidates[0])
+    resolved = list(dict.fromkeys(resolved))
+    if not resolved:
+        return []
+
+    with get_session() as session:
+        result = session.run(f"""
+            MATCH (r:Recipe)-[:CONTAINS]->(i:Ingredient)
+            WHERE i.name IN $ingredients
+            WITH r, collect(DISTINCT i.name) AS matched_ingredients, {_SCORE_EXPR} AS score
+            WHERE size(matched_ingredients) = size($ingredients)
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
+                   r.cooking_time AS cooking_time, r.kind AS kind,
+                   r.view_count AS view_count, score, matched_ingredients
+            ORDER BY score DESC LIMIT $limit
+        """, ingredients=resolved, limit=limit)
+        rows = [r.data() for r in result]
+        for row in rows:
+            row["match_type"] = "multi_ingredient_match"
+        return rows
+
+
+def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
+    """특정 재료를 제외한 레시피."""
+    exclude_candidates = _resolve_ingredient_candidates(exclude, limit=1)
+    exclude_name = exclude_candidates[0] if exclude_candidates else exclude
+
+    with get_session() as session:
+        result = session.run(f"""
+            MATCH (r:Recipe)
+            WHERE r.name CONTAINS $keyword
+            AND NOT (r)-[:CONTAINS]->(:Ingredient {{name: $exclude}})
+            WITH r, {_SCORE_EXPR} AS score
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
+                   r.cooking_time AS cooking_time, r.kind AS kind,
+                   r.view_count AS view_count, score
+            ORDER BY score DESC LIMIT $limit
         """, keyword=keyword, exclude=exclude_name, limit=limit)
-        return [row.data() for row in rows]
+        return [r.data() for r in result]
 
 
-def recommend_recipes(kind=None, difficulty=None, servings=None, cooking_method=None, limit=5):
-    """Simple property filter kept for compatibility; Databricks can own richer catalog filters."""
+# ============================================================
+# 4. 대체재 추천 (그래프 기반 RAG)
+# ============================================================
+
+def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
+    """주어진 메뉴에서 특정 재료를 대체할 만한 재료를 그래프 관계로 추천.
+
+    cost_calculator가 이 함수의 결과(후보 5개)를 받고,
+    가격사전과 매칭해 원가가 가장 낮은 대체재를 고르는 식으로 사용 가능.
+
+    동작 순서:
+      1. missing_ingredient의 lv1(대분류)를 찾는다 (예: 돼지고기 → '육류·계란')
+      2. 해당 메뉴를 가진 레시피들의 재료 중,
+         같은 lv1이면서 missing이 아닌 재료를 빈도순으로 뽑는다.
+
+    예: suggest_substitute_ingredient("김치찌개", "돼지고기")
+        → [
+            {"name": "햄",   "category": "육류·계란", "recipe_count": 23},
+            {"name": "참치", "category": "어패류",   "recipe_count": 18},
+            ...
+          ]
+
+    자연어 표현도 처리: "고기" → "돼지고기"로 자동 변환 후 검색
+    """
+    candidates = _resolve_ingredient_candidates(missing_ingredient, limit=1)
+    if not candidates:
+        return []
+    missing = candidates[0]
+
+    with get_session() as session:
+        # missing의 lv1(대분류) 먼저 확인
+        meta = session.run(
+            "MATCH (i:Ingredient {name: $name}) RETURN i.lv1 AS lv1 LIMIT 1",
+            name=missing,
+        ).single()
+        if not meta or not meta["lv1"]:
+            return []
+        missing_lv1 = meta["lv1"]
+
+        # 같은 카테고리 + 해당 메뉴에 자주 등장하는 재료
+        result = session.run("""
+            MATCH (r:Recipe)-[:CONTAINS]->(alt:Ingredient)
+            WHERE r.name CONTAINS $menu
+              AND alt.lv1 = $missing_lv1
+              AND alt.name <> $missing
+            WITH alt.name AS name, alt.lv1 AS category,
+                 count(DISTINCT r) AS recipe_count
+            ORDER BY recipe_count DESC
+            LIMIT $limit
+            RETURN name, category, recipe_count
+        """, menu=menu, missing=missing, missing_lv1=missing_lv1, limit=limit)
+
+        return [r.data() for r in result]
+
+
+# ============================================================
+# 5. 유사 레시피 추천
+# ============================================================
+
+def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
+    """주어진 레시피와 재료를 공유하는 유사 레시피 추천."""
+    #기준 레시피 1개를 잡고
+    # → 그 레시피와 재료가 많이 겹치는 다른 레시피 찾기
+
+    with get_session() as session:
+        result = session.run(f"""
+            MATCH (base:Recipe {{rcp_sno: $rcp_sno}})-[:CONTAINS]->(i:Ingredient)
+            MATCH (other:Recipe)-[:CONTAINS]->(i)
+            WHERE other.rcp_sno <> base.rcp_sno
+            WITH other, count(DISTINCT i) AS shared,
+                 {_SCORE_EXPR.replace('r.', 'other.')} AS pop
+            WHERE shared >= $min_shared
+            RETURN other.rcp_sno AS id, other.name AS name,
+                   other.difficulty AS difficulty, other.servings AS servings,
+                   shared, pop AS score
+            ORDER BY shared DESC, pop DESC
+            LIMIT $limit
+        """, rcp_sno=rcp_sno, min_shared=min_shared, limit=limit)
+        return [r.data() for r in result]
+
+
+# ============================================================
+# 5. 인기/조건 추천
+# ============================================================
+
+def get_popular_recipes(limit=3):
+    """전체 인기 레시피 top N."""
+    with get_session() as session:
+        result = session.run(f"""
+            MATCH (r:Recipe)
+            WITH r, {_SCORE_EXPR} AS score
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
+                   r.cooking_time AS cooking_time, r.kind AS kind,
+                   r.view_count AS view_count, score
+            ORDER BY score DESC LIMIT $limit
+        """, limit=limit)
+        return [r.data() for r in result]
+
+
+def recommend_recipes(
+    kind=None,
+    difficulty=None,
+    servings=None,
+    cooking_method=None,
+    limit=3,
+):
+    """조건 기반 추천."""
     conditions = []
     params = {"limit": limit}
 
@@ -634,38 +638,69 @@ def recommend_recipes(kind=None, difficulty=None, servings=None, cooking_method=
         params["cooking_method"] = cooking_method
 
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
     with get_session() as session:
-        rows = session.run(f"""
+        result = session.run(f"""
             MATCH (r:Recipe)
             {where_clause}
-            WITH r, {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
-                   r.servings AS servings, r.difficulty AS difficulty,
-                   r.cooking_time AS cooking_time, r.kind AS kind,
-                   r.view_count AS view_count,
-                   r.steps AS steps,
-                   popularity_score,
-                   'property_filter' AS match_type
-            ORDER BY popularity_score DESC
-            LIMIT $limit
+            WITH r, {_SCORE_EXPR} AS score
+            RETURN r.rcp_sno AS id, r.name AS name,
+                   r.difficulty AS difficulty, r.servings AS servings,
+                   r.kind AS kind, r.cooking_time AS cooking_time,
+                   r.view_count AS view_count, score
+            ORDER BY score DESC LIMIT $limit
         """, **params)
-        return [row.data() for row in rows]
+        return [r.data() for r in result]
 
 
-def get_popular_recipes(limit=5):
-    """Popularity ranking for selecting among multiple existing recipe variants."""
-    with get_session() as session:
-        rows = session.run(f"""
-            MATCH (r:Recipe)
-            WITH r, {_SCORE_EXPR} AS popularity_score
-            RETURN r.rcp_sno AS id, r.name AS name, r.title AS title,
-                   r.servings AS servings, r.difficulty AS difficulty,
-                   r.cooking_time AS cooking_time, r.kind AS kind,
-                   r.view_count AS view_count,
-                   r.steps AS steps,
-                   popularity_score,
-                   'popular_recipe' AS match_type
-            ORDER BY popularity_score DESC
-            LIMIT $limit
-        """, limit=limit)
-        return [row.data() for row in rows]
+# ============================================================
+# 6. 챗봇/기존 import 호환
+# ============================================================
+
+def search_recipes(keyword, limit=5):
+    """기존 search_recipes 인터페이스 유지."""
+    return search_recipes_smart(keyword, limit=limit, fallback_popular=False)
+
+
+def get_chatbot_context(keyword):
+    """agent.py의 recipe_db_expert에서 호출하는 형태로 반환.
+
+    동작 순서:
+    1. 요청 문장 그대로 레시피명 검색
+    2. 없으면 "마라김치찌개" 같은 조합형 메뉴를 Neo4j 관계 컨텍스트로 반환
+    3. 그래도 없으면 재료/토큰 기반 검색
+    """
+    recipes = _search_by_name(keyword, limit=5)
+    if not recipes:
+        graph_rows = build_graph_relation_context(keyword, limit=3)
+        if graph_rows:
+            return graph_rows
+
+    if not recipes:
+        recipes = search_recipes_smart(keyword, limit=5, fallback_popular=False)
+
+    if not recipes:
+        return []
+
+    results = []
+    for recipe in recipes:
+        ingredients = get_recipe_ingredients(recipe["id"])
+        ing_names = []
+        for ing in ingredients:
+            name = ing.get("name")
+            quantity = ing.get("quantity")
+            ing_names.append(f"{name}: {quantity}" if quantity else name)
+
+        results.append({
+            "menu": recipe["name"],
+            "margin": 0,
+            "ingredients": ing_names,
+            "difficulty": recipe.get("difficulty"),
+            "servings": recipe.get("servings"),
+            "cooking_time": recipe.get("cooking_time"),
+            "view_count": recipe.get("view_count"),
+            "match_type": recipe.get("match_type"),
+            "matched_ingredients": recipe.get("matched_ingredients", []),
+        })
+
+    return results
