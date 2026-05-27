@@ -17,6 +17,7 @@ import mlflow
 from concurrent.futures import ThreadPoolExecutor
 from mlflow.entities import SpanType
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.sql import StatementState
 
 from backend.debug_log import archive
 from backend.catalog import resolve_many, ResolveResult
@@ -24,9 +25,11 @@ from backend.catalog import resolve_many, ResolveResult
 GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID", "01f148e5845f1f68843892ceb53abd32")
 
 # Genie 한 번에 조회할 재료 수 제한 (작게 잡을수록 SQL 생성 안정성 ↑)
-_GENIE_BATCH_SIZE = 5
+_GENIE_BATCH_SIZE = 3
 # Genie 동시 호출 워커 수 (Databricks rate limit 고려)
 _GENIE_MAX_WORKERS = 3
+# 배치가 MessageStatus.FAILED로 실패했을 때 항목별 단건 재시도 최대 동시 워커 수
+_GENIE_RETRY_MAX_WORKERS = 2
 
 # negation 패턴: Genie가 "X는 조회되지 않았습니다" 식으로 말할 때 잡기 위함
 _NEGATION_PATTERNS = [
@@ -41,6 +44,123 @@ _NEGATION_PATTERNS = [
 
 # 가격 표기 패턴 — "1,200원", "₩1,200", "1.2kg당 3,000원" 등
 _PRICE_PATTERN = re.compile(r"(?:₩|\d[\d,]{2,}\s*원)|(?:\d+\s*(?:kg|g|ml|L|개)\s*당?\s*\d[\d,]+)")
+
+
+def _get_warehouse_id(w: WorkspaceClient) -> str | None:
+    """direct_sql 폴백용 warehouse 조회. databricks_db.py / catalog.py와 동일 패턴."""
+    wh_id = os.environ.get("DATABRICKS_WAREHOUSE_ID")
+    if wh_id:
+        return wh_id
+    for wh in w.warehouses.list():
+        if wh.state and wh.state.value in ("RUNNING", "STARTING"):
+            return wh.id
+    warehouses = list(w.warehouses.list())
+    return warehouses[0].id if warehouses else None
+
+
+def _direct_sql_query(targets: list[tuple[str, str, str]]) -> dict:
+    """카탈로그 (재료명, 단위) 조합으로 statement_execution을 직접 호출.
+
+    Genie 우회 — LLM SQL 생성을 건너뛰고 결정적인 WHERE 절로 최근 30일 평균 도매가 조회.
+    재질의도 실패한 matched 항목의 마지막 폴백으로 사용한다.
+
+    Args:
+        targets: (input_name, db_name, db_unit) 튜플 목록.
+
+    Returns:
+        {"text": "재료명: ₩가격/kg ..." 형식 문자열, "found": [회복된 input_name], "error": Optional[str]}
+        결과가 없거나 실패하면 found=[]로 반환.
+    """
+    if not targets:
+        return {"text": "", "found": [], "error": None}
+
+    # WHERE 절 동적 생성: (재료명='X' AND 단위='Y') OR ...
+    where_clauses = []
+    db_to_input: dict[tuple[str, str], str] = {}
+    for input_name, db_name, db_unit in targets:
+        # SQL 인젝션 방지: 작은따옴표 escape
+        safe_name = (db_name or "").replace("'", "''")
+        safe_unit = (db_unit or "").replace("'", "''")
+        where_clauses.append(f"(`재료명` = '{safe_name}' AND `단위` = '{safe_unit}')")
+        db_to_input[(db_name, db_unit)] = input_name
+
+    sql = f"""
+SELECT `재료명`, `단위`, ROUND(AVG(`가격`)) AS `평균가격`, COUNT(*) AS `행수`
+FROM silver.ingredient.ingredient
+WHERE ({" OR ".join(where_clauses)})
+  AND `날짜` >= DATE_SUB(CURRENT_DATE(), 30)
+  AND `가격` IS NOT NULL
+GROUP BY `재료명`, `단위`
+""".strip()
+
+    try:
+        host = os.environ.get("DATABRICKS_HOST")
+        token = os.environ.get("DATABRICKS_TOKEN")
+        w = WorkspaceClient(host=host, token=token) if host and token else WorkspaceClient()
+        warehouse_id = _get_warehouse_id(w)
+        if not warehouse_id:
+            return {"text": "", "found": [], "error": "warehouse_not_found"}
+
+        resp = w.statement_execution.execute_statement(
+            warehouse_id=warehouse_id,
+            statement=sql,
+            wait_timeout="50s",
+        )
+        if not resp.status or resp.status.state != StatementState.SUCCEEDED:
+            err_msg = resp.status.error.message if resp.status and resp.status.error else "unknown"
+            return {"text": "", "found": [], "error": f"sql_failed: {err_msg}"}
+
+        # 결과 파싱: 재료명, 단위 → 평균가격 (cost_calculator의 정규식이 잡도록 "재료명: ₩X/kg" 포맷)
+        lines: list[str] = []
+        found_inputs: list[str] = []
+        for row in (resp.result.data_array or []):
+            db_name = str(row[0] or "").strip()
+            db_unit = str(row[1] or "").strip()
+            try:
+                avg_price = int(float(row[2])) if row[2] is not None else None
+            except (TypeError, ValueError):
+                avg_price = None
+            if avg_price is None or avg_price <= 0:
+                continue
+            input_name = db_to_input.get((db_name, db_unit), db_name)
+            # cost_calculator._PRICE_LINE_PATTERNS이 "재료명: ... NNN원/kg" 형식을 잡음
+            # 단위가 kg/g 외(개/마리/포기 등)면 그대로 ₩표기로만 보고하되 cost_calculator의
+            # _PER_PIECE_GRAMS 매칭에 의존하지 않는 흐름은 ₩/kg가 가장 안전. 단위에 'kg'가
+            # 포함되면 그 단위로 환산하고, 아니면 raw 단위로 표기.
+            unit_lower = db_unit.lower().replace(" ", "")
+            kg_match = re.match(r"^(\d+(?:\.\d+)?)kg$", unit_lower)
+            g_match = re.match(r"^(\d+(?:\.\d+)?)g$", unit_lower)
+            if kg_match:
+                kg_val = float(kg_match.group(1))
+                price_per_kg = int(avg_price / kg_val) if kg_val > 0 else avg_price
+                lines.append(
+                    f"{input_name}: 약 ₩{price_per_kg:,}/kg "
+                    f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
+                )
+            elif g_match:
+                g_val = float(g_match.group(1))
+                price_per_kg = int(avg_price * 1000 / g_val) if g_val > 0 else avg_price
+                lines.append(
+                    f"{input_name}: 약 ₩{price_per_kg:,}/kg "
+                    f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
+                )
+            else:
+                # 개/마리/포기 등 — cost_calculator가 _PER_PIECE_GRAMS로 환산 시도하므로
+                # 단가는 그대로 표기하되 단위 정보를 같이 노출
+                lines.append(
+                    f"{input_name}: 약 ₩{avg_price:,}/{db_unit} "
+                    f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
+                )
+            found_inputs.append(input_name)
+
+        return {
+            "text": "\n".join(lines),
+            "found": found_inputs,
+            "error": None,
+            "sql": sql,
+        }
+    except Exception as e:
+        return {"text": "", "found": [], "error": f"exception: {str(e)}"}
 
 
 def _ask_genie(question: str, conversation_id: str = None) -> dict:
@@ -365,6 +485,78 @@ def price_search_node(state: dict) -> dict:
                 if result.get("dataframe") is not None:
                     all_tables.append(result["dataframe"].to_string(index=False, max_rows=15))
 
+        # ─── 실패 배치 단건 재시도 ────────────────────────────
+        # 배치 단위 호출이 MessageStatus.FAILED 등으로 통째로 실패한 경우,
+        # 그 안의 항목을 1개씩 분리하여 다시 호출. 1건 처리 시 SQL 생성 자유도가
+        # 줄어 성공률이 올라가는 효과를 기대.
+        # mode는 catalog_targets에 포함된 입력명이면 'catalog', 아니면 'passthrough'.
+        retry_recovered: list[str] = []
+        if failed_batch_items:
+            catalog_input_map = {t[0]: t for t in catalog_targets}
+
+            def _retry_single(item: str) -> tuple:
+                """단건 재시도. (item, result|None, err|None)."""
+                if item in catalog_input_map:
+                    query = _build_catalog_query([catalog_input_map[item]])
+                    item_mode = "catalog"
+                else:
+                    query = _build_passthrough_query([item])
+                    item_mode = "passthrough"
+                archive("price_search.retry_single_attempt", {
+                    "item": item,
+                    "mode": item_mode,
+                    "trace_id": trace_ids.get(item, item),
+                })
+                try:
+                    with mlflow.start_span(
+                        name=f"genie_retry_{item_mode}_[{item}]",
+                        span_type=SpanType.RETRIEVER,
+                    ) as span:
+                        span.set_inputs({"item": item, "mode": item_mode, "question": query})
+                        r = _ask_genie(query)
+                        span.set_outputs({
+                            "text": r.get("text"),
+                            "has_sql": bool(r.get("sql")),
+                            "has_dataframe": r.get("dataframe") is not None,
+                        })
+                    return (item, r, None)
+                except Exception as retry_exc:
+                    return (item, None, str(retry_exc))
+
+            with ThreadPoolExecutor(
+                max_workers=min(len(failed_batch_items), _GENIE_RETRY_MAX_WORKERS)
+            ) as ex:
+                retry_results = list(ex.map(_retry_single, failed_batch_items))
+
+            still_failed_after_retry: list[str] = []
+            for item, r, err in retry_results:
+                if err or not r:
+                    archive("price_search.retry_single_failed", {
+                        "item": item,
+                        "trace_id": trace_ids.get(item, item),
+                        "error": err or "no_result",
+                    })
+                    still_failed_after_retry.append(item)
+                    continue
+                archive("price_search.retry_single_success", {
+                    "item": item,
+                    "trace_id": trace_ids.get(item, item),
+                    "has_text": bool(r.get("text")),
+                    "has_sql": bool(r.get("sql")),
+                    "has_dataframe": r.get("dataframe") is not None,
+                    "text_preview": (r.get("text") or "")[:200],
+                })
+                retry_recovered.append(item)
+                if r.get("text"):
+                    all_texts.append(r["text"])
+                if r.get("sql"):
+                    all_sqls.append(r["sql"])
+                if r.get("dataframe") is not None:
+                    all_tables.append(r["dataframe"].to_string(index=False, max_rows=15))
+
+            # 단건 재시도로 성공한 항목은 실패 목록에서 제외 → 후속 단계에 영향 없도록
+            failed_batch_items = still_failed_after_retry
+
         price_data = {"source": "genie", "data": ingredients}
         if all_texts:
             price_data["text"] = "\n\n".join(all_texts)
@@ -402,6 +594,160 @@ def price_search_node(state: dict) -> dict:
             if item not in unavailable:
                 unavailable.append(item)
 
+        # ─── 카탈로그 재질의 ──────────────────────────────────
+        # 'matched' 상태였는데 Genie 1차에서 unavailable로 분류된 재료를 한 번 더 질의.
+        # 카탈로그에 (db_name, db_unit)이 확실히 존재하므로 Genie의 LLM 비결정성으로
+        # SQL을 잘못 생성했을 가능성이 큼. 명시적 WHERE 조건을 자연어로 강하게 유도하여
+        # 재시도하고, 성공한 항목은 unavailable에서 제거.
+        catalog_input_set = {t[0] for t in catalog_targets}
+        recoverable = [ing for ing in unavailable if ing in catalog_input_set]
+        requery_recovered: list[str] = []
+        if recoverable:
+            requery_targets: list[tuple[str, str, str]] = [
+                (ing, resolved_by_input[ing].db_name, resolved_by_input[ing].db_unit)
+                for ing in recoverable
+            ]
+            requery_query = _build_catalog_query(requery_targets)
+            archive("price_search.catalog_requery_attempt", {
+                "recoverable": recoverable,
+                "trace_ids": [trace_ids.get(ing, ing) for ing in recoverable],
+                "targets": [
+                    {"input": ing, "db_name": db_name, "db_unit": db_unit}
+                    for ing, db_name, db_unit in requery_targets
+                ],
+            })
+            try:
+                with mlflow.start_span(
+                    name=f"genie_catalog_requery_[{','.join(recoverable)[:60]}]",
+                    span_type=SpanType.RETRIEVER,
+                ) as span:
+                    span.set_inputs({"recoverable": recoverable, "question": requery_query})
+                    requery_result = _ask_genie(requery_query)
+                    span.set_outputs({
+                        "text": requery_result.get("text"),
+                        "has_sql": bool(requery_result.get("sql")),
+                        "has_dataframe": requery_result.get("dataframe") is not None,
+                    })
+
+                requery_text = requery_result.get("text") or ""
+                if requery_result.get("dataframe") is not None:
+                    requery_text += "\n" + requery_result["dataframe"].to_string(index=False, max_rows=15)
+
+                # 판정은 input_name + db_name 둘 다로 — Genie가 어느 표기로 응답해도 잡힘
+                requery_judge_targets: list[str] = []
+                for ing in recoverable:
+                    requery_judge_targets.append(ing)
+                    db_name = resolved_by_input[ing].db_name
+                    if db_name and db_name not in requery_judge_targets:
+                        requery_judge_targets.append(db_name)
+                requery_missing_set = set(_detect_unavailable(requery_judge_targets, requery_text))
+
+                found_now: list[str] = []
+                for ing in recoverable:
+                    r = resolved_by_input[ing]
+                    in_resp_by_input = ing not in requery_missing_set
+                    in_resp_by_db = bool(r.db_name and r.db_name not in requery_missing_set)
+                    if in_resp_by_input or in_resp_by_db:
+                        found_now.append(ing)
+
+                archive("price_search.catalog_requery_result", {
+                    "recoverable": recoverable,
+                    "found_now": found_now,
+                    "still_missing": [ing for ing in recoverable if ing not in found_now],
+                    "text_preview": requery_text[:300],
+                })
+
+                # 재질의로 회복된 재료는 unavailable에서 제거하고, Genie 응답 텍스트는 누적
+                if found_now:
+                    requery_recovered = list(found_now)
+                    unavailable = [ing for ing in unavailable if ing not in found_now]
+                    if requery_result.get("text"):
+                        existing_text = price_data.get("text", "")
+                        price_data["text"] = (
+                            existing_text + "\n\n[카탈로그 재질의 추가 조회]\n" + requery_result["text"]
+                        )
+                    if requery_result.get("sql"):
+                        existing_sql = price_data.get("sql", "")
+                        price_data["sql"] = (
+                            existing_sql + "\n---\n" + requery_result["sql"] if existing_sql
+                            else requery_result["sql"]
+                        )
+                    if requery_result.get("dataframe") is not None:
+                        existing_table = price_data.get("table", "")
+                        requery_table = requery_result["dataframe"].to_string(index=False, max_rows=15)
+                        price_data["table"] = (
+                            existing_table + "\n---\n" + requery_table if existing_table
+                            else requery_table
+                        )
+            except Exception as requery_exc:
+                archive("price_search.catalog_requery_error", {
+                    "error": str(requery_exc),
+                    "recoverable": recoverable,
+                })
+
+        # ─── direct_sql_fallback ──────────────────────────────
+        # matched 였는데 Genie 1차 + 카탈로그 재질의에도 회복 안 된 항목을 마지막으로 시도.
+        # statement_execution으로 (재료명, 단위) WHERE 절을 직접 작성해 평균 가격 조회.
+        # Genie의 LLM SQL 생성을 완전히 우회하므로 결정적이며, 카탈로그에 데이터가 실제로
+        # 존재한다면 거의 항상 회복 가능.
+        direct_sql_recovered: list[str] = []
+        unrecoverable_matched = [ing for ing in unavailable if ing in catalog_input_set]
+        if unrecoverable_matched:
+            direct_targets: list[tuple[str, str, str]] = [
+                (ing, resolved_by_input[ing].db_name, resolved_by_input[ing].db_unit)
+                for ing in unrecoverable_matched
+            ]
+            archive("price_search.direct_sql_attempt", {
+                "items": unrecoverable_matched,
+                "trace_ids": [trace_ids.get(ing, ing) for ing in unrecoverable_matched],
+                "targets": [
+                    {"input": ing, "db_name": db_name, "db_unit": db_unit}
+                    for ing, db_name, db_unit in direct_targets
+                ],
+            })
+            try:
+                with mlflow.start_span(
+                    name=f"direct_sql_[{','.join(unrecoverable_matched)[:60]}]",
+                    span_type=SpanType.RETRIEVER,
+                ) as span:
+                    span.set_inputs({"items": unrecoverable_matched, "targets": direct_targets})
+                    direct_result = _direct_sql_query(direct_targets)
+                    span.set_outputs({
+                        "found": direct_result.get("found"),
+                        "error": direct_result.get("error"),
+                        "text_preview": (direct_result.get("text") or "")[:200],
+                    })
+
+                direct_found = direct_result.get("found") or []
+                archive("price_search.direct_sql_result", {
+                    "items": unrecoverable_matched,
+                    "found": direct_found,
+                    "still_missing": [ing for ing in unrecoverable_matched if ing not in direct_found],
+                    "error": direct_result.get("error"),
+                    "text_preview": (direct_result.get("text") or "")[:300],
+                })
+
+                if direct_found:
+                    direct_sql_recovered = list(direct_found)
+                    unavailable = [ing for ing in unavailable if ing not in direct_found]
+                    if direct_result.get("text"):
+                        existing_text = price_data.get("text", "")
+                        price_data["text"] = (
+                            existing_text + "\n\n[KAMIS direct_sql 폴백 조회]\n"
+                            + direct_result["text"]
+                        )
+                    if direct_result.get("sql"):
+                        existing_sql = price_data.get("sql", "")
+                        price_data["sql"] = (
+                            existing_sql + "\n---\n" + direct_result["sql"] if existing_sql
+                            else direct_result["sql"]
+                        )
+            except Exception as direct_exc:
+                archive("price_search.direct_sql_error", {
+                    "error": str(direct_exc),
+                    "items": unrecoverable_matched,
+                })
+
         # skip 그룹 합류 (Genie를 거치지 않은 ambiguous/not_in_catalog)
         for item in skip_unavailable:
             if item not in unavailable:
@@ -428,6 +774,12 @@ def price_search_node(state: dict) -> dict:
             "num_batches_used": len(batches),
             "num_skipped_to_unavailable": len(skip_unavailable),
             "num_failed_batches": len(failed_batch_items),
+            "num_retry_recovered": len(retry_recovered),
+            "retry_recovered": retry_recovered,
+            "num_requery_recovered": len(requery_recovered),
+            "requery_recovered": requery_recovered,
+            "num_direct_sql_recovered": len(direct_sql_recovered),
+            "direct_sql_recovered": direct_sql_recovered,
             "has_text": bool(price_data.get("text")),
             "has_table": bool(price_data.get("table")),
             "text_preview": (price_data.get("text") or "")[:300],
