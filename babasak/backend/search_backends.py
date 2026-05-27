@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import requests
@@ -6,13 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from backend.debug_log import archive
-
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    )
-}
+from backend.catalog import resolve_ingredient
 
 _NAVER_RATE_LOCK = threading.Lock()
 _NAVER_LAST_REQUEST_AT = 0.0
@@ -123,12 +118,114 @@ def _per_kg_prices(items: list[dict]) -> list[int]:
     return out
 
 
-def _median(values: list[int]) -> int:
-    s = sorted(values)
-    n = len(s)
-    if n % 2 == 1:
-        return s[n // 2]
-    return (s[n // 2 - 1] + s[n // 2]) // 2
+# ────────────────────────────────────────────────────────────
+# LLM 정제: 네이버 raw 결과 5개 → 적합 상품 선별 + kg당 단가 산정
+# ────────────────────────────────────────────────────────────
+# 재료당 1회 호출(작고 빠름). 호출 부담을 줄이려고 lazy init + 짧은 출력.
+_refine_llm = None
+
+
+def _get_refine_llm():
+    """LLM 정제용 lazy init. 결정적 답을 위해 temperature=0."""
+    global _refine_llm
+    if _refine_llm is None:
+        from databricks_langchain import ChatDatabricks
+        _refine_llm = ChatDatabricks(
+            endpoint="databricks-gpt-5-4-mini",
+            temperature=0,
+            max_tokens=400,
+        )
+    return _refine_llm
+
+
+_REFINE_SYSTEM = """당신은 식재료 도매가 분석가입니다.
+네이버 검색 결과 중 사용자가 찾는 식재료에 정확히 일치하는 상품만 골라서 kg당 도매가를 산정합니다.
+
+[작업 절차]
+1. 각 상품 title을 보고 사용자가 찾는 재료와 같은 종류인지 판단 (예: '두부' 검색에 '두부젤리'/세제/꼬치 등은 제외).
+2. 적합한 상품들의 title에서 총 무게(g)를 추정. title에 무게 명시가 없으면 통념으로 추정 (예: 두부 1모≈300g, 양파 1개≈200g, 참치 1캔≈150g, 청양고추 1개≈7g).
+3. 각 상품의 kg당 단가 계산 = lprice × 1000 / 총 무게(g).
+4. 적합 상품들의 kg당 단가 중 **최저가**를 최종 가격으로 산정 (도매가 기준 가장 저렴한 옵션을 보여주기 위함). 단위 환산이 모호한 경우는 confidence를 낮춤.
+5. 한 상품도 적합하지 않으면 price_per_kg=null, confidence="none".
+
+[출력 형식 — 반드시 순수 JSON만, 다른 텍스트 금지]
+{
+  "ingredient": "<재료명>",
+  "price_per_kg": <정수 또는 null>,
+  "unit_hint": "<예: 1모≈300g, 1개≈200g, kg 단위 도매 등 — 환산 근거>",
+  "confidence": "high" | "medium" | "low" | "none",
+  "selected_indices": [<적합으로 판정한 상품 인덱스 0~4>],
+  "rejected_reasons": {"<인덱스>": "<제외 사유>"},
+  "note": "<한 줄 요약>"
+}
+
+[confidence 기준]
+- high: 적합 상품 3개 이상 + kg당 단가 분산 작음
+- medium: 적합 상품 1~2개 또는 단위 추정 보강 필요
+- low: 추정에 의존이 큼
+- none: 적합 상품 없음
+"""
+
+
+def _refine_with_llm(item: str, items_raw: list[dict]) -> dict:
+    """네이버 raw 5개를 LLM에 던져 dict로 정제.
+
+    실패하거나 JSON 파싱 안 되면 {"confidence": "none", ...} 반환하여
+    호출부에서 폴백 처리.
+    """
+    if not items_raw:
+        return {"ingredient": item, "price_per_kg": None, "confidence": "none",
+                "note": "no_items"}
+
+    # LLM 입력용 후보 목록 직렬화 (인덱스 + title + 가격만)
+    candidates = []
+    for i, it in enumerate(items_raw[:5]):
+        candidates.append({
+            "index": i,
+            "title": _clean_title(it.get("title", ""))[:120],
+            "lprice": int(it.get("lprice", 0)) if it.get("lprice") else 0,
+        })
+
+    user_prompt = (
+        f"사용자가 찾는 재료: {item}\n\n"
+        f"네이버 검색 결과 (상위 {len(candidates)}개):\n"
+        + "\n".join(f"  [{c['index']}] {c['title']}  (lprice={c['lprice']}원)" for c in candidates)
+        + "\n\n위 5개 중 적합한 상품만 골라서 kg당 단가를 산정하고 JSON으로만 답하세요."
+    )
+
+    try:
+        from langchain_core.messages import SystemMessage, HumanMessage
+        response = _get_refine_llm().invoke([
+            SystemMessage(content=_REFINE_SYSTEM),
+            HumanMessage(content=user_prompt),
+        ])
+        raw = (response.content or "").strip()
+        # 일부 LLM이 ```json 코드펜스 붙이는 경우 제거
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        parsed = json.loads(raw)
+        # 최소 필드 보강
+        parsed.setdefault("ingredient", item)
+        parsed.setdefault("price_per_kg", None)
+        parsed.setdefault("confidence", "none")
+        # price_per_kg 정수 캐스팅 (LLM이 가끔 문자열로 줌)
+        ppk = parsed.get("price_per_kg")
+        if isinstance(ppk, str):
+            digits = re.sub(r"[^\d]", "", ppk)
+            parsed["price_per_kg"] = int(digits) if digits else None
+        elif isinstance(ppk, float):
+            parsed["price_per_kg"] = int(ppk)
+        archive("naver_search.llm_refine", {
+            "item": item,
+            "num_candidates": len(candidates),
+            "result": parsed,
+        })
+        return parsed
+    except Exception as e:
+        archive("naver_search.llm_refine_error", {"item": item, "error": str(e)})
+        return {"ingredient": item, "price_per_kg": None,
+                "confidence": "none", "note": f"refine_error: {e}"}
 
 
 # ────────────────────────────────────────────────────────────
@@ -147,7 +244,24 @@ def duckduckgo_search(ingredients_text: str) -> str:
 # 버전 2 : 네이버 쇼핑 API  (SEARCH_BACKEND=naver)
 # ────────────────────────────────────────────────────────────
 
-def naver_search(ingredients_text: str) -> str:
+def naver_search_structured(ingredients_text: str) -> dict:
+    """네이버 검색 + 재료별 LLM 정제 → 구조화된 결과 dict.
+
+    Returns:
+      {
+        "items": {
+            "<재료명>": {
+                "price_per_kg": int|None,
+                "confidence": "high|medium|low|none",
+                "unit_hint": str|None,
+                "note": str|None,
+                "raw_titles": [str, ...]   # 디버깅용
+            },
+            ...
+        },
+        "text": "<재료1: ...\n재료2: ...>"  # 호환용 텍스트 출력
+      }
+    """
     client_id = os.getenv("NAVER_CLIENT_ID", "")
     client_secret = os.getenv("NAVER_CLIENT_SECRET", "")
     archive("naver_search.input", {
@@ -158,173 +272,236 @@ def naver_search(ingredients_text: str) -> str:
     if not client_id or not client_secret:
         msg = f"[오류] 네이버 API 키가 설정되지 않았습니다. (NAVER_CLIENT_ID={'있음' if client_id else '없음'}, NAVER_CLIENT_SECRET={'있음' if client_secret else '없음'})"
         archive("naver_search.output", {"reason": "missing_credentials", "result": msg})
-        return msg
+        return {"items": {}, "text": msg}
 
     ingredients = _parse_ingredients(ingredients_text)
     archive("naver_search.parsed", {"ingredients": ingredients})
     if not ingredients:
         msg = "검색할 재료가 없습니다."
         archive("naver_search.output", {"reason": "no_ingredients", "result": msg})
-        return msg
+        return {"items": {}, "text": msg}
 
-    def _search_one(item: str) -> str:
-        try:
+    def _call_naver_api(item: str, query: str, display: int, attempt_label: str) -> tuple[int, list[dict]]:
+        """네이버 쇼핑 API 1회 호출. (status_code, items_raw) 반환.
+
+        429 retry 내장. 호출 실패 시 빈 리스트 반환.
+        """
+        _wait_for_naver_slot()
+        r = requests.get(
+            "https://openapi.naver.com/v1/search/shop.json",
+            params={"query": query, "display": display},
+            headers={
+                "X-Naver-Client-Id": client_id,
+                "X-Naver-Client-Secret": client_secret,
+            },
+            timeout=5,
+        )
+        archive("naver_search.api_call", {
+            "item": item, "attempt": attempt_label,
+            "query": query, "display": display,
+            "status": r.status_code, "body_preview": r.text[:200],
+        })
+        for retry_idx, delay in enumerate(_NAVER_RETRY_DELAYS, start=1):
+            if r.status_code != 429:
+                break
+            archive("naver_search.rate_limited", {
+                "item": item, "attempt": attempt_label,
+                "retry": retry_idx, "retry_after_seconds": delay,
+            })
+            time.sleep(delay)
             _wait_for_naver_slot()
             r = requests.get(
                 "https://openapi.naver.com/v1/search/shop.json",
-                params={"query": f"{item} 식자재 도매", "display": 5},
+                params={"query": query, "display": display},
                 headers={
                     "X-Naver-Client-Id": client_id,
                     "X-Naver-Client-Secret": client_secret,
                 },
                 timeout=5,
             )
-            archive("naver_search.api_call", {
-                "item": item,
-                "status": r.status_code,
-                "body_preview": r.text[:300],
-            })
-            for attempt, delay in enumerate(_NAVER_RETRY_DELAYS, start=1):
-                if r.status_code != 429:
-                    break
-                archive("naver_search.rate_limited", {
-                    "item": item,
-                    "attempt": attempt,
-                    "retry_after_seconds": delay,
+        if r.status_code != 200:
+            return (r.status_code, [])
+        return (r.status_code, r.json().get("items", []))
+
+    def _filter_by_token_and_price(item: str, items_raw: list[dict], attempt_label: str) -> list[dict]:
+        """title 핵심 토큰 매칭 + 가격 범위 필터. archive에 reject 사유 기록."""
+        resolved = resolve_ingredient(item)
+        key_name = resolved.db_name or item
+        key_token = key_name.split()[0] if key_name else item
+        kept = []
+        rejected_titles = []
+        for it in items_raw:
+            try:
+                lprice = int(it.get("lprice", 0))
+            except (TypeError, ValueError):
+                lprice = 0
+            if lprice < 500 or lprice > 500_000:
+                rejected_titles.append((_clean_title(it.get("title", ""))[:60], "price_out_of_range"))
+                continue
+            title_clean = _clean_title(it.get("title", ""))
+            if key_token and key_token not in title_clean:
+                rejected_titles.append((title_clean[:60], "token_mismatch"))
+                continue
+            kept.append(it)
+        archive("naver_search.title_validation", {
+            "item": item, "attempt": attempt_label,
+            "key_token": key_token,
+            "kept": len(kept),
+            "rejected": len(items_raw) - len(kept),
+            "rejected_sample": rejected_titles[:3],
+        })
+        return kept
+
+    # ── 재시도 단계 정의 ───────────────────────────────────────
+    # 1차: "{재료} 식자재 도매" + display=5 → 업소 묶음 위주
+    # 2차: "{재료}" 단독 + display=15 → 일반 상품 포함 더 넓은 후보
+    # LLM이 1차에서 "전부 부적합" 판정하면 2차로 자동 진행.
+    _ATTEMPTS = [
+        {"label": "narrow", "query_suffix": " 식자재 도매", "display": 5},
+        {"label": "wider",  "query_suffix": "",             "display": 15},
+    ]
+
+    def _search_one(item: str) -> tuple[str, dict, str]:
+        """한 재료 처리. (item, structured_dict, text_line) 반환.
+
+        재시도 전략: _ATTEMPTS를 순서대로 돌면서 LLM이 confidence!=none 줄 때까지.
+        모든 attempt 실패하면 마지막 attempt의 kept를 가지고 정규식/절대가 폴백.
+        """
+        try:
+            last_status = None
+            last_kept: list[dict] = []
+            last_refined: dict = {}
+            last_attempt_label = None
+
+            for attempt in _ATTEMPTS:
+                label = attempt["label"]
+                query = f"{item}{attempt['query_suffix']}"
+                last_attempt_label = label
+
+                status, items_raw = _call_naver_api(item, query, attempt["display"], label)
+                last_status = status
+
+                if status == 429:
+                    archive("naver_search.rate_limit_final", {"item": item, "attempt": label})
+                    line = f"{item}: 네이버 API 한도 초과 (잠시 후 재시도 필요)"
+                    return (item, {"price_per_kg": None, "confidence": "none",
+                                   "note": f"rate_limit_attempt_{label}"}, line)
+                if status != 200:
+                    archive("naver_search.http_error", {"item": item, "attempt": label, "status": status})
+                    # 한 단계 실패해도 다음 attempt 시도
+                    continue
+
+                kept = _filter_by_token_and_price(item, items_raw, label)
+                per_kg_regex = _per_kg_prices(kept)
+                kept_titles = [_clean_title(it.get("title", ""))[:80] for it in kept]
+                prices = [int(it["lprice"]) for it in kept if it.get("lprice")]
+
+                archive("naver_search.parsed_prices", {
+                    "item": item, "attempt": label,
+                    "num_items_raw": len(items_raw),
+                    "num_items_kept": len(kept),
+                    "prices": prices,
+                    "per_kg_prices_regex": per_kg_regex,
+                    "titles": kept_titles[:3],
                 })
-                time.sleep(delay)
-                _wait_for_naver_slot()
-                r = requests.get(
-                    "https://openapi.naver.com/v1/search/shop.json",
-                    params={"query": f"{item} 식자재 도매", "display": 5},
-                    headers={
-                        "X-Naver-Client-Id": client_id,
-                        "X-Naver-Client-Secret": client_secret,
-                    },
-                    timeout=5,
-                )
-                archive("naver_search.api_call", {
-                    "item": item,
-                    "status": r.status_code,
-                    "attempt": attempt + 1,
-                    "body_preview": r.text[:300],
+
+                # title 검증 통과 0건이면 다음 attempt로
+                if not kept:
+                    last_kept = []
+                    continue
+
+                # LLM 정제
+                refined = _refine_with_llm(item, kept)
+                refined["raw_titles"] = kept_titles
+                refined["attempt"] = label
+                last_kept = kept
+                last_refined = refined
+
+                ppk = refined.get("price_per_kg")
+                conf = refined.get("confidence", "none")
+                if ppk and conf != "none":
+                    # 성공 — 즉시 반환
+                    line = (f"{item}: 약 ₩{ppk:,}/kg "
+                            f"(LLM 정제 {label}, conf={conf}"
+                            f"{', ' + refined['unit_hint'] if refined.get('unit_hint') else ''})")
+                    return (item, refined, line)
+
+                # LLM이 none 판정 — 다음 attempt로 (있으면)
+                archive("naver_search.llm_refine_none", {
+                    "item": item, "attempt": label,
+                    "next_attempt": "yes" if label != _ATTEMPTS[-1]["label"] else "no",
                 })
-            # 재시도 후에도 429면 "한도 초과"로 명시 (Medium 1)
-            if r.status_code == 429:
-                archive("naver_search.rate_limit_final", {"item": item})
-                return f"{item}: 네이버 API 한도 초과 (잠시 후 재시도 필요)"
-            if r.status_code != 200:
-                archive("naver_search.http_error", {"item": item, "status": r.status_code})
-                return f"{item}: 네이버 API 오류 (status {r.status_code})"
 
-            items_raw = r.json().get("items", [])
-            prices = [int(it["lprice"]) for it in items_raw if it.get("lprice")]
-            per_kg = _per_kg_prices(items_raw)  # 단위 환산 가능한 것만
-            archive("naver_search.parsed_prices", {
-                "item": item,
-                "num_items": len(items_raw),
-                "prices": prices,
-                "per_kg_prices": per_kg,
-                "titles": [_clean_title(it.get("title", ""))[:60] for it in items_raw[:3]],
+            # ─── 모든 attempt 실패 — 마지막 attempt의 kept로 폴백 ──────
+            if last_kept:
+                per_kg_regex = _per_kg_prices(last_kept)
+                prices = [int(it["lprice"]) for it in last_kept if it.get("lprice")]
+                refined = last_refined or {"price_per_kg": None, "confidence": "none",
+                                            "raw_titles": [_clean_title(it.get("title", ""))[:80] for it in last_kept]}
+
+                # 정규식 환산 폴백 (최저가)
+                if per_kg_regex:
+                    min_pkg = min(per_kg_regex)
+                    refined["note"] = "llm_none_regex_fallback"
+                    refined["price_per_kg"] = min_pkg
+                    refined["confidence"] = "low"
+                    line = (f"{item}: 약 ₩{min_pkg:,}/kg "
+                            f"(정규식 환산 최저가 폴백, {len(per_kg_regex)}개 상품)")
+                    return (item, refined, line)
+
+                # 절대가 최저가 폴백
+                sorted_prices = sorted(prices) if prices else []
+                if sorted_prices:
+                    min_abs = sorted_prices[0]
+                    refined.setdefault("note", "absolute_price_only")
+                    line = f"{item}: 약 ₩{min_abs:,} (상품가 최저, 단위 미상)"
+                    return (item, refined, line)
+
+            # 진짜 아무것도 못 찾음
+            archive("naver_search.all_attempts_exhausted", {
+                "item": item, "last_status": last_status, "last_attempt": last_attempt_label,
             })
-            if not prices:
-                return f"{item}: 검색 결과 없음"
+            line = f"{item}: 검색 결과 없음"
+            return (item, {"price_per_kg": None, "confidence": "none",
+                           "raw_titles": [], "note": "all_attempts_exhausted"}, line)
 
-            # ── 1순위: per-kg 환산 (단위 정보 있으면) ──
-            if per_kg:
-                median_pkg = _median(per_kg)
-                return f"{item}: 약 ₩{median_pkg:,}/kg (네이버 쇼핑 환산, {len(per_kg)}개 상품 기준)"
-
-            # ── 2순위: 단위 환산 불가 → 절대 가격 중앙값 (참고용) ──
-            sorted_prices = sorted(prices)
-            return f"{item}: 약 ₩{_median(sorted_prices):,} (네이버 쇼핑 상품가 중앙값, 단위 미상·범위 ₩{sorted_prices[0]:,}~₩{sorted_prices[-1]:,})"
         except Exception as e:
             archive("naver_search.error", {"item": item, "error": str(e)})
-            return f"{item}: 검색 실패 ({e})"
+            line = f"{item}: 검색 실패 ({e})"
+            return (item, {"price_per_kg": None, "confidence": "none",
+                           "note": f"error: {e}"}, line)
 
     max_workers = max(1, _env_int("NAVER_SEARCH_MAX_WORKERS", _NAVER_DEFAULT_MAX_WORKERS))
     with ThreadPoolExecutor(max_workers=min(len(ingredients), max_workers)) as ex:
         results = list(ex.map(_search_one, ingredients))
 
-    final = (
-        "\n".join(results)
+    items_dict: dict[str, dict] = {}
+    text_lines: list[str] = []
+    for item_name, structured, text_line in results:
+        items_dict[item_name] = structured
+        text_lines.append(text_line)
+
+    final_text = (
+        "\n".join(text_lines)
         + "\n\n※ 네이버 쇼핑 소매가 기준이며, KAMIS DB에 없는 재료에 한해 참고용으로 제공됩니다."
     )
-    archive("naver_search.output", {"result_preview": final[:500]})
-    return final
+    archive("naver_search.output", {
+        "result_preview": final_text[:500],
+        "num_items": len(items_dict),
+        "by_confidence": {
+            c: [name for name, d in items_dict.items() if d.get("confidence") == c]
+            for c in ("high", "medium", "low", "none")
+        },
+    })
+    return {"items": items_dict, "text": final_text}
 
 
-# ────────────────────────────────────────────────────────────
-# 버전 3 : CJ프레시웨이 + 에이스식자재몰 크롤링  (SEARCH_BACKEND=crawl)
-# ────────────────────────────────────────────────────────────
+def naver_search(ingredients_text: str) -> str:
+    """호환용 래퍼: 기존 호출처가 문자열을 기대하므로 text만 반환.
 
-def _extract_min_price(text: str) -> int | None:
-    matches = re.findall(r'[\d,]+', text)
-    values = []
-    for m in matches:
-        val = int(m.replace(",", ""))
-        if 500 <= val <= 500_000:
-            values.append(val)
-    return min(values) if values else None
-
-
-def _crawl_cj(item: str) -> str | None:
-    try:
-        from bs4 import BeautifulSoup
-        r = requests.get(
-            "https://www.cjfls.co.kr/search",
-            params={"searchKeyword": item},
-            headers=_HEADERS,
-            timeout=7,
-        )
-        soup = BeautifulSoup(r.text, "html.parser")
-        for img in soup.find_all("img", src=lambda s: s and "price" in s.lower()):
-            price = _extract_min_price(img.parent.get_text(" ", strip=True))
-            if price:
-                return f"₩{price:,} (CJ프레시웨이)"
-    except Exception:
-        pass
-    return None
-
-
-def _crawl_ace(item: str) -> str | None:
-    try:
-        from bs4 import BeautifulSoup
-        r = requests.get(
-            "https://www.acemall.asia/goods/goods_search.php",
-            params={"keyword": item},
-            headers=_HEADERS,
-            timeout=7,
-        )
-        soup = BeautifulSoup(r.text, "html.parser")
-        # <strong> 태그에 가격이 있음
-        for tag in soup.find_all("strong"):
-            text = tag.get_text(strip=True).replace(",", "")
-            if text.isdigit():
-                val = int(text)
-                if 500 <= val <= 500_000:
-                    return f"₩{val:,} (에이스식자재몰)"
-    except Exception:
-        pass
-    return None
-
-
-def crawl_search(ingredients_text: str) -> str:
-    ingredients = _parse_ingredients(ingredients_text)
-    if not ingredients:
-        return "검색할 재료가 없습니다."
-
-    def _crawl_one(item: str) -> str:
-        price = _crawl_cj(item) or _crawl_ace(item)
-        return f"{item}: {price}" if price else f"{item}: 검색 결과 없음"
-
-    with ThreadPoolExecutor(max_workers=min(len(ingredients), 5)) as ex:
-        results = list(ex.map(_crawl_one, ingredients))
-
-    return (
-        "\n".join(results)
-        + "\n\n※ 위 가격은 식자재몰 기준이며, KAMIS DB에 없는 재료에 한해 참고용으로 제공됩니다."
-    )
+    구조화된 dict가 필요하면 naver_search_structured()를 직접 호출.
+    """
+    return naver_search_structured(ingredients_text)["text"]
 
 
 # ────────────────────────────────────────────────────────────
@@ -332,9 +509,7 @@ def crawl_search(ingredients_text: str) -> str:
 # ────────────────────────────────────────────────────────────
 
 def search(ingredients_text: str) -> str:
-    backend = os.getenv("SEARCH_BACKEND", "duckduckgo")
+    backend = os.getenv("SEARCH_BACKEND", "naver")
     if backend == "naver":
         return naver_search(ingredients_text)
-    if backend == "crawl":
-        return crawl_search(ingredients_text)
-    return duckduckgo_search(ingredients_text)  # 기본값 (롤백용)
+    return duckduckgo_search(ingredients_text)  # 롤백용

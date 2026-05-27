@@ -1,3 +1,15 @@
+"""
+Genie Space로 KAMIS 도매가를 조회하는 노드.
+
+흐름:
+  1. 입력 재료 목록을 catalog.resolve_many()로 정규화하여 3그룹으로 분리
+       - matched     : (db_name, db_unit)로 정확명 쿼리 ─ 1차에서 명시 쿼리로 던짐
+       - passthrough : alias 미등록('unmapped') ─ 원본 이름 그대로 자유 쿼리
+       - skip        : 카탈로그에 없는 게 명백('ambiguous', 'not_in_catalog')
+                       Genie를 거치지 않고 곧장 unavailable로 분류
+  2. matched/passthrough만 배치로 묶어 Genie에 병렬 호출
+  3. Genie unavailable 판정 + 실패 배치를 합쳐 missing_price_search로 넘김
+"""
 import os
 import re
 import pandas as pd
@@ -7,6 +19,7 @@ from mlflow.entities import SpanType
 from databricks.sdk import WorkspaceClient
 
 from backend.debug_log import archive
+from backend.catalog import resolve_many, ResolveResult
 
 GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID", "01f148e5845f1f68843892ceb53abd32")
 
@@ -28,41 +41,6 @@ _NEGATION_PATTERNS = [
 
 # 가격 표기 패턴 — "1,200원", "₩1,200", "1.2kg당 3,000원" 등
 _PRICE_PATTERN = re.compile(r"(?:₩|\d[\d,]{2,}\s*원)|(?:\d+\s*(?:kg|g|ml|L|개)\s*당?\s*\d[\d,]+)")
-
-# 재료명 단순화: 수식어·부위명 제거 패턴
-_SIMPLIFY_PREFIX_RE = re.compile(r"^(국내산|수입산|냉동|신선|유기농|무농약|깐|손질|데친|절인|생)\s+")
-
-# 연결된 재료명에서 추출할 알려진 prefix (Neo4j 데이터 품질 문제 대응)
-_KNOWN_PREFIXES = [
-    "돼지고기", "소고기", "닭고기", "오리고기", "한우",
-    "양파", "대파", "쪽파", "당근", "감자", "고구마", "양배추", "배추", "무",
-    "마늘", "생강", "고추", "청양고추", "버섯", "두부",
-    "김치", "신김치", "깍두기", "젓갈",
-    "간장", "된장", "고추장", "설탕", "소금", "후추",
-    "참기름", "들기름", "식용유", "올리고당", "물엿", "매실원액",
-    "통깨", "깨소금", "소주", "맛술",
-]
-
-
-def _simplify_ingredient(name: str) -> str | None:
-    """구체적 부위·수식어 제거 후 단순화된 재료명 반환. 이미 단순하면 None.
-
-    예: "돼지고기 앞다리살" → "돼지고기"
-        "돼지고기목살앞다리살" → "돼지고기" (연결된 이름)
-        "국내산 한우" → "한우"
-        "대파" → None (단순화 불필요)
-    """
-    cleaned = _SIMPLIFY_PREFIX_RE.sub("", name.strip())
-    parts = cleaned.split()
-    if len(parts) > 1:
-        return parts[0]
-    if cleaned != name.strip():
-        return cleaned
-    # 공백 없이 연결된 이름: 알려진 prefix가 있으면 추출
-    for prefix in _KNOWN_PREFIXES:
-        if name.startswith(prefix) and len(name) > len(prefix):
-            return prefix
-    return None
 
 
 def _ask_genie(question: str, conversation_id: str = None) -> dict:
@@ -170,10 +148,45 @@ def _detect_unavailable(ingredients: list, genie_text: str) -> list:
     return unavailable
 
 
+def _build_catalog_query(targets: list[tuple[str, str, str]]) -> str:
+    """(input_name, db_name, db_unit) 튜플 목록으로 정확명 쿼리 생성.
+
+    Genie가 LIKE 검색이나 다른 단위 대체 없이 정확히 명시된 (재료명, 단위)로만
+    WHERE 절을 만들도록 유도한다.
+    """
+    lines = []
+    for input_name, db_name, db_unit in targets:
+        lines.append(f"- 재료명='{db_name}', 단위='{db_unit}'  (사용자 입력: '{input_name}')")
+    return (
+        "아래는 silver.ingredient.ingredient 테이블에 확실히 존재하는 (재료명, 단위) 조합입니다. "
+        "각 항목에 대해 정확히 그 재료명/단위로 WHERE 절을 작성하여 최근 도매가를 조회해줘. "
+        "다른 단위로 대체하거나 LIKE 검색하지 말고 명시된 조건만 사용해줘. "
+        "응답은 반드시 다음 형식을 포함해줘:\n"
+        "  '조회된 재료는 X, Y, Z입니다.'\n"
+        "  '나머지 재료(A, B, C)는 DB에 데이터가 없어 없음으로 분류됩니다.'\n"
+        "그 다음 각 재료별 가격을 자세히 알려줘.\n"
+        + "\n".join(lines)
+    )
+
+
+def _build_passthrough_query(batch_items: list[str]) -> str:
+    """alias 미등록 재료를 위한 자유 텍스트 쿼리 (기존 방식)."""
+    return (
+        "다음 재료들에 대해서만 최근 도매가를 조회해줘. "
+        "반드시 실제 DB에 있는 데이터만 보고해줘. DB에 없는 재료는 '없음'으로 표시해줘. 추정값 사용 금지. "
+        "응답은 반드시 다음 형식을 포함해줘:\n"
+        "  '조회된 재료는 X, Y, Z입니다.'\n"
+        "  '나머지 재료(A, B, C)는 DB에 데이터가 없어 없음으로 분류됩니다.'\n"
+        "그 다음 각 재료별 가격을 자세히 알려줘. "
+        f"재료 목록: {', '.join(batch_items)}"
+    )
+
+
 def price_search_node(state: dict) -> dict:
     """Genie Space로 도매가 조회. 조회 후 누락 재료를 unavailable 필드로 반환."""
     entities = state.get("entities", {})
     recipe_info = state.get("recipe_info", {})
+    loop_count = state.get("loop_count", 0)
 
     ingredients = []
     if recipe_info and recipe_info.get("data"):
@@ -213,84 +226,144 @@ def price_search_node(state: dict) -> dict:
         return {"price_info": {"source": "genie", "data": [], "note": "조회할 재료 없음"}}
 
     ingredients = list(dict.fromkeys(ingredients))
+
+    # 재료별 trace_id — 모든 archive에 동일 형식으로 박아 grep 추적용.
+    # missing_price_search 노드도 같은 형식을 사용한다.
+    trace_ids = {ing: f"{loop_count}:{ing}" for ing in ingredients}
+
+    # ─── 카탈로그 기반 그룹 분리 ────────────────────────────────
+    # resolve_many()는 각 재료를 4가지 status로 분류한다:
+    #   matched         → 정확명 쿼리 그룹 (catalog_targets)
+    #   unmapped        → alias 미등록, 자유 쿼리로 시도 (passthrough)
+    #   ambiguous       → 자동 매칭 금지, Genie 건너뛰고 곧장 unavailable (skip)
+    #   not_in_catalog  → alias 매핑은 있는데 카탈로그엔 없음 (skip)
+    resolved: list[ResolveResult] = resolve_many(ingredients)
+    resolved_by_input: dict[str, ResolveResult] = {r.input_name: r for r in resolved}
+
+    catalog_targets: list[tuple[str, str, str]] = []  # (input, db_name, db_unit)
+    passthrough: list[str] = []
+    skip_unavailable: list[str] = []
+    for r in resolved:
+        if r.status == "matched" and r.db_name and r.db_unit:
+            catalog_targets.append((r.input_name, r.db_name, r.db_unit))
+        elif r.status == "unmapped":
+            passthrough.append(r.input_name)
+        else:
+            # ambiguous / not_in_catalog → Genie를 거치지 않고 곧장 unavailable로
+            skip_unavailable.append(r.input_name)
+
     archive("price_search.input", {
         "ingredients": ingredients,
         "num_ingredients": len(ingredients),
         "batch_size": _GENIE_BATCH_SIZE,
+        "trace_ids": trace_ids,
+        "groups": {
+            "catalog_targets": [t[0] for t in catalog_targets],
+            "passthrough": passthrough,
+            "skip_unavailable": skip_unavailable,
+        },
+        "resolved": [
+            {"input": r.input_name, "status": r.status,
+             "db_name": r.db_name, "db_unit": r.db_unit, "reason": r.reason}
+            for r in resolved
+        ],
     })
 
     try:
-        # ── 배치 처리: 재료를 _GENIE_BATCH_SIZE개씩 나눠 Genie 호출 (병렬) ──
-        all_texts = []
-        all_sqls = []
-        all_tables = []
-        failed_batch_items: list[str] = []  # 배치 실패 시 해당 재료들을 unavailable로 보냄
-        batches = [ingredients[i:i + _GENIE_BATCH_SIZE] for i in range(0, len(ingredients), _GENIE_BATCH_SIZE)]
+        # ─── 배치 계획 ───────────────────────────────────────
+        # 정확명 그룹과 자유 그룹은 쿼리 형식이 달라 별도 배치로 분리.
+        # 그룹 내에서만 _GENIE_BATCH_SIZE 단위로 묶는다.
+        # batches는 (mode, items) 형태로 통일. mode는 "catalog" | "passthrough".
+        batches: list[tuple[str, list]] = []
+        for i in range(0, len(catalog_targets), _GENIE_BATCH_SIZE):
+            batches.append(("catalog", catalog_targets[i:i + _GENIE_BATCH_SIZE]))
+        for i in range(0, len(passthrough), _GENIE_BATCH_SIZE):
+            batches.append(("passthrough", passthrough[i:i + _GENIE_BATCH_SIZE]))
+
         archive("price_search.batch_plan", {
             "num_batches": len(batches),
-            "batch_sizes": [len(b) for b in batches],
+            "num_skip": len(skip_unavailable),
             "max_workers": _GENIE_MAX_WORKERS,
+            "plan": [
+                {"mode": mode, "size": len(items),
+                 "items": [it[0] if mode == "catalog" else it for it in items]}
+                for mode, items in batches
+            ],
         })
 
-        def _build_query(batch_items: list[str]) -> str:
-            return (
-                "다음 재료들에 대해서만 최근 도매가를 조회해줘. "
-                "반드시 실제 DB에 있는 데이터만 보고해줘. DB에 없는 재료는 '없음'으로 표시해줘. 추정값 사용 금지. "
-                "응답은 반드시 다음 형식을 포함해줘:\n"
-                "  '조회된 재료는 X, Y, Z입니다.'\n"
-                "  '나머지 재료(A, B, C)는 DB에 데이터가 없어 없음으로 분류됩니다.'\n"
-                "그 다음 각 재료별 가격을 자세히 알려줘. "
-                f"재료 목록: {', '.join(batch_items)}"
-            )
-
         def _process_batch(idx_batch: tuple) -> tuple:
-            """배치 1개를 Genie에 질의. (idx, result_dict, batch, err_str|None) 반환."""
-            idx, batch = idx_batch
-            query = _build_query(batch)
-            archive("price_search.genie_query", {"batch_index": idx, "batch_items": batch, "query": query})
+            """배치 1개를 Genie에 질의. (idx, mode, result|None, batch, err|None)."""
+            idx, (mode, items) = idx_batch
+            if mode == "catalog":
+                query = _build_catalog_query(items)
+                input_names = [t[0] for t in items]
+            else:
+                query = _build_passthrough_query(items)
+                input_names = items
+            archive("price_search.genie_query", {
+                "batch_index": idx,
+                "mode": mode,
+                "batch_items": input_names,
+                "trace_ids": [trace_ids.get(n, n) for n in input_names],
+                "query": query,
+            })
             try:
-                with mlflow.start_span(name=f"genie_batch_{idx}_[{','.join(batch)[:60]}]", span_type=SpanType.RETRIEVER) as span:
-                    span.set_inputs({"batch_index": idx, "batch_items": batch, "question": query})
+                with mlflow.start_span(
+                    name=f"genie_batch_{idx}_{mode}_[{','.join(input_names)[:60]}]",
+                    span_type=SpanType.RETRIEVER,
+                ) as span:
+                    span.set_inputs({"batch_index": idx, "mode": mode,
+                                      "batch_items": input_names, "question": query})
                     result = _ask_genie(query)
                     span.set_outputs({
                         "text": result.get("text"),
                         "has_sql": bool(result.get("sql")),
                         "has_dataframe": result.get("dataframe") is not None,
                     })
-                return (idx, result, batch, None)
+                return (idx, mode, result, input_names, None)
             except Exception as batch_exc:
-                return (idx, None, batch, str(batch_exc))
+                return (idx, mode, None, input_names, str(batch_exc))
 
         # ── 병렬 호출 ──
-        with ThreadPoolExecutor(max_workers=min(len(batches), _GENIE_MAX_WORKERS)) as ex:
-            batch_results = list(ex.map(_process_batch, enumerate(batches)))
+        all_texts: list[str] = []
+        all_sqls: list[str] = []
+        all_tables: list[str] = []
+        failed_batch_items: list[str] = []
 
-        # idx 순으로 정렬 후 응답 처리 (출력 순서 보존)
-        batch_results.sort(key=lambda r: r[0])
-        for idx, result, batch, err in batch_results:
-            if err:
-                archive("price_search.batch_failed", {
+        if batches:
+            with ThreadPoolExecutor(max_workers=min(len(batches), _GENIE_MAX_WORKERS)) as ex:
+                batch_results = list(ex.map(_process_batch, enumerate(batches)))
+            batch_results.sort(key=lambda r: r[0])
+
+            for idx, mode, result, batch_items, err in batch_results:
+                if err:
+                    archive("price_search.batch_failed", {
+                        "batch_index": idx,
+                        "mode": mode,
+                        "batch_items": batch_items,
+                        "trace_ids": [trace_ids.get(n, n) for n in batch_items],
+                        "error": err,
+                    })
+                    failed_batch_items.extend(batch_items)
+                    continue
+
+                archive("price_search.genie_response", {
                     "batch_index": idx,
-                    "batch_items": batch,
-                    "error": err,
+                    "mode": mode,
+                    "batch_items": batch_items,
+                    "trace_ids": [trace_ids.get(n, n) for n in batch_items],
+                    "has_text": bool(result.get("text")),
+                    "has_sql": bool(result.get("sql")),
+                    "has_dataframe": result.get("dataframe") is not None,
+                    "text_preview": (result.get("text") or "")[:300],
                 })
-                failed_batch_items.extend(batch)
-                continue
 
-            archive("price_search.genie_response", {
-                "batch_index": idx,
-                "has_text": bool(result.get("text")),
-                "has_sql": bool(result.get("sql")),
-                "has_dataframe": result.get("dataframe") is not None,
-                "text_preview": (result.get("text") or "")[:300],
-            })
-
-            if result.get("text"):
-                all_texts.append(result["text"])
-            if result.get("sql"):
-                all_sqls.append(result["sql"])
-            if result.get("dataframe") is not None:
-                all_tables.append(result["dataframe"].to_string(index=False, max_rows=15))
+                if result.get("text"):
+                    all_texts.append(result["text"])
+                if result.get("sql"):
+                    all_sqls.append(result["sql"])
+                if result.get("dataframe") is not None:
+                    all_tables.append(result["dataframe"].to_string(index=False, max_rows=15))
 
         price_data = {"source": "genie", "data": ingredients}
         if all_texts:
@@ -300,75 +373,69 @@ def price_search_node(state: dict) -> dict:
         if all_tables:
             price_data["table"] = "\n---\n".join(all_tables)
 
-        # [핵심] 누락 재료 감지 — 모든 배치 응답을 합쳐서 판정
+        # ─── unavailable 판정 ─────────────────────────────────
+        # 1) skip 그룹은 처음부터 unavailable
+        # 2) Genie를 거친 재료 중 응답에 없는 것도 unavailable
+        # 3) 배치 실패분도 unavailable
+        # 판정은 input_name + db_name 둘 다로 — Genie가 어느 표기로 응답해도 잡힘.
+        queried_input_names = [t[0] for t in catalog_targets] + passthrough
+        judge_targets: list[str] = []
+        for name in queried_input_names:
+            judge_targets.append(name)
+            r = resolved_by_input.get(name)
+            if r and r.db_name and r.db_name not in judge_targets:
+                judge_targets.append(r.db_name)
+
         genie_response_text = (price_data.get("text") or "") + "\n" + (price_data.get("table") or "")
-        unavailable = _detect_unavailable(ingredients, genie_response_text)
+        missing_set = set(_detect_unavailable(judge_targets, genie_response_text))
 
-        # 실패한 배치의 재료는 무조건 unavailable로 (Naver 폴백 대상)
-        if failed_batch_items:
-            for item in failed_batch_items:
-                if item not in unavailable:
-                    unavailable.append(item)
-            archive("price_search.failed_batches_to_unavailable", {
-                "failed_items": failed_batch_items,
-                "total_unavailable": len(unavailable),
-            })
+        unavailable: list[str] = []
+        for name in queried_input_names:
+            r = resolved_by_input.get(name)
+            in_response_by_input = name not in missing_set
+            in_response_by_db = bool(r and r.db_name and r.db_name not in missing_set)
+            if not (in_response_by_input or in_response_by_db):
+                unavailable.append(name)
 
-        # ── 부분 매칭 재시도: "돼지고기 앞다리살" → "돼지고기" 등으로 단순화 후 재검색 ──
-        if unavailable:
-            simplify_pairs = [(ing, _simplify_ingredient(ing)) for ing in unavailable]
-            retry_candidates = [(orig, simp) for orig, simp in simplify_pairs if simp]
-            if retry_candidates:
-                simplified_names = list(dict.fromkeys(simp for _, simp in retry_candidates))
-                retry_query = (
-                    "다음 재료들에 대해 최근 도매가를 조회해줘. "
-                    "정확한 품목이 없으면 가장 유사한 품목으로 대체 조회해줘. "
-                    "추정값 사용 금지 — DB에 없으면 '없음'으로 표시. "
-                    f"재료 목록: {', '.join(simplified_names)}"
-                )
-                archive("price_search.partial_match_attempt", {
-                    "pairs": [(o, s) for o, s in retry_candidates],
-                    "simplified_query": simplified_names,
-                })
-                try:
-                    with mlflow.start_span(name=f"genie_partial_match_[{','.join(simplified_names)[:60]}]", span_type=SpanType.RETRIEVER) as span:
-                        span.set_inputs({"simplified_query": simplified_names, "question": retry_query})
-                        retry_result = _ask_genie(retry_query)
-                        span.set_outputs({"text": retry_result.get("text")})
-                    retry_text = retry_result.get("text") or ""
-                    if retry_result.get("dataframe") is not None:
-                        retry_text += "\n" + retry_result["dataframe"].to_string(index=False, max_rows=10)
-                    still_missing = _detect_unavailable(simplified_names, retry_text)
-                    found_simplified = set(simplified_names) - set(still_missing)
-                    archive("price_search.partial_match_result", {
-                        "simplified_queried": simplified_names,
-                        "found": list(found_simplified),
-                        "still_missing": still_missing,
-                        "text_preview": retry_text[:300],
-                    })
-                    if found_simplified and retry_result.get("text"):
-                        existing = price_data.get("text", "")
-                        price_data["text"] = existing + f"\n\n[부분 매칭 추가 조회]\n{retry_result['text']}"
-                    new_unavailable = []
-                    for orig, simp in simplify_pairs:
-                        if simp and simp in found_simplified:
-                            pass  # 부분 매칭으로 찾음
-                        else:
-                            new_unavailable.append(orig)
-                    unavailable = new_unavailable
-                except Exception as retry_exc:
-                    archive("price_search.partial_match_error", {"error": str(retry_exc)})
+        # 실패 배치는 무조건 unavailable
+        for item in failed_batch_items:
+            if item not in unavailable:
+                unavailable.append(item)
+
+        # skip 그룹 합류 (Genie를 거치지 않은 ambiguous/not_in_catalog)
+        for item in skip_unavailable:
+            if item not in unavailable:
+                unavailable.append(item)
 
         if unavailable:
             price_data["unavailable"] = unavailable
+            # missing_price_search 검증에 활용할 resolve 정보 첨부
+            price_data["unavailable_resolved"] = {
+                ing: {
+                    "status": resolved_by_input[ing].status,
+                    "db_name": resolved_by_input[ing].db_name,
+                    "db_unit": resolved_by_input[ing].db_unit,
+                }
+                for ing in unavailable if ing in resolved_by_input
+            }
+
+        # missing_price_search가 같은 trace_id를 재사용하도록 전달
+        price_data["trace_ids"] = trace_ids
 
         archive("price_search.output", {
             "requested": ingredients,
             "unavailable": unavailable,
             "num_batches_used": len(batches),
+            "num_skipped_to_unavailable": len(skip_unavailable),
+            "num_failed_batches": len(failed_batch_items),
             "has_text": bool(price_data.get("text")),
             "has_table": bool(price_data.get("table")),
             "text_preview": (price_data.get("text") or "")[:300],
+            "unavailable_by_status": {
+                status: [ing for ing in unavailable
+                         if ing in resolved_by_input and resolved_by_input[ing].status == status]
+                for status in ("matched", "ambiguous", "not_in_catalog", "unmapped")
+            },
         })
         return {"price_info": price_data}
 

@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────
+# 재료명 alias 테이블
+# 사용자/레시피 표기 → silver.ingredient.ingredient의 표준 (재료명, 단위)
+#
+# 형식:
+#   <입력명>: {db_name: <DB 재료명>, db_unit: <DB 단위>}   # 매칭 사용
+#   <입력명>: null                                          # ambiguous (자동 매칭 금지)
+#
+# 운영 원칙:
+# - 첫 시드(a)는 databricks_db.py의 대시보드 SQL에 명시된 6쌍만으로 시작.
+#   이들은 KAMIS DB에 확실히 존재함이 검증된 (재료명, 단위) 조합.
+# - archive 로그에서 unmatched_ingredients 자주 나오는 것부터 PR로 추가.
+# - 추측 금지: db_name/db_unit은 반드시 DB distinct 결과를 보고 작성할 것.
+# ─────────────────────────────────────────────────────────────────────
+
+aliases:
+  # ── 카탈로그 ground truth (databricks_db.py 검증분) ──
+  계란:        {db_name: 계란,   db_unit: 30개}
+  달걀:        {db_name: 계란,   db_unit: 30개}
+  깐마늘:      {db_name: 깐마늘, db_unit: 20kg}
+  마늘:        {db_name: 깐마늘, db_unit: 20kg}
+  다진마늘:    {db_name: 깐마늘, db_unit: 20kg}
+  당근:        {db_name: 당근,   db_unit: 10kg}
+  대파:        {db_name: 대파,   db_unit: 1kg}
+  파:          {db_name: 대파,   db_unit: 1kg}
+  양파:        {db_name: 양파,   db_unit: 15kg}
+  풋고추:      {db_name: 풋고추, db_unit: 4kg}
+
+  # ── 명시적 ambiguous (단독으론 자동 매칭 금지) ──
+  # 사용자가 "고추"라고만 적으면 풋고추/청양/홍고추 등 어느 쪽인지 모름.
+  # alias에 null로 박아두면 Genie는 원본 이름으로 시도하되, 부분 매칭으로
+  # 깐마늘/풋고추 같은 엉뚱한 데로 자동 흡수되지 않음.
+  고추:        null
+  돼지고기:    null
+  소고기:      null
+  닭고기:      null

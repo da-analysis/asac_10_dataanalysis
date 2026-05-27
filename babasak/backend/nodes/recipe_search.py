@@ -1,16 +1,20 @@
 """
 Neo4j 레시피 검색 노드.
-기존 agent.py의 neo4j_graph_query 로직을 포팅하여
-db.py의 8개 함수를 모두 활용.
+db.py의 그래프 함수를 활용해 LangGraph state에 recipe_info를 채움.
 
 지원 시나리오:
-  1. 메뉴 키워드 검색 + 재료 상세
-  2. 단일 재료 기반 레시피 역추적
-  3. 다중 재료 AND 검색
-  4. 재료 제외 검색 (알레르기 대응)
-  5. 조건 기반 추천 (난이도, 인분, 종류, 조리법)
-  6. 인기 레시피 폴백
-  7. 대체재 제안 (특정 재료가 들어간 레시피 → 해당 재료 제외 레시피)
+  1. 인기 레시피 폴백
+  2. 조건 기반 추천 (난이도, 인분, 종류, 조리법)
+  3. 재료 제외 검색 (알레르기 대응)
+  4. 대체재 제안 (시나리오 4 — "두부 대신 쓸 거" 유사레시피 기반, 기존)
+  5. 다중 재료 AND 검색
+  6. 단일 재료 기반 검색
+  7. 메뉴 키워드 검색 + 재료 상세 + 조리단계
+     ↳ 없는 메뉴면 build_graph_relation_context로 그래프 조합 컨텍스트 생성
+  8. 유사 레시피 추천 (재료 공유도 기반) — is_similar 또는 reference_menu
+  9. 1:1 대체재 추천 (RAG 그래프) — substitute_for 들어왔을 때
+     ↳ 같은 lv1 카테고리 + 해당 메뉴에 자주 등장하는 재료 후보 5개 반환
+     ↳ cost_calculator가 이 후보를 가격사전과 매칭해 원가 낮은 거 선택 가능
 """
 from backend.db import (
     search_recipes,
@@ -21,6 +25,10 @@ from backend.db import (
     get_recipes_excluding_ingredient,
     recommend_recipes,
     get_popular_recipes,
+    # 신규: 그래프 RAG 강화
+    build_graph_relation_context,   # DB 없는 메뉴 → 그래프 조합 컨텍스트
+    find_similar_recipes,           # 재료 공유도 기반 유사 레시피
+    suggest_substitute_ingredient,  # 같은 카테고리 + 메뉴 빈도 기반 대체재
 )
 from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -130,6 +138,12 @@ def recipe_search_node(state: dict) -> dict:
     is_alternative = entities.get("is_alternative", False)
     conditions = entities.get("conditions")  # dict or None
     is_popular = entities.get("is_popular", False)
+    # 신규(시나리오 8): "비슷한/유사한" 의도 + 기준 메뉴
+    is_similar = entities.get("is_similar", False)
+    reference_menu = entities.get("reference_menu") or menu
+    # 신규(시나리오 9): "X 대신 Y" 1:1 대체재 추천 의도
+    # preprocessor가 잡거나, cost_calculator가 원가 비싼 재료 발견 후 호출 가능
+    substitute_for = entities.get("substitute_for")  # 대체할 재료 이름 (예: "돼지고기")
 
     # ingredient 정규화: str → list
     if isinstance(ingredient, str):
@@ -160,6 +174,51 @@ def recipe_search_node(state: dict) -> dict:
     recipe_data = []
 
     try:
+        # === 시나리오 9: 대체재 1:1 추천 (RAG 그래프 기반) ===
+        # "김치찌개에 돼지고기 대신 뭐 써?"
+        # cost_calculator가 원가 비싼 재료 찾고 이 노드 재호출할 때도 사용 가능
+        # → 같은 lv1 카테고리 + 해당 메뉴에 자주 나오는 재료 5개 반환
+        if substitute_for and (menu or reference_menu):
+            target_menu = menu or reference_menu
+            substitutes = suggest_substitute_ingredient(
+                target_menu, substitute_for, limit=5
+            )
+            return {"recipe_info": {
+                "data": substitutes,
+                "search_type": "substitute",
+                "menu": target_menu,
+                "missing_ingredient": substitute_for,
+                "note": (
+                    f"'{target_menu}'에서 '{substitute_for}' 대체 후보. "
+                    "cost_calculator가 가격사전과 매칭해 원가 낮은 거 선택 가능."
+                ),
+            }}
+
+        # === 시나리오 8: 유사 레시피 추천 (재료 공유도) ===
+        # "김치찌개랑 비슷한 거", "이거랑 유사한 레시피"
+        # 기준 메뉴 1개로 base recipe 잡고 → find_similar_recipes
+        if is_similar and reference_menu:
+            base_recipes = search_recipes(reference_menu, limit=1)
+            if base_recipes:
+                base = base_recipes[0]
+                similar = find_similar_recipes(base["id"], limit=5, min_shared=2)
+                for recipe in similar:
+                    ings = get_recipe_ingredients(recipe["id"])
+                    recipe_data.append({
+                        "menu": recipe["name"],
+                        "id": recipe["id"],
+                        "servings": recipe.get("servings"),
+                        "difficulty": recipe.get("difficulty"),
+                        "shared_ingredient_count": recipe.get("shared"),
+                        "ingredients": ings,
+                    })
+                return {"recipe_info": {
+                    "data": recipe_data,
+                    "search_type": "similar",
+                    "reference_menu": base["name"],
+                    "reference_id": base["id"],
+                }}
+
         # === 시나리오 1: 인기 레시피 ===
         if is_popular and not menu and not ingredients:
             recipes = get_popular_recipes(limit=5)
@@ -273,9 +332,20 @@ def recipe_search_node(state: dict) -> dict:
                 })
             return {"recipe_info": {"data": recipe_data, "search_type": "by_ingredient"}}
 
-        # === 시나리오 7: 메뉴 키워드 검색 + 재료 상세 (기본) ===
+        # === 시나리오 7: 메뉴 키워드 검색 + 재료 상세 + 조리단계 (기본) ===
         if menu:
             recipes = search_recipes(menu, limit=10)
+
+            # 빈 결과 → 없는 메뉴(예: "마라김치찌개")
+            # → build_graph_relation_context로 base + modifier 조합 컨텍스트 생성
+            if not recipes:
+                graph_rows = build_graph_relation_context(menu, limit=3)
+                if graph_rows:
+                    return {"recipe_info": {
+                        "data": graph_rows,
+                        "search_type": "graph_relation",
+                        "note": f"'{menu}' 정확 매칭 없음, 그래프 관계로 조합 근거 제공",
+                    }}
 
             if conditions:
                 filtered = []
@@ -301,6 +371,8 @@ def recipe_search_node(state: dict) -> dict:
                     "cooking_time": recipe.get("cooking_time"),
                     "cooking_method": detail.get("cooking_method") if detail else None,
                     "description": detail.get("description") if detail else None,
+                    # 신규: 조리단계 (report_generator가 답변에 포함하도록)
+                    "steps": detail.get("steps") if detail else None,
                     "ingredients": ings,
                 })
             return {"recipe_info": {"data": recipe_data, "search_type": "keyword"}}
