@@ -1,36 +1,186 @@
 # ─────────────────────────────────────────────────────────────────────
-# 재료명 alias 테이블
-# 사용자/레시피 표기 → silver.ingredient.ingredient의 표준 (재료명, 단위)
-#
-# 형식:
-#   <입력명>: {db_name: <DB 재료명>, db_unit: <DB 단위>}   # 매칭 사용
-#   <입력명>: null                                          # ambiguous (자동 매칭 금지)
-#
-# 운영 원칙:
-# - 첫 시드(a)는 databricks_db.py의 대시보드 SQL에 명시된 6쌍만으로 시작.
-#   이들은 KAMIS DB에 확실히 존재함이 검증된 (재료명, 단위) 조합.
-# - archive 로그에서 unmatched_ingredients 자주 나오는 것부터 PR로 추가.
-# - 추측 금지: db_name/db_unit은 반드시 DB distinct 결과를 보고 작성할 것.
+# 재료명 alias 테이블 (DB 카탈로그 + 세부속성 기반 자동 생성)
+# 형식: <입력명>: {db_name: <DB재료명>, db_unit: '<단위>'}
+#        <입력명>: null  → ambiguous (자동 매칭 금지)
 # ─────────────────────────────────────────────────────────────────────
 
 aliases:
-  # ── 카탈로그 ground truth (databricks_db.py 검증분) ──
-  계란:        {db_name: 계란,   db_unit: 30개}
-  달걀:        {db_name: 계란,   db_unit: 30개}
-  깐마늘:      {db_name: 깐마늘, db_unit: 20kg}
-  마늘:        {db_name: 깐마늘, db_unit: 20kg}
-  다진마늘:    {db_name: 깐마늘, db_unit: 20kg}
-  당근:        {db_name: 당근,   db_unit: 10kg}
-  대파:        {db_name: 대파,   db_unit: 1kg}
-  파:          {db_name: 대파,   db_unit: 1kg}
-  양파:        {db_name: 양파,   db_unit: 15kg}
-  풋고추:      {db_name: 풋고추, db_unit: 4kg}
+  # ══ 1. DB 재료명 직접 매핑 (대표 단위 = 최다 건수) ══
+  가리비: {db_name: '가리비', db_unit: '1kg'}
+  가지: {db_name: '가지', db_unit: '200g'}
+  갈치: {db_name: '갈치', db_unit: '1마리'}
+  감귤: {db_name: '감귤', db_unit: '10개'}
+  감자: {db_name: '감자', db_unit: '100g'}
+  갓: {db_name: '갓', db_unit: '1kg'}
+  거봉: {db_name: '거봉', db_unit: '2kg'}
+  건고추: {db_name: '건고추', db_unit: '600g'}
+  건다시마: {db_name: '건다시마', db_unit: '100g'}
+  건블루베리: {db_name: '건블루베리', db_unit: '100g'}
+  건포도: {db_name: '건포도', db_unit: '100g'}
+  계란: {db_name: '계란', db_unit: '30개'}
+  고구마: {db_name: '고구마', db_unit: '1kg'}
+  고등어: {db_name: '고등어', db_unit: '1손'}
+  고등어필렛: {db_name: '고등어필렛', db_unit: '1kg'}
+  고춧가루: {db_name: '고춧가루', db_unit: '1kg'}
+  굴: {db_name: '굴', db_unit: '1kg'}
+  귀리: {db_name: '귀리', db_unit: '1kg'}
+  기장: {db_name: '기장', db_unit: '400g'}
+  김: {db_name: '김', db_unit: '10장'}
+  깐마늘: {db_name: '깐마늘', db_unit: '1kg'}
+  깻잎: {db_name: '깻잎', db_unit: '100g'}
+  꽁치: {db_name: '꽁치', db_unit: '5마리'}
+  꽃게: {db_name: '꽃게', db_unit: '1kg'}
+  녹두: {db_name: '녹두', db_unit: '500g'}
+  느타리버섯: {db_name: '느타리버섯', db_unit: '100g'}
+  단감: {db_name: '단감', db_unit: '10개'}
+  단호박: {db_name: '단호박', db_unit: '1kg'}
+  닭고기: {db_name: '닭고기', db_unit: '1kg'}
+  당근: {db_name: '당근', db_unit: '1kg'}
+  대파: {db_name: '대파', db_unit: '1kg'}
+  대하: {db_name: '대하', db_unit: '100g'}
+  돼지고기: {db_name: '돼지고기', db_unit: '100g'}
+  들깨: {db_name: '들깨', db_unit: '23kg'}
+  딸기: {db_name: '딸기', db_unit: '100g'}
+  땅콩: {db_name: '땅콩', db_unit: '100g'}
+  레몬: {db_name: '레몬', db_unit: '10개'}
+  마늘: {db_name: '깐마늘', db_unit: '1kg'}
+  마른멸치: {db_name: '마른멸치', db_unit: '100g'}
+  마른미역: {db_name: '마른미역', db_unit: '100g'}
+  마른오징어: {db_name: '마른오징어', db_unit: '10마리'}
+  망고: {db_name: '망고', db_unit: '1개'}
+  메밀: {db_name: '메밀', db_unit: '1kg'}
+  멜론: {db_name: '멜론', db_unit: '1개'}
+  멸치액젓: {db_name: '멸치액젓', db_unit: '1kg'}
+  명태: {db_name: '명태', db_unit: '1마리'}
+  무: {db_name: '무', db_unit: '1개'}
+  물오징어: {db_name: '물오징어', db_unit: '1마리'}
+  미나리: {db_name: '미나리', db_unit: '100g'}
+  바나나: {db_name: '바나나', db_unit: '100g'}
+  바지락: {db_name: '바지락', db_unit: '1kg'}
+  방울토마토: {db_name: '방울토마토', db_unit: '1kg'}
+  배: {db_name: '배', db_unit: '10개'}
+  배추: {db_name: '배추', db_unit: '1포기'}
+  보리: {db_name: '보리', db_unit: '800g'}
+  복숭아: {db_name: '복숭아', db_unit: '10개'}
+  부세: {db_name: '부세', db_unit: '1마리'}
+  부추: {db_name: '부추', db_unit: '200g'}
+  북어: {db_name: '북어', db_unit: '10마리'}
+  붉은고추: {db_name: '붉은고추', db_unit: '100g'}
+  브로콜리: {db_name: '브로콜리', db_unit: '1개'}
+  블루베리: {db_name: '블루베리', db_unit: '100g'}
+  사과: {db_name: '사과', db_unit: '10개'}
+  삼치: {db_name: '삼치', db_unit: '1마리'}
+  상추: {db_name: '상추', db_unit: '100g'}
+  새송이버섯: {db_name: '새송이버섯', db_unit: '100g'}
+  새우: {db_name: '새우', db_unit: '10마리'}
+  새우젓: {db_name: '새우젓', db_unit: '1kg'}
+  생강: {db_name: '생강', db_unit: '1kg'}
+  샤인머스켓: {db_name: '샤인머스켓', db_unit: '2kg'}
+  소고기: {db_name: '소고기', db_unit: '100g'}
+  수박: {db_name: '수박', db_unit: '1개'}
+  수수: {db_name: '수수', db_unit: '400g'}
+  수입조기: {db_name: '수입조기', db_unit: '1마리'}
+  시금치: {db_name: '시금치', db_unit: '100g'}
+  쌀: {db_name: '쌀', db_unit: '20kg'}
+  아몬드: {db_name: '아몬드', db_unit: '100g'}
+  아보카도: {db_name: '아보카도', db_unit: '1개'}
+  알배기배추: {db_name: '알배기배추', db_unit: '1포기'}
+  애호박: {db_name: '애호박', db_unit: '1개'}
+  양배추: {db_name: '양배추', db_unit: '1포기'}
+  양상추: {db_name: '양상추', db_unit: '100g'}
+  양송이버섯: {db_name: '양송이버섯', db_unit: '100g'}
+  양파: {db_name: '양파', db_unit: '1kg'}
+  얼갈이배추: {db_name: '얼갈이배추', db_unit: '1kg'}
+  연근: {db_name: '연근', db_unit: '100g'}
+  연어필렛: {db_name: '연어필렛', db_unit: '320g'}
+  열무: {db_name: '열무', db_unit: '1kg'}
+  오렌지: {db_name: '오렌지', db_unit: '10개'}
+  오이: {db_name: '오이', db_unit: '10개'}
+  오징어: {db_name: '물오징어', db_unit: '1마리'}
+  오징어젓: {db_name: '오징어젓', db_unit: '400g'}
+  오징어젓갈: {db_name: '오징어젓갈', db_unit: '150g'}
+  우엉: {db_name: '우엉', db_unit: '300g'}
+  우유: {db_name: '우유', db_unit: '1L'}
+  율무: {db_name: '율무', db_unit: '400g'}
+  자몽: {db_name: '자몽', db_unit: '10개'}
+  적상추: {db_name: '적상추', db_unit: '100g'}
+  전복: {db_name: '전복', db_unit: '5마리'}
+  전어: {db_name: '전어', db_unit: '5마리'}
+  절임배추: {db_name: '절임배추', db_unit: '20kg'}
+  조기: {db_name: '조기', db_unit: '1마리'}
+  쥬키니: {db_name: '쥬키니', db_unit: '1개'}
+  쪽파: {db_name: '쪽파', db_unit: '1kg'}
+  참깨: {db_name: '참깨', db_unit: '500g'}
+  참다래: {db_name: '참다래', db_unit: '10개'}
+  참외: {db_name: '참외', db_unit: '10개'}
+  참조기: {db_name: '참조기', db_unit: '1마리'}
+  찹쌀: {db_name: '찹쌀', db_unit: '1kg'}
+  천일염: {db_name: '천일염', db_unit: '5kg'}
+  청경채: {db_name: '청경채', db_unit: '150g'}
+  체리: {db_name: '체리', db_unit: '100g'}
+  케일: {db_name: '케일', db_unit: '100g'}
+  콩: {db_name: '콩', db_unit: '500g'}
+  콩나물: {db_name: '콩나물', db_unit: '300g'}
+  토마토: {db_name: '토마토', db_unit: '1kg'}
+  파인애플: {db_name: '파인애플', db_unit: '1개'}
+  파프리카: {db_name: '파프리카', db_unit: '200g'}
+  팥: {db_name: '팥', db_unit: '500g'}
+  팽이버섯: {db_name: '팽이버섯', db_unit: '150g'}
+  포도: {db_name: '포도', db_unit: '1kg'}
+  표고버섯: {db_name: '표고버섯', db_unit: '100g'}
+  풋고추: {db_name: '풋고추', db_unit: '100g'}
+  피마늘: {db_name: '피마늘', db_unit: '10kg'}
+  피망: {db_name: '피망', db_unit: '100g'}
+  현미: {db_name: '현미', db_unit: '2kg'}
+  호두: {db_name: '호두', db_unit: '100g'}
+  혼합곡: {db_name: '혼합곡', db_unit: '800g'}
+  홍합: {db_name: '홍합', db_unit: '1kg'}
+  훈제오리: {db_name: '훈제오리', db_unit: '500g'}
 
-  # ── 명시적 ambiguous (단독으론 자동 매칭 금지) ──
-  # 사용자가 "고추"라고만 적으면 풋고추/청양/홍고추 등 어느 쪽인지 모름.
-  # alias에 null로 박아두면 Genie는 원본 이름으로 시도하되, 부분 매칭으로
-  # 깐마늘/풋고추 같은 엉뚱한 데로 자동 흡수되지 않음.
-  고추:        null
-  돼지고기:    null
-  소고기:      null
-  닭고기:      null
+  # ══ 2. 세부속성 기반 별칭 (부위/품종 → DB 재료명) ══
+  삼겹살: {db_name: '돼지고기', db_unit: '100g'}
+  목살: {db_name: '돼지고기', db_unit: '100g'}
+  목심: {db_name: '돼지고기', db_unit: '100g'}
+  돼지갈비: {db_name: '돼지고기', db_unit: '100g'}
+  앞다리: {db_name: '돼지고기', db_unit: '100g'}
+  앞다리살: {db_name: '돼지고기', db_unit: '100g'}
+  등심: {db_name: '소고기', db_unit: '100g'}
+  안심: {db_name: '소고기', db_unit: '100g'}
+  갈비: {db_name: '소고기', db_unit: '100g'}
+  갈비살: {db_name: '소고기', db_unit: '100g'}
+  설도: {db_name: '소고기', db_unit: '100g'}
+  양지: {db_name: '소고기', db_unit: '100g'}
+  불고기: {db_name: '소고기', db_unit: '100g'}
+  도계: {db_name: '닭고기', db_unit: '1kg'}
+  수미감자: {db_name: '감자', db_unit: '100g'}
+  대지마감자: {db_name: '감자', db_unit: '100g'}
+  청상추: {db_name: '상추', db_unit: '100g'}
+  화건고추: {db_name: '건고추', db_unit: '600g'}
+  양건고추: {db_name: '건고추', db_unit: '600g'}
+
+  # ══ 3. 사용자 입력 별칭 → DB 재료명 ══
+  고추: {db_name: '풋고추', db_unit: '100g'}
+  느타리: {db_name: '느타리버섯', db_unit: '100g'}
+  다진마늘: {db_name: '깐마늘', db_unit: '1kg'}
+  달걀: {db_name: '계란', db_unit: '30개'}
+  닭: {db_name: '닭고기', db_unit: '1kg'}
+  돼지: {db_name: '돼지고기', db_unit: '100g'}
+  두부: {db_name: '콩', db_unit: '500g'}
+  들기름: {db_name: '들깨', db_unit: '23kg'}
+  들깨가루: {db_name: '들깨', db_unit: '23kg'}
+  무우: {db_name: '무', db_unit: '1개'}
+  배추김치: {db_name: '배추', db_unit: '1포기'}
+  새송이: {db_name: '새송이버섯', db_unit: '100g'}
+  쇠고기: {db_name: '소고기', db_unit: '100g'}
+  시래기: {db_name: '배추', db_unit: '1포기'}
+  알배추: {db_name: '알배기배추', db_unit: '1포기'}
+  양송이: {db_name: '양송이버섯', db_unit: '100g'}
+  우거지: {db_name: '배추', db_unit: '1포기'}
+  참기름: {db_name: '참깨', db_unit: '500g'}
+  청양고추: {db_name: '풋고추', db_unit: '100g'}
+  통마늘: {db_name: '피마늘', db_unit: '10kg'}
+  파: {db_name: '대파', db_unit: '1kg'}
+  팽이: {db_name: '팽이버섯', db_unit: '150g'}
+  표고: {db_name: '표고버섯', db_unit: '100g'}
+  한우: {db_name: '소고기', db_unit: '100g'}
+  홍고추: {db_name: '붉은고추', db_unit: '100g'}
