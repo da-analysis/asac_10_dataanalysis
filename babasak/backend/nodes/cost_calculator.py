@@ -201,6 +201,15 @@ _GENIE_PRICE_PATTERN = re.compile(
 # 괄호 단위 → 그램 (개수 단위는 _PER_PIECE_GRAMS로 별도 처리하므로 여기선 무게 단위만)
 _GENIE_UNIT_TO_GRAMS = {"kg": 1000.0, "g": 1.0}
 
+# Genie가 재료명(단위)과 가격을 줄바꿈으로 분리해 주는 경우 대응.
+# "계란(30개)입니다. ...\n- 강원: 7,750원" 처럼 단위와 가격이 다른 줄에 있음.
+# 재료명(단위) 뒤 최대 80자 이내(다른 재료 설명이 끼기 전)의 첫 가격을 묶는다.
+_GENIE_PRICE_MULTILINE = re.compile(
+    r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|마리|포기|장|손|쪽|단|모)\s*\)"
+    r".{0,80}?(?P<price>[\d,]{3,})\s*원",
+    re.DOTALL,
+)
+
 
 def _genie_price_to_per_kg(qty: float, unit: str, price: int, name: str) -> int | None:
     """Genie 괄호 단위(예: '1kg', '100g', '6마리')와 가격을 kg당 단가로 환산."""
@@ -311,6 +320,25 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
                     }
             except ValueError:
                 pass
+
+    # 보완: 재료명(단위)과 가격이 줄바꿈으로 분리된 Genie 응답 대응.
+    # 예: "계란(30개)입니다.\n- 강원: 7,750원" → 위 줄단위 스캔에서 놓친 것만 흡수.
+    for mg in _GENIE_PRICE_MULTILINE.finditer(raw_text):
+        name = mg.group("name")
+        if name in price_map:
+            continue
+        try:
+            raw_price = int(mg.group("price").replace(",", ""))
+            ppk = _genie_price_to_per_kg(
+                float(mg.group("qty")), mg.group("unit"), raw_price, name)
+            if ppk and 100 <= ppk <= _MAX_PRICE_PER_KG:
+                price_map[name] = {
+                    "price_per_kg": ppk,
+                    "source": "kamis_genie_multiline",
+                    "confidence": "high",
+                }
+        except ValueError:
+            pass
 
     return price_map
 
