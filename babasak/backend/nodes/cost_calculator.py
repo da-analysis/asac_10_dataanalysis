@@ -315,12 +315,31 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
     return price_map
 
 
+def _alias_db_name(ingredient_name: str) -> str | None:
+    """입력 재료명을 alias 테이블의 DB 재료명으로 변환 (예: '다진마늘' → '깐마늘').
+
+    catalog 모듈을 지연 import하여 순환참조를 피한다. 실패 시 None.
+    """
+    try:
+        from backend.catalog import resolve_ingredient
+        r = resolve_ingredient(ingredient_name)
+        return r.db_name
+    except Exception:
+        return None
+
+
 def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
-    """재료명 → 가격 dict. 정확 매칭 → 부분 매칭(포함관계) 순서로 시도."""
+    """재료명 → 가격 dict. 정확 매칭 → alias db_name 매칭 → 부분 매칭 순서로 시도."""
     if ingredient_name in price_map:
         return price_map[ingredient_name]
-    # 부분 매칭: "다진마늘" → "깐마늘" 같은 케이스는 alias 단계에서 처리되지만,
-    # 그래도 가격 키와 입력 키가 다를 수 있음. 토큰 포함 관계로 보조 매칭.
+
+    # alias 매칭: Genie는 DB명(예: '깐마늘')으로 가격을 주는데 레시피는 '다진마늘'로
+    # 들어오는 케이스. alias 테이블로 입력명 → db_name 변환 후 그 이름으로 재조회.
+    db_name = _alias_db_name(ingredient_name)
+    if db_name and db_name in price_map:
+        return price_map[db_name]
+
+    # 부분 매칭: 토큰 포함 관계로 보조 매칭 (예: '마늘' ↔ '다진마늘').
     for key, info in price_map.items():
         if key in ingredient_name or ingredient_name in key:
             return info
