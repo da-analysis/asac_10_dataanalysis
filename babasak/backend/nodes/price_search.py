@@ -26,11 +26,21 @@ from backend.catalog import resolve_many, ResolveResult
 GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID", "01f148e5845f1f68843892ceb53abd32")
 
 # Genie 한 번에 조회할 재료 수 제한 (작게 잡을수록 SQL 생성 안정성 ↑)
-_GENIE_BATCH_SIZE = 5
+_GENIE_BATCH_SIZE = 7
 # Genie 동시 호출 워커 수 (Databricks rate limit 고려)
-_GENIE_MAX_WORKERS = 3
-# 배치가 MessageStatus.FAILED로 실패했을 때 항목별 단건 재시도 최대 동시 워커 수
-_GENIE_RETRY_MAX_WORKERS = 2
+_GENIE_MAX_WORKERS = 5
+
+# WorkspaceClient 싱글턴 — 매 호출마다 재생성하지 않고 재사용
+_ws_client: WorkspaceClient | None = None
+
+
+def _get_client() -> WorkspaceClient:
+    """WorkspaceClient 싱글턴 반환. 인증 핸드셰이크를 1회만 수행."""
+    global _ws_client
+    if _ws_client is None:
+        _ws_client = WorkspaceClient()
+    return _ws_client
+
 
 # negation 패턴: Genie가 "X는 조회되지 않았습니다" 식으로 말할 때 잡기 위함
 _NEGATION_PATTERNS = [
@@ -180,7 +190,7 @@ GROUP BY `재료명`, `단위`
 
 
 def _ask_genie(question: str, conversation_id: str = None) -> dict:
-    w = _get_workspace_client()
+    w = _get_client()
     result = {"text": None, "sql": None, "dataframe": None, "conversation_id": None}
 
     if conversation_id is None:
@@ -297,6 +307,8 @@ def _build_catalog_query(targets: list[tuple[str, str, str]]) -> str:
         "아래는 silver.ingredient.ingredient 테이블에 확실히 존재하는 (재료명, 단위) 조합입니다. "
         "각 항목에 대해 정확히 그 재료명/단위로 WHERE 절을 작성하여 최근 도매가를 조회해줘. "
         "다른 단위로 대체하거나 LIKE 검색하지 말고 명시된 조건만 사용해줘. "
+        "반드시 WHERE 재료명 IN ('A', 'B', 'C') 형식으로 단 1개의 SQL 쿼리를 작성해서 모든 재료를 한 번에 조회해줘. "
+        "재료별로 개별 쿼리를 실행하지 마. "
         "응답은 반드시 다음 형식을 포함해줘:\n"
         "  '조회된 재료는 X, Y, Z입니다.'\n"
         "  '나머지 재료(A, B, C)는 DB에 데이터가 없어 없음으로 분류됩니다.'\n"
@@ -306,10 +318,13 @@ def _build_catalog_query(targets: list[tuple[str, str, str]]) -> str:
 
 
 def _build_passthrough_query(batch_items: list[str]) -> str:
-    """alias 미등록 재료를 위한 자유 텍스트 쿼리 (기존 방식)."""
+    """alias 미등록 재료를 위한 자유 텍스트 쿼리."""
+    items_str = "', '".join(batch_items)
     return (
         "다음 재료들에 대해서만 최근 도매가를 조회해줘. "
         "반드시 실제 DB에 있는 데이터만 보고해줘. DB에 없는 재료는 '없음'으로 표시해줘. 추정값 사용 금지. "
+        f"반드시 WHERE 재료명 IN ('{items_str}') 형식으로 단 1개의 SQL 쿼리를 작성해서 모든 재료를 한 번에 조회해줘. "
+        "재료별로 개별 쿼리를 실행하지 마. "
         "응답은 반드시 다음 형식을 포함해줘:\n"
         "  '조회된 재료는 X, Y, Z입니다.'\n"
         "  '나머지 재료(A, B, C)는 DB에 데이터가 없어 없음으로 분류됩니다.'\n"
