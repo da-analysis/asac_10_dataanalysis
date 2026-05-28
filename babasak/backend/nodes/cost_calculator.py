@@ -20,6 +20,28 @@ from backend.debug_log import archive
 
 
 # ════════════════════════════════════════════════════════════════
+# 가격 sanity 필터
+# ════════════════════════════════════════════════════════════════
+
+# kg당 단가 상한. 이보다 비싸면 네이버 검색이 엉뚱한 상품(소량 조미료, 수입
+# 가공품 등)을 잡아 환산을 잘못한 것으로 보고 가격을 버린다.
+# (예: '김칫국물 소금맛 68g' → ₩112,000/kg 같은 케이스 방지)
+_MAX_PRICE_PER_KG = 100_000
+
+# 원가 계산에서 제외할 재료. 물처럼 사실상 무료이거나, '국물류'처럼
+# 레시피상 다른 재료에서 파생되어 별도 시세로 잡으면 과대계상되는 항목.
+_NON_COST_INGREDIENTS = ("물",)
+_NON_COST_KEYWORDS = ("국물",)
+
+
+def _is_non_cost_ingredient(name: str) -> bool:
+    """원가에서 제외할 재료인지 판정."""
+    if name in _NON_COST_INGREDIENTS:
+        return True
+    return any(kw in name for kw in _NON_COST_KEYWORDS)
+
+
+# ════════════════════════════════════════════════════════════════
 # 사용량 → 그램 환산 테이블
 # ════════════════════════════════════════════════════════════════
 
@@ -58,6 +80,23 @@ _PER_PIECE_GRAMS = {
     "참치": 150.0,  # 1캔 기준
     "다시마": 5.0,  # 1조각 기준
     "황태머리": 50.0,
+    "꽃게": 200.0,  # 1마리 기준
+    "게": 200.0,
+    "새우": 15.0,  # 1마리 기준
+    "홍합": 20.0,
+    "바지락": 5.0,
+    "청량고추": 7.0,  # 청양고추 변형 표기
+    "버섯": 20.0,
+    "표고버섯": 20.0,
+    "느타리버섯": 15.0,
+    "팽이버섯": 100.0,  # 1봉 기준
+    "배추": 2500.0,  # 1포기 기준
+    "무": 1000.0,  # 1개 기준
+    "파": 100.0,
+    "생강": 20.0,
+    "레몬": 100.0,
+    "사과": 250.0,
+    "어묵": 40.0,  # 1장 기준
 }
 
 # 정성 표현 → 그램
@@ -152,6 +191,31 @@ _PRICE_LINE_PATTERNS = [
     re.compile(r"(?P<name>[가-힣]+)[^\n]*?(?P<price>[\d,]+)\s*원\s*/\s*100\s*g"),
 ]
 
+# Genie가 자연어로 주는 형식: "**꽃게(1kg)**의 ... 평균 도매가는 **15,300원**"
+#   → 단위가 괄호 안에 있고, 가격엔 /kg가 안 붙음. 단위로 kg당 환산.
+# 예: 꽃게(1kg)…15,300원 → 15,300/kg,  돼지고기(100g)…2,000원 → 20,000/kg
+_GENIE_PRICE_PATTERN = re.compile(
+    r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|마리|포기|장|손|쪽|단|모)\s*\)"
+    r"[^\n]*?(?P<price>[\d,]+)\s*원"
+)
+# 괄호 단위 → 그램 (개수 단위는 _PER_PIECE_GRAMS로 별도 처리하므로 여기선 무게 단위만)
+_GENIE_UNIT_TO_GRAMS = {"kg": 1000.0, "g": 1.0}
+
+
+def _genie_price_to_per_kg(qty: float, unit: str, price: int, name: str) -> int | None:
+    """Genie 괄호 단위(예: '1kg', '100g', '6마리')와 가격을 kg당 단가로 환산."""
+    if unit in _GENIE_UNIT_TO_GRAMS:
+        grams = qty * _GENIE_UNIT_TO_GRAMS[unit]
+    else:
+        # 개/마리/포기 등 개수 단위 → 개당 무게 테이블로 환산
+        ppg = _PER_PIECE_GRAMS.get(name)
+        if not ppg:
+            return None
+        grams = qty * ppg
+    if grams <= 0:
+        return None
+    return int(price * 1000 / grams)
+
 
 def _build_price_map(price_info: dict) -> dict[str, dict]:
     """price_info에서 {재료명: {price_per_kg, source, confidence}} 추출.
@@ -167,13 +231,22 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
     structured = price_info.get("structured_prices") or {}
     for name, info in structured.items():
         ppk = info.get("price_per_kg") if isinstance(info, dict) else None
-        if ppk:
-            price_map[name] = {
-                "price_per_kg": int(ppk),
-                "source": "naver_llm",
-                "confidence": info.get("confidence", "medium"),
-                "note": info.get("note"),
-            }
+        if not ppk:
+            continue
+        ppk = int(ppk)
+        # sanity 상한 초과 → 네이버가 엉뚱한 상품을 잡은 것으로 보고 버림
+        if ppk > _MAX_PRICE_PER_KG:
+            archive("cost_calculator.price_rejected", {
+                "ingredient": name, "price_per_kg": ppk,
+                "reason": "exceeds_max_per_kg", "cap": _MAX_PRICE_PER_KG,
+            })
+            continue
+        price_map[name] = {
+            "price_per_kg": ppk,
+            "source": "naver_llm",
+            "confidence": info.get("confidence", "medium"),
+            "note": info.get("note"),
+        }
 
     # 2순위: text/table에서 KAMIS 등 정규식 추출 (structured에 없는 재료만)
     raw_text = ""
@@ -185,6 +258,26 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
 
     # 단순 "재료명: ... NNN원/kg" 같은 라인 스캔
     for line in raw_text.split("\n"):
+        # Genie 자연어 형식 우선: "꽃게(1kg)…15,300원" → 단위로 kg당 환산
+        # (KAMIS 실제 도매가라 네이버 추정보다 신뢰도 높음)
+        mg = _GENIE_PRICE_PATTERN.search(line)
+        if mg:
+            name = mg.group("name")
+            if name not in price_map:
+                try:
+                    raw_price = int(mg.group("price").replace(",", ""))
+                    ppk = _genie_price_to_per_kg(
+                        float(mg.group("qty")), mg.group("unit"), raw_price, name)
+                    if ppk and 100 <= ppk <= _MAX_PRICE_PER_KG:
+                        price_map[name] = {
+                            "price_per_kg": ppk,
+                            "source": "kamis_genie",
+                            "confidence": "high",
+                        }
+                        continue
+                except ValueError:
+                    pass
+
         # /100g → /kg 환산
         m100 = _PRICE_LINE_PATTERNS[1].search(line)
         if m100:
@@ -192,12 +285,13 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
             if name in price_map:
                 continue
             try:
-                p100 = int(m100.group("price").replace(",", ""))
-                price_map[name] = {
-                    "price_per_kg": p100 * 10,
-                    "source": "text_parse_100g",
-                    "confidence": "low",
-                }
+                ppk = int(m100.group("price").replace(",", "")) * 10
+                if 100 <= ppk <= _MAX_PRICE_PER_KG:
+                    price_map[name] = {
+                        "price_per_kg": ppk,
+                        "source": "text_parse_100g",
+                        "confidence": "low",
+                    }
             except ValueError:
                 pass
             continue
@@ -209,7 +303,7 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
                 continue
             try:
                 ppk = int(m.group("price").replace(",", ""))
-                if 100 <= ppk <= 500_000:
+                if 100 <= ppk <= _MAX_PRICE_PER_KG:
                     price_map[name] = {
                         "price_per_kg": ppk,
                         "source": "text_parse_kg",
@@ -264,6 +358,20 @@ def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
         if not name:
             continue
         quantity = (ing.get("quantity") or ing.get("amount") or "").strip()
+
+        # 물·국물류 등 비-원가 재료는 원가 합산에서 제외 (₩0으로 표시)
+        if _is_non_cost_ingredient(name):
+            items_out.append({
+                "name": name,
+                "quantity": quantity,
+                "grams": None,
+                "price_per_kg": None,
+                "cost": 0,
+                "source": "non_cost",
+                "confidence": "n/a",
+                "qty_reason": "non_cost_ingredient",
+            })
+            continue
 
         price_info = _lookup_price(name, price_map)
         grams, qty_reason = _quantity_to_grams(quantity, name)
@@ -327,7 +435,9 @@ def _format_recipe_section(calc: dict) -> str:
     lines.append("|---|---:|---:|---:|")
     for it in calc["items"]:
         ppk = f"{it['price_per_kg']:,}" if it.get("price_per_kg") else "—"
-        if it["cost"] is not None:
+        if it.get("source") == "non_cost":
+            cost = "원가 제외"
+        elif it["cost"] is not None:
             cost = f"{it['cost']:,}원"
         else:
             cost = "시세/사용량 미확인"

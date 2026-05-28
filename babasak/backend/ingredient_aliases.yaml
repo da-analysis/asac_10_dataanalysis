@@ -165,8 +165,8 @@ aliases:
   달걀: {db_name: '계란', db_unit: '30개'}
   닭: {db_name: '닭고기', db_unit: '1kg'}
   돼지: {db_name: '돼지고기', db_unit: '100g'}
-  두부: {db_name: '콩', db_unit: '500g'}
-  들기름: {db_name: '들깨', db_unit: '23kg'}
+  두부: null  # 가공품 — KAMIS 원물(콩)과 다름, 네이버로 직접 검색
+  들기름: null  # 가공유 — KAMIS 원물(들깨)과 다름, 네이버로 직접 검색
   들깨가루: {db_name: '들깨', db_unit: '23kg'}
   무우: {db_name: '무', db_unit: '1개'}
   배추김치: {db_name: '배추', db_unit: '1포기'}
@@ -176,7 +176,7 @@ aliases:
   알배추: {db_name: '알배기배추', db_unit: '1포기'}
   양송이: {db_name: '양송이버섯', db_unit: '100g'}
   우거지: {db_name: '배추', db_unit: '1포기'}
-  참기름: {db_name: '참깨', db_unit: '500g'}
+  참기름: null  # 가공유 — KAMIS 원물(참깨)과 다름, 네이버로 직접 검색
   청양고추: {db_name: '풋고추', db_unit: '100g'}
   통마늘: {db_name: '피마늘', db_unit: '10kg'}
   파: {db_name: '대파', db_unit: '1kg'}
