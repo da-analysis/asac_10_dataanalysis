@@ -15,6 +15,14 @@ _NAVER_DEFAULT_MAX_WORKERS = 2
 _NAVER_DEFAULT_MIN_INTERVAL = 0.25
 _NAVER_RETRY_DELAYS = (0.7, 1.5)
 
+# 합성 재료명(예: '돼지고기앞다리살')에서 부위명을 따로 떼어내 상품명과
+# 순서·띄어쓰기 무관하게 매칭하기 위한 부위 토큰 목록. 긴 것부터 검사.
+_MEAT_PART_TOKENS = (
+    "앞다리살", "뒷다리살", "항정살", "갈매기살", "가브리살", "등심덧살",
+    "삼겹살", "오겹살", "목살", "등심", "안심", "갈비", "사태", "전지", "후지",
+    "다리살", "닭가슴살", "닭다리살", "우삼겹", "차돌박이", "양지", "차돌",
+)
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -324,10 +332,36 @@ def naver_search_structured(ingredients_text: str) -> dict:
         return (r.status_code, r.json().get("items", []))
 
     def _filter_by_token_and_price(item: str, items_raw: list[dict], attempt_label: str) -> list[dict]:
-        """title 핵심 토큰 매칭 + 가격 범위 필터. archive에 reject 사유 기록."""
+        """title 핵심 토큰 매칭 + 가격 범위 필터. archive에 reject 사유 기록.
+
+        매칭 전략 (느슨한 순서로 OR):
+          1) 검색 토큰이 상품명에 그대로 포함
+          2) 공백 제거 후 포함 ("돼지고기 앞다리살" → "돼지고기앞다리살")
+          3) 검색 토큰을 2글자+ 조각으로 나눠 핵심 조각이 포함
+        '돼지고기앞다리살'처럼 합성 재료명이 띄어쓰기/순서 차이로 전부 탈락하던 문제 완화.
+        """
         resolved = resolve_ingredient(item)
         key_name = resolved.db_name or item
         key_token = key_name.split()[0] if key_name else item
+        key_token_nospace = key_token.replace(" ", "")
+        # 합성 재료명에서 핵심 조각 추출. 공백으로 나뉜 조각 + 고기 부위명.
+        # 예: "돼지고기앞다리살" → 공백 없으나 부위명 '앞다리살'을 따로 잡아 순서 무관 매칭.
+        sub_tokens = [t for t in re.split(r"\s+", key_token) if len(t) >= 2]
+        for cut in _MEAT_PART_TOKENS:
+            if cut in key_token_nospace:
+                sub_tokens.append(cut)
+
+        def _matches(title_nospace: str) -> bool:
+            if key_token and key_token in title_nospace:
+                return True
+            if key_token_nospace and key_token_nospace in title_nospace:
+                return True
+            # 핵심 조각(부위명 등)이 상품명에 있으면 통과 — 띄어쓰기/순서 차이 흡수
+            for tok in sub_tokens:
+                if len(tok) >= 3 and tok in title_nospace:
+                    return True
+            return False
+
         kept = []
         rejected_titles = []
         for it in items_raw:
@@ -339,7 +373,8 @@ def naver_search_structured(ingredients_text: str) -> dict:
                 rejected_titles.append((_clean_title(it.get("title", ""))[:60], "price_out_of_range"))
                 continue
             title_clean = _clean_title(it.get("title", ""))
-            if key_token and key_token not in title_clean:
+            title_nospace = title_clean.replace(" ", "")
+            if not _matches(title_nospace):
                 rejected_titles.append((title_clean[:60], "token_mismatch"))
                 continue
             kept.append(it)
@@ -420,6 +455,23 @@ def naver_search_structured(ingredients_text: str) -> dict:
                 ppk = refined.get("price_per_kg")
                 conf = refined.get("confidence", "none")
                 if ppk and conf != "none":
+                    # 교차 검증: 정규식으로 환산한 kg당 최저가와 비교.
+                    # LLM이 최저가 선택을 자주 틀리므로(예: 멸치 51,415가 실제
+                    # 최저인데 92,800으로 산정), 정규식 최저가보다 1.4배 넘게
+                    # 비싸면 정규식 값으로 보정한다.
+                    if per_kg_regex:
+                        regex_min = min(per_kg_regex)
+                        if ppk > regex_min * 1.4:
+                            archive("naver_search.llm_price_corrected", {
+                                "item": item, "attempt": label,
+                                "llm_price": ppk, "regex_min": regex_min,
+                            })
+                            refined["price_per_kg"] = regex_min
+                            refined["note"] = (
+                                f"llm={ppk} → 정규식 최저가로 보정 "
+                                f"({refined.get('note', '')})"
+                            )
+                            ppk = regex_min
                     # 성공 — 즉시 반환
                     line = (f"{item}: 약 ₩{ppk:,}/kg "
                             f"(LLM 정제 {label}, conf={conf}"

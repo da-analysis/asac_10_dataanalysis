@@ -372,10 +372,17 @@ def _carry_from_history(messages: list) -> tuple[str | None, list[str]]:
 # (recipe_search.py 시나리오 8/9가 이 키들을 사용)
 # ─────────────────────────────────────────────────────────────
 
+import re as _re
+
 _SIMILAR_KEYWORDS = ["비슷한", "유사한", "닮은", "비슷하게", "같은 종류", "유사", "비슷"]
 
+# "대체 메뉴/음식/요리/레시피" 또는 "대신 먹을/할/만들" = 다른 메뉴 추천 (유사 레시피)
+_SIMILAR_PHRASE_PAT = _re.compile(
+    r'대체\s*(?:메뉴|음식|요리|레시피|것|거)|대신\s*(?:먹|할|만들|있는)|다른\s*(?:메뉴|음식|요리|레시피)'
+)
+
 # "X 대신 Y" / "X 대체" / "X 빼고 뭐" 같은 패턴에서 X(대체할 재료) 추출
-import re as _re
+# 단, "대체 메뉴" 같은 경우는 제외 (재료가 아니라 메뉴 추천 요청)
 _SUBSTITUTE_PAT = _re.compile(
     r'([가-힣]{2,10})\s*(?:대신|대체|말고|없으면|빼고)',
 )
@@ -384,13 +391,23 @@ _SUBSTITUTE_PAT = _re.compile(
 def _detect_is_similar(query: str) -> bool:
     if not query:
         return False
-    return any(kw in query for kw in _SIMILAR_KEYWORDS)
+    if any(kw in query for kw in _SIMILAR_KEYWORDS):
+        return True
+    # "대체 메뉴", "대신 먹을", "다른 요리" 같은 표현도 유사 추천 의도로
+    if _SIMILAR_PHRASE_PAT.search(query):
+        return True
+    return False
 
 
 def _detect_substitute_for(query: str, ingredients=None) -> str | None:
     """'돼지고기 대신 뭐 써?' → '돼지고기' 추출.
-    1순위: 정규식 패턴 매칭, 2순위: 알려진 재료 + 대체 키워드 동시 등장."""
+    1순위: 정규식 패턴 매칭, 2순위: 알려진 재료 + 대체 키워드 동시 등장.
+    단, '대체 메뉴/음식/요리' 같은 메뉴 추천 요청에서는 None 반환 (시나리오 9 진입 차단).
+    """
     if not query:
+        return None
+    # "대체 메뉴"는 substitute_for가 아니라 is_similar로 처리되도록
+    if _SIMILAR_PHRASE_PAT.search(query):
         return None
     m = _SUBSTITUTE_PAT.search(query)
     if m:

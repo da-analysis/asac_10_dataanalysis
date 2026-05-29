@@ -131,7 +131,16 @@ def _tokenize(query):
 
 
 def _resolve_ingredient_candidates(text, limit=5):
-    """자연어/롱테일 재료 표현을 DB의 Ingredient.name 후보로 변환."""
+    """자연어/롱테일 재료 표현을 DB의 Ingredient.name 후보로 변환.
+
+    안전화 규칙:
+    - exact 매칭 우선
+    - substring 매칭은 한 방향만:
+      * "당근손가락길이만큼"(긴 쿼리) 안에 ing("당근")이 포함 → OK (수다 제거 케이스)
+      * cleaned(쿼리)가 ing 안에 포함되는 역방향은 길이 차이가 작을 때만
+        예) "마라"(2글자)가 "고구마라떼"(6글자) 안에 → ❌ 차이 너무 큼
+            "다진마"가 "다진마늘" 안에 → ✅ 차이 1글자
+    """
     _load_dictionaries()
     raw = text or ""
     cleaned = _strip_query_words(raw)
@@ -149,14 +158,18 @@ def _resolve_ingredient_candidates(text, limit=5):
         if ing_compact and ing_compact in {raw_compact, cleaned_compact}:
             candidates.append(ing)
 
-    # substring fallback: "당근손가락길이만큼" -> "당근"
+    # substring fallback
     for ing in _KNOWN_INGREDIENTS:
         ing_compact = _compact(ing)
         if not ing_compact or len(ing_compact) < 2:
             continue
+        # 정방향: 쿼리 안에 재료명 포함 (수다 제거)
         if ing_compact in raw_compact or ing_compact in cleaned_compact:
             candidates.append(ing)
-        elif len(cleaned_compact) >= 2 and cleaned_compact in ing_compact:
+        # 역방향: 쿼리가 재료명 안에 포함되는 경우 — 길이 차이 1글자 이내만
+        elif (len(cleaned_compact) >= 2
+              and cleaned_compact in ing_compact
+              and (len(ing_compact) - len(cleaned_compact)) <= 1):
             candidates.append(ing)
         if len(dict.fromkeys(candidates)) >= limit:
             break
@@ -165,10 +178,22 @@ def _resolve_ingredient_candidates(text, limit=5):
 
 
 def _extract_graph_parts(query):
-    """없는 메뉴를 조합하기 위한 base menu + modifier ingredient 추출.
+    """없는 메뉴를 조합하기 위한 base menu + modifier 추출 (재료 + 메뉴 둘 다).
 
-    예: "마라김치찌개" -> base_menus=["김치찌개"], modifier_terms=["마라"],
-        modifier_ingredients=["마라소스", ...]
+    동작:
+      1) _KNOWN_MENUS 매칭으로 base 메뉴들 추출 (가장 첫 매칭이 base)
+      2) 남은 토큰을 modifier로 분류:
+         - modifier가 _KNOWN_INGREDIENTS와 매칭 → modifier_ingredients
+         - modifier가 _KNOWN_MENUS와 매칭 → modifier_menus
+           (예: "김치된장찌개" → base="된장찌개", modifier_menu="김치찌개"
+            → 김치찌개 재료까지 컨텍스트에 추가)
+
+    예시:
+      "마라김치찌개"   → base=["김치찌개"], modifier_terms=["마라"],
+                          modifier_ingredients=[], modifier_menus=[]
+                          ("마라" 매칭 실패 시 빈 list — 안전)
+      "김치된장찌개"   → base=["된장찌개"], modifier_terms=["김치"],
+                          modifier_ingredients=["김치"], modifier_menus=["김치찌개", "김치전", ...]
     """
     _load_dictionaries()
     raw = query or ""
@@ -181,26 +206,43 @@ def _extract_graph_parts(query):
         if menu_compact and menu_compact in remaining_compact:
             base_menus.append(menu)
             remaining_compact = remaining_compact.replace(menu_compact, " ")
+            # base는 1개만 잡고 나머지는 modifier로 (김치된장찌개의 김치찌개를 base로 두지 않게)
+            break
 
+    # 남은 토큰들 (공백 기준)
     modifier_terms = [
         term for term in re.split(r"\s+", remaining_compact.strip())
         if len(term) >= 2
     ]
-
-    modifier_ingredients = []
-    for term in modifier_terms:
-        modifier_ingredients.extend(_resolve_ingredient_candidates(term, limit=3))
-
-    # "마라 김치찌개"처럼 공백이 있는 쿼리도 잡기 위해 원문 토큰도 한 번 더 본다.
+    # 원문 토큰도 추가 (공백 있는 케이스)
     for token in re.split(r"\s+", _strip_query_words(raw)):
         token_compact = _compact(token)
-        if len(token_compact) >= 2 and token_compact not in [_compact(m) for m in base_menus]:
-            modifier_ingredients.extend(_resolve_ingredient_candidates(token_compact, limit=2))
+        if (len(token_compact) >= 2
+            and token_compact not in [_compact(m) for m in base_menus]
+            and token_compact not in modifier_terms):
+            modifier_terms.append(token_compact)
+
+    modifier_ingredients = []
+    modifier_menus = []
+    base_compact_set = {_compact(m) for m in base_menus}
+
+    for term in modifier_terms:
+        # 재료 후보
+        modifier_ingredients.extend(_resolve_ingredient_candidates(term, limit=3))
+        # 메뉴 후보 (modifier가 _KNOWN_MENUS의 어떤 메뉴를 substring으로 포함)
+        # 예: "김치" → 김치찌개, 김치전 등 매칭
+        for menu in _KNOWN_MENUS:
+            mc = _compact(menu)
+            if not mc or mc in base_compact_set:
+                continue
+            if term in mc and len(modifier_menus) < 5:
+                modifier_menus.append(menu)
 
     return {
         "base_menus": list(dict.fromkeys(base_menus)),
         "modifier_terms": list(dict.fromkeys(modifier_terms)),
         "modifier_ingredients": list(dict.fromkeys(modifier_ingredients)),
+        "modifier_menus": list(dict.fromkeys(modifier_menus)),
     }
 
 
@@ -224,14 +266,23 @@ def get_related_ingredients(ingredient_names, limit=12):
 
 
 def build_graph_relation_context(query, limit=3):
-    """DB에 정확한 레시피가 없을 때 Neo4j 관계로 조합 근거를 만든다.
+    """DB에 정확한 레시피가 없을 때 Neo4j 관계로 조합 컨텍스트 생성.
 
-    이 함수는 완성 레시피를 창작하지 않는다.
-    Neo4j에서 base recipe, modifier ingredient, co-occurring ingredient 관계만 반환한다.
+    동작 흐름:
+      1) _extract_graph_parts → base 메뉴 + modifier (재료/메뉴)
+      2) base 메뉴의 인기 레시피 조회 (search_by_name)
+      3) modifier_ingredients의 co-occurring 재료 조회
+      4) modifier_menus가 있으면 그 메뉴들의 대표 재료도 컨텍스트에 추가
+         예: "김치된장찌개" → base=된장찌개, modifier_menus=[김치찌개, 김치전]
+              → 김치찌개의 재료 일부도 컨텍스트에 같이
+      5) 모든 정보를 텍스트 라인으로 묶어서 LLM에 전달
+
+    이 함수는 완성 레시피를 만들지 않음. 관계 정보만 반환 → LLM이 RAG로 답변 생성.
     """
     parts = _extract_graph_parts(query)
     base_menus = parts["base_menus"]
     modifier_ingredients = parts["modifier_ingredients"]
+    modifier_menus = parts.get("modifier_menus", [])
 
     if not base_menus:
         return []
@@ -241,12 +292,15 @@ def build_graph_relation_context(query, limit=3):
     if not base_recipes:
         return []
 
+    # modifier 재료와 같이 나오는 co-occurring 재료
     related = get_related_ingredients(modifier_ingredients, limit=12)
 
+    # modifier 재료가 들어간 다른 레시피 예시
     modifier_recipes = []
     for ing in modifier_ingredients[:3]:
         modifier_recipes.extend(get_recipes_by_ingredient(ing, limit=2))
 
+    # base 레시피들의 재료 컨텍스트
     source_blocks = []
     for recipe in base_recipes:
         ingredients = get_recipe_ingredients(recipe["id"])
@@ -262,12 +316,32 @@ def build_graph_relation_context(query, limit=3):
             ],
         })
 
+    # 신규: modifier가 메뉴인 경우 (김치된장찌개 → modifier_menus=[김치찌개])
+    # 그 메뉴들의 대표 레시피 1개씩 재료 컨텍스트에 추가
+    modifier_menu_blocks = []
+    for mm in modifier_menus[:2]:
+        mm_recipes = _search_by_name(mm, 1)
+        if mm_recipes:
+            mm_recipe = mm_recipes[0]
+            mm_ings = get_recipe_ingredients(mm_recipe["id"])
+            modifier_menu_blocks.append({
+                "menu_name": mm,
+                "recipe_name": mm_recipe.get("name"),
+                "ingredients": [
+                    f"{ing.get('name')}: {ing.get('quantity')}"
+                    if ing.get("quantity") else ing.get("name")
+                    for ing in mm_ings
+                ],
+            })
+
     relation_lines = [
         f"[조합 요청] {query}",
         f"[기본 메뉴] {base_menu}",
     ]
     if modifier_ingredients:
         relation_lines.append(f"[추가 재료 후보] {', '.join(modifier_ingredients[:5])}")
+    if modifier_menus:
+        relation_lines.append(f"[추가 메뉴 후보] {', '.join(modifier_menus[:5])}")
     if related:
         relation_lines.append(
             "[추가 재료와 같이 자주 나오는 재료] "
@@ -280,6 +354,14 @@ def build_graph_relation_context(query, limit=3):
             for src in source_blocks[:2]
         )
     )
+    if modifier_menu_blocks:
+        relation_lines.append(
+            "[추가 메뉴의 대표 재료 — 이걸 base 메뉴에 합쳐서 답변 구성 권장] "
+            + " / ".join(
+                f"{blk['menu_name']}: {', '.join(blk['ingredients'][:10])}"
+                for blk in modifier_menu_blocks
+            )
+        )
     if modifier_recipes:
         seen = []
         for recipe in modifier_recipes:
@@ -297,9 +379,11 @@ def build_graph_relation_context(query, limit=3):
         "base_menu": base_menu,
         "modifier_terms": parts["modifier_terms"],
         "modifier_ingredients": modifier_ingredients,
+        "modifier_menus": modifier_menus,
         "related_ingredients": related,
         "source_recipes": source_blocks,
         "modifier_recipes": modifier_recipes[:5],
+        "modifier_menu_blocks": modifier_menu_blocks,
     }]
 
 
@@ -350,23 +434,37 @@ def search_recipes_smart(query, limit=3, fallback_popular=False):
 
 
 def _search_by_name(keyword, limit):
-    """이름 부분 매칭. 인기도 정렬."""
+    """이름 매칭 — 짧은 쿼리는 prefix만, 긴 건 substring.
+
+    [한국어 메뉴명 특성]
+    띄어쓰기 없는 합성어 많음 → substring 매칭이 우연 매칭 일으킴.
+      예) "장어" CONTAINS → "고추장어묵볶음"의 "장+어" 부분 매칭 ❌
+          "마라" CONTAINS → "고구마라떼"의 "마+라" 부분 매칭 ❌
+
+    [해결]
+    - 1~2글자 쿼리: STARTS WITH 만 허용 (자연스러운 매칭만)
+    - 3글자 이상 쿼리: CONTAINS 허용 (우연 매칭 위험 ↓)
+    """
     keyword = (keyword or "").strip()
     if not keyword:
         return []
 
+    # 길이 분기 — Cypher에서 처리
+    cypher = f"""
+        MATCH (r:Recipe)
+        WHERE
+          (size($kw) <= 2 AND r.name STARTS WITH $kw)
+          OR (size($kw) >= 3 AND r.name CONTAINS $kw)
+        WITH r, {_SCORE_EXPR} AS score
+        RETURN r.rcp_sno AS id, r.name AS name,
+               r.servings AS servings, r.difficulty AS difficulty,
+               r.kind AS kind, r.cooking_time AS cooking_time,
+               r.view_count AS view_count, score
+        ORDER BY score DESC
+        LIMIT $limit
+    """
     with get_session() as session:
-        result = session.run(f"""
-            MATCH (r:Recipe)
-            WHERE r.name CONTAINS $kw
-            WITH r, {_SCORE_EXPR} AS score
-            RETURN r.rcp_sno AS id, r.name AS name,
-                   r.servings AS servings, r.difficulty AS difficulty,
-                   r.kind AS kind, r.cooking_time AS cooking_time,
-                   r.view_count AS view_count, score
-            ORDER BY score DESC
-            LIMIT $limit
-        """, kw=keyword, limit=limit)
+        result = session.run(cypher, kw=keyword, limit=limit)
         rows = []
         for r in result:
             d = r.data()
@@ -376,14 +474,20 @@ def _search_by_name(keyword, limit):
 
 
 def _search_by_tokens(menu_tokens, ing_tokens, limit):
-    """메뉴 토큰 매칭 + 재료 토큰 일치당 +1000점 가중."""
+    """메뉴 토큰 매칭 + 재료 토큰 일치당 +1000점 가중.
+
+    _search_by_name과 같은 길이 분기 룰 적용 (짧은 토큰은 prefix만).
+    """
     if not menu_tokens:
         return []
 
     with get_session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)
-            WHERE ANY(t IN $menus WHERE r.name CONTAINS t)
+            WHERE ANY(t IN $menus WHERE
+              (size(t) <= 2 AND r.name STARTS WITH t)
+              OR (size(t) >= 3 AND r.name CONTAINS t)
+            )
             OPTIONAL MATCH (r)-[:CONTAINS]->(i:Ingredient)
             WHERE i.name IN $ings
             WITH r, count(DISTINCT i) AS ing_hits, {_SCORE_EXPR} AS base_score
@@ -501,7 +605,10 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
     with get_session() as session:
         result = session.run(f"""
             MATCH (r:Recipe)
-            WHERE r.name CONTAINS $keyword
+            WHERE (
+              (size($keyword) <= 2 AND r.name STARTS WITH $keyword)
+              OR (size($keyword) >= 3 AND r.name CONTAINS $keyword)
+            )
             AND NOT (r)-[:CONTAINS]->(:Ingredient {{name: $exclude}})
             WITH r, {_SCORE_EXPR} AS score
             RETURN r.rcp_sno AS id, r.name AS name,
