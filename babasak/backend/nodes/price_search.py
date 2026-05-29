@@ -224,18 +224,45 @@ _NOT_FOUND_LIST_RE = re.compile(
 )
 
 
+def _has_price_evidence(ing: str, genie_text: str) -> bool:
+    """genie_text 안에서 ing 주변에 부정어 없이 가격 숫자가 있으면 True.
+
+    재료명이 응답에 등장한 모든 위치의 윈도우(-30 ~ +80)를 검사해, 가격 패턴이 있고
+    부정 표현이 없는 위치가 하나라도 있으면 '가격 확인됨'으로 본다.
+    """
+    if ing not in genie_text:
+        return False
+    for match in re.finditer(re.escape(ing), genie_text):
+        start = max(0, match.start() - 30)
+        end = min(len(genie_text), match.end() + 80)
+        window = genie_text[start:end]
+        has_negation = any(p.search(window) for p in _NEGATION_PATTERNS)
+        has_price = bool(_PRICE_PATTERN.search(window))
+        if has_price and not has_negation:
+            return True
+    return False
+
+
 def _detect_unavailable(ingredients: list, genie_text: str) -> list:
-    """요청한 재료 vs Genie 응답을 비교하여 누락된 재료 반환."""
+    """요청한 재료 vs Genie 응답을 비교하여 누락된 재료 반환.
+
+    전략:
+    1) Genie가 "조회된 재료는 X, Y, Z" 식으로 명시한 경우 → 그 외는 모두 unavailable
+    2) "나머지 재료(A, B, C)는 ... 없" 패턴이 있으면 그것도 활용
+    3) 명시적 패턴 없으면 기존 윈도우 기반 polling으로 폴백
+    """
     if not genie_text or not ingredients:
         return list(ingredients)
 
+    # ── Step 1: "조회된 재료는 X, Y, Z" 명시적 추출 ──
     explicit_found = set()
     for fm in _FOUND_LIST_RE.finditer(genie_text):
-        found_text = re.sub(r"\*+", "", fm.group(1))
+        found_text = re.sub(r"\*+", "", fm.group(1))  # markdown ** 제거
         for ing in ingredients:
             if ing in found_text:
                 explicit_found.add(ing)
 
+    # ── Step 2: "나머지 재료(A, B, C)는 ... 없" 명시적 추출 ──
     explicit_not_found = set()
     for nm in _NOT_FOUND_LIST_RE.finditer(genie_text):
         nf_text = nm.group(1)
@@ -243,29 +270,26 @@ def _detect_unavailable(ingredients: list, genie_text: str) -> list:
             if ing in nf_text:
                 explicit_not_found.add(ing)
 
+    # ── Step 3: 명시적 found 리스트가 있으면, 단 가격 숫자가 실제로 있는지 재확인 ──
+    # Genie가 "조회된 재료는 …양파…입니다"라고 이름만 말하고 가격 줄을 안 주는 경우가 있다.
+    # 이름이 found 목록에 있어도 응답 본문에 그 재료의 가격 숫자가 없으면 unavailable로 내려
+    # 기존 폴백(카탈로그 재질의 → direct_sql)이 가격을 채우게 한다.
     if explicit_found:
-        return [ing for ing in ingredients if ing not in explicit_found]
+        unavailable = []
+        for ing in ingredients:
+            if ing not in explicit_found:
+                unavailable.append(ing)
+                continue
+            if not _has_price_evidence(ing, genie_text):
+                unavailable.append(ing)
+        return unavailable
+
+    # ── Step 4: 명시적 not_found 리스트만 있으면 그것만 unavailable ──
     if explicit_not_found:
         return [ing for ing in ingredients if ing in explicit_not_found]
 
-    unavailable = []
-    for ing in ingredients:
-        if ing not in genie_text:
-            unavailable.append(ing)
-            continue
-        positive_evidence = False
-        for match in re.finditer(re.escape(ing), genie_text):
-            start = max(0, match.start() - 30)
-            end = min(len(genie_text), match.end() + 80)
-            window = genie_text[start:end]
-            has_negation = any(p.search(window) for p in _NEGATION_PATTERNS)
-            has_price = bool(_PRICE_PATTERN.search(window))
-            if has_price and not has_negation:
-                positive_evidence = True
-                break
-        if not positive_evidence:
-            unavailable.append(ing)
-    return unavailable
+    # ── Step 5: 폴백 — 기존 윈도우 기반 polling ──
+    return [ing for ing in ingredients if not _has_price_evidence(ing, genie_text)]
 
 
 def _build_catalog_query(targets: list[tuple[str, str, str]]) -> str:
