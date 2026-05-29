@@ -1,3 +1,4 @@
+import mlflow.genai
 import json
 import os
 import re
@@ -146,7 +147,8 @@ def _get_refine_llm():
     return _refine_llm
 
 
-_REFINE_SYSTEM = """당신은 식재료 도매가 분석가입니다.
+# UC 프롬프트 로드 (폴백: 하드코딩)
+_FALLBACK_REFINE_SYSTEM = """당신은 식재료 도매가 분석가입니다.
 네이버 검색 결과 중 사용자가 찾는 식재료에 정확히 일치하는 상품만 골라서 kg당 도매가를 산정합니다.
 
 [작업 절차]
@@ -171,8 +173,14 @@ _REFINE_SYSTEM = """당신은 식재료 도매가 분석가입니다.
 - high: 적합 상품 3개 이상 + kg당 단가 분산 작음
 - medium: 적합 상품 1~2개 또는 단위 추정 보강 필요
 - low: 추정에 의존이 큼
-- none: 적합 상품 없음
-"""
+- none: 적합 상품 없음"""
+
+try:
+    _REFINE_SYSTEM = mlflow.genai.load_prompt(
+        "prompts:/gold.ai_agent.naver_price_refiner@production"
+    ).template
+except Exception:
+    _REFINE_SYSTEM = _FALLBACK_REFINE_SYSTEM
 
 
 def _refine_with_llm(item: str, items_raw: list[dict]) -> dict:

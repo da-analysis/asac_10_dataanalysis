@@ -1,4 +1,5 @@
 import re
+import mlflow.genai
 
 from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -105,7 +106,9 @@ def _format_price_info(price_info: dict) -> str:
     return "\n".join(parts) if parts else str(price_info)
 
 
-SYSTEM_PROMPT = (
+# UC 프롬프트 로드 (폴백: 하드코딩)
+_FALLBACK_SYSTEM_PROMPT = (
+
     "당신은 소상공인을 위한 물가 연동형 메뉴 추천 AI '바바삭'입니다. "
     "사용자 메시지에 [업종: X, 지역: Y] 형태가 있으면 그 맥락에 맞춰 답하세요.\n"
     "\n"
@@ -246,6 +249,13 @@ SYSTEM_PROMPT = (
     "- 커피 원두, 밀가루, 설탕, 버터 등 식음료 재료는 식재료로 간주.\n"
     "- 한국어로, 핵심만 간결하게. 불필요한 인사말/주의사항 생략."
 )
+
+try:
+    SYSTEM_PROMPT = mlflow.genai.load_prompt(
+        "prompts:/gold.ai_agent.report_generator@production"
+    ).template
+except Exception:
+    SYSTEM_PROMPT = _FALLBACK_SYSTEM_PROMPT
 
 
 def report_generator_node(state: dict) -> dict:
@@ -413,8 +423,17 @@ def report_generator_node(state: dict) -> dict:
         # DB의 조리단계에 "5~10분", "6~7마리" 같은 범위 표현이 많음.
         # 마크다운에서 ~ 가 두 개 이상이면 ~~취소선~~ 으로 해석돼 텍스트 사라짐.
         # 숫자~숫자 패턴은 의미 보존하면서 unicode 물결표(∼)로 치환.
-        import re as _re_md
-        final_answer = _re_md.sub(r'(\d+)\s*~\s*(\d+)', r'\1∼\2', final_answer)
+        final_answer = re.sub(r'(\d+)\s*~\s*(\d+)', r'\1∼\2', final_answer)
+
+        # Hallucination 검증 — 가격 날조/도메인 이탈 시 차단
+        check_result = _check_hallucination(final_answer, context, intent)
+        if check_result == "block":
+            final_answer = _BLOCK_FALLBACK
+            archive("report_generator.output", {"reason": "hallucination_blocked", "answer_preview": final_answer})
+            return {
+                "final_report": final_answer,
+                "messages": [AIMessage(content=final_answer)]
+            }
     except Exception as e:
         # LLM 호출 실패 시 기본 포맷으로 폴백
         final_answer = f"요청하신 {entities} 관련 답변입니다.\n\n"

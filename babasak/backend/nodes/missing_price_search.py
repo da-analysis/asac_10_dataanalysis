@@ -1,6 +1,7 @@
 import os
 
 import mlflow
+import mlflow.genai
 from mlflow.entities import SpanType
 from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -117,7 +118,13 @@ def missing_price_search_node(state: dict) -> dict:
             state.setdefault("error_log", []).append(f"missing_price_search.naver: {str(e)}")
 
     # ── 2순위: LLM 기반 추정 (네이버 실패/비활성 시 최종 폴백) ──
-    sys_prompt = """당신은 한국 식재료 도매 시세 전문가입니다.
+    # UC 프롬프트 로드 (폴백: 하드코딩)
+    try:
+        sys_prompt = mlflow.genai.load_prompt(
+            "prompts:/gold.ai_agent.missing_price_estimator@production"
+        ).template
+    except Exception:
+        sys_prompt = """당신은 한국 식재료 도매 시세 전문가입니다.
 아래 재료들의 대략적인 도매 가격을 추정해주세요.
 
 규칙:

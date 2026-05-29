@@ -7,6 +7,7 @@ preprocessor_node: 멀티쿼리 리트리버 기반 사용자 질문 분석
   Phase 2: Grounding — LLM 출력을 알려진 DB 엔티티에 맞춰 정규화
   Phase 3: 히스토리 carry-over — 위 전부 실패 시 이전 HumanMessage에서 상속
 """
+import mlflow.genai
 from langchain_core.messages import HumanMessage, SystemMessage
 from databricks_langchain import ChatDatabricks
 
@@ -101,7 +102,8 @@ def _get_llm():
     return _llm
 
 
-_UNIFIED_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입니다.
+# UC 프롬프트 로드 (폴백: 하드코딩)
+_FALLBACK_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입니다.
 사용자의 질문을 분석하여 아래 형식으로 답하세요.
 
 [분석 절차]
@@ -158,6 +160,13 @@ _UNIFIED_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입�
 재료: NONE
 제외: NONE
 조건: 초급"""
+
+try:
+    _UNIFIED_SYSTEM_PROMPT = mlflow.genai.load_prompt(
+        "prompts:/gold.ai_agent.preprocessor@production"
+    ).template
+except Exception:
+    _UNIFIED_SYSTEM_PROMPT = _FALLBACK_SYSTEM_PROMPT
 
 
 def _llm_multiquery_extract(query: str) -> dict:
