@@ -22,3 +22,14 @@ newenv/
 
 # google api key 파일 
 StreamlitApp/google_api_key.json
+
+# MLflow 로컬 트래킹 (Databricks 원격 실험 사용)
+**/mlruns/
+
+# 디버그 로그 (앱 실행 시 자동 생성)
+**/debug_archive/
+
+# IDE
+.idea/
+.vscode/
+*.swp
