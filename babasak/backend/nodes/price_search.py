@@ -530,17 +530,23 @@ def price_search_node(state: dict) -> dict:
         # 줄어 성공률이 올라가는 효과를 기대.
         # mode는 catalog_targets에 포함된 입력명이면 'catalog', 아니면 'passthrough'.
         retry_recovered: list[str] = []
-        if failed_batch_items:
-            catalog_input_map = {t[0]: t for t in catalog_targets}
+        catalog_input_map = {t[0]: t for t in catalog_targets}
+        # passthrough(KAMIS에 없는 게 거의 확실한 재료)는 단건 재시도해도 100% '없음'으로
+        # 나와 네이버로 갈 뿐이라, 재시도 대상에서 제외하고 곧장 실패 처리한다.
+        # (재시도 1건당 Genie 4~25초 × N개 = 수분 낭비의 주원인이었음)
+        retry_targets = [i for i in failed_batch_items if i in catalog_input_map]
+        skip_retry_passthrough = [i for i in failed_batch_items if i not in catalog_input_map]
+        if skip_retry_passthrough:
+            archive("price_search.retry_skipped_passthrough", {
+                "items": skip_retry_passthrough,
+                "reason": "passthrough_goes_to_naver",
+            })
+        if retry_targets:
 
             def _retry_single(item: str) -> tuple:
-                """단건 재시도. (item, result|None, err|None)."""
-                if item in catalog_input_map:
-                    query = _build_catalog_query([catalog_input_map[item]])
-                    item_mode = "catalog"
-                else:
-                    query = _build_passthrough_query([item])
-                    item_mode = "passthrough"
+                """단건 재시도(catalog 전용). (item, result|None, err|None)."""
+                query = _build_catalog_query([catalog_input_map[item]])
+                item_mode = "catalog"
                 archive("price_search.retry_single_attempt", {
                     "item": item,
                     "mode": item_mode,
@@ -563,9 +569,9 @@ def price_search_node(state: dict) -> dict:
                     return (item, None, str(retry_exc))
 
             with ThreadPoolExecutor(
-                max_workers=min(len(failed_batch_items), _GENIE_RETRY_MAX_WORKERS)
+                max_workers=min(len(retry_targets), _GENIE_RETRY_MAX_WORKERS)
             ) as ex:
-                retry_results = list(ex.map(_retry_single, failed_batch_items))
+                retry_results = list(ex.map(_retry_single, retry_targets))
 
             still_failed_after_retry: list[str] = []
             for item, r, err in retry_results:
@@ -593,8 +599,12 @@ def price_search_node(state: dict) -> dict:
                 if r.get("dataframe") is not None:
                     all_tables.append(r["dataframe"].to_string(index=False, max_rows=15))
 
-            # 단건 재시도로 성공한 항목은 실패 목록에서 제외 → 후속 단계에 영향 없도록
-            failed_batch_items = still_failed_after_retry
+            # catalog 재시도 실패분 + 처음부터 재시도 스킵한 passthrough = 최종 실패 목록.
+            # (둘 다 unavailable로 흘러가 네이버 폴백 대상이 됨)
+            failed_batch_items = still_failed_after_retry + skip_retry_passthrough
+        else:
+            # 재시도할 catalog 항목이 없으면, 실패분은 스킵된 passthrough가 전부.
+            failed_batch_items = skip_retry_passthrough
 
         price_data = {"source": "genie", "data": ingredients}
         if all_texts:
