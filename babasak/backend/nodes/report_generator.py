@@ -1,7 +1,67 @@
+import re
+
 from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from backend.debug_log import archive
+
+
+# ═══════════════════════════════════════════════════════════════
+# Hallucination 검증 (가격 날조 + 도메인 이탈 실시간 차단)
+# ═══════════════════════════════════════════════════════════════
+
+_DOMAIN_BLACKLIST = [
+    '비트코인', '주식', '부동산', '암호화폐', '코인', '투자',
+    '로또', '도박', '성인', '정치', '선거', '종교',
+]
+
+_BLOCK_FALLBACK = (
+    "해당 질문은 식재료 및 식당 운영과 관련이 없어 답변드리기 어렵습니다. "
+    "메뉴, 원가, 시세 관련 질문을 해주세요."
+)
+
+
+def _extract_prices_from_text(text: str) -> set:
+    """텍스트에서 가격 수치(원 단위)를 추출하여 set으로 반환."""
+    matches = re.findall(r'([\d,]+)\s*원', text)
+    prices = set()
+    for m in matches:
+        try:
+            prices.add(int(m.replace(',', '')))
+        except ValueError:
+            pass
+    return prices
+
+
+def _check_hallucination(final_answer: str, context: str, intent: str) -> str:
+    """
+    답변 품질 검증 (hallucination + 도메인 이탈).
+    Returns: "pass" | "block"
+    """
+    # Rule 1: 도메인 이탈
+    answer_lower = final_answer.lower()
+    for keyword in _DOMAIN_BLACKLIST:
+        if keyword in answer_lower:
+            return "block"
+
+    # Rule 2: 가격 날조 (극단적 가격이 context에 없을 때)
+    if intent in ('cost_analysis', 'price_inquiry'):
+        answer_prices = _extract_prices_from_text(final_answer)
+        context_prices = _extract_prices_from_text(context)
+
+        if answer_prices and context_prices:
+            fabricated = answer_prices - context_prices
+            max_reasonable = sum(context_prices) * 2
+            fabricated = {p for p in fabricated if p > max_reasonable or p < 50}
+            if fabricated:
+                archive("report_generator.hallucination", {
+                    "rule": "price_fabrication",
+                    "fabricated_prices": list(fabricated),
+                    "action": "block",
+                })
+                return "block"
+
+    return "pass"
 
 def _get_last_human_query(messages: list) -> str:
     """메시지 리스트에서 마지막 HumanMessage의 content를 반환"""
