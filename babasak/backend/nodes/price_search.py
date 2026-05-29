@@ -2,13 +2,15 @@
 Genie Space로 KAMIS 도매가를 조회하는 노드.
 
 흐름:
-  1. 입력 재료 목록을 catalog.resolve_many()로 정규화하여 3그룹으로 분리
-       - matched     : (db_name, db_unit)로 정확명 쿼리 ─ 1차에서 명시 쿼리로 던짐
-       - passthrough : alias 미등록('unmapped') ─ 원본 이름 그대로 자유 쿼리
-       - skip        : 카탈로그에 없는 게 명백('ambiguous', 'not_in_catalog')
-                       Genie를 거치지 않고 곧장 unavailable로 분류
-  2. matched/passthrough만 배치로 묶어 Genie에 병렬 호출
-  3. Genie unavailable 판정 + 실패 배치를 합쳐 missing_price_search로 넘김
+  1. 입력 재료 목록을 catalog.resolve_many()로 정규화하여 4그룹으로 분리
+       - matched       : (db_name, db_unit)로 정확명 쿼리 ─ Genie/direct_sql 대상
+       - recipe_direct : ingredient_recipe B2B 유통가 직접 사용 ─ Genie 건너뜀
+       - passthrough   : alias 미등록('unmapped') ─ 원본 이름 그대로 자유 쿼리
+       - skip          : 카탈로그에 없는 게 명백('ambiguous', 'not_in_catalog')
+                         Genie를 거치지 않고 곧장 unavailable로 분류
+  2. recipe_direct는 즉시 structured_prices에 투입 (Genie 호출 불필요)
+  3. matched/passthrough만 배치로 묶어 Genie에 병렬 호출
+  4. Genie 실패 시 direct_sql + recipe B2B 폴백 후 최종 unavailable만 missing_price_search로
 """
 import os
 import time
@@ -21,7 +23,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import StatementState
 
 from backend.debug_log import archive
-from backend.catalog import resolve_many, ResolveResult
+from backend.catalog import resolve_many, ResolveResult, get_recipe_prices_for_items
 
 GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID", "01f148e5845f1f68843892ceb53abd32")
 
@@ -139,9 +141,6 @@ GROUP BY `재료명`, `단위`
                 continue
             input_name = db_to_input.get((db_name, db_unit), db_name)
             # cost_calculator._PRICE_LINE_PATTERNS이 "재료명: ... NNN원/kg" 형식을 잡음
-            # 단위가 kg/g 외(개/마리/포기 등)면 그대로 ₩표기로만 보고하되 cost_calculator의
-            # _PER_PIECE_GRAMS 매칭에 의존하지 않는 흐름은 ₩/kg가 가장 안전. 단위에 'kg'가
-            # 포함되면 그 단위로 환산하고, 아니면 raw 단위로 표기.
             unit_lower = db_unit.lower().replace(" ", "")
             kg_match = re.match(r"^(\d+(?:\.\d+)?)kg$", unit_lower)
             g_match = re.match(r"^(\d+(?:\.\d+)?)g$", unit_lower)
@@ -160,8 +159,6 @@ GROUP BY `재료명`, `단위`
                     f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
                 )
             else:
-                # 개/마리/포기 등 — cost_calculator가 _PER_PIECE_GRAMS로 환산 시도하므로
-                # 단가는 그대로 표기하되 단위 정보를 같이 노출
                 lines.append(
                     f"{input_name}: 약 ₩{avg_price:,}/{db_unit} "
                     f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
@@ -228,25 +225,17 @@ _NOT_FOUND_LIST_RE = re.compile(
 
 
 def _detect_unavailable(ingredients: list, genie_text: str) -> list:
-    """요청한 재료 vs Genie 응답을 비교하여 누락된 재료 반환.
-
-    전략:
-    1) Genie가 "조회된 재료는 X, Y, Z" 식으로 명시한 경우 → 그 외는 모두 unavailable
-    2) "나머지 재료(A, B, C)는 ... 없" 패턴이 있으면 그것도 활용
-    3) 명시적 패턴 없으면 기존 윈도우 기반 polling으로 폴백
-    """
+    """요청한 재료 vs Genie 응답을 비교하여 누락된 재료 반환."""
     if not genie_text or not ingredients:
         return list(ingredients)
 
-    # ── Step 1: "조회된 재료는 X, Y, Z" 명시적 추출 ──
     explicit_found = set()
     for fm in _FOUND_LIST_RE.finditer(genie_text):
-        found_text = re.sub(r"\*+", "", fm.group(1))  # markdown ** 제거
+        found_text = re.sub(r"\*+", "", fm.group(1))
         for ing in ingredients:
             if ing in found_text:
                 explicit_found.add(ing)
 
-    # ── Step 2: "나머지 재료(A, B, C)는 ... 없" 명시적 추출 ──
     explicit_not_found = set()
     for nm in _NOT_FOUND_LIST_RE.finditer(genie_text):
         nf_text = nm.group(1)
@@ -254,15 +243,11 @@ def _detect_unavailable(ingredients: list, genie_text: str) -> list:
             if ing in nf_text:
                 explicit_not_found.add(ing)
 
-    # ── Step 3: 명시적 found 리스트가 있으면 그게 진실 ──
     if explicit_found:
         return [ing for ing in ingredients if ing not in explicit_found]
-
-    # ── Step 4: 명시적 not_found 리스트만 있으면 그것만 unavailable ──
     if explicit_not_found:
         return [ing for ing in ingredients if ing in explicit_not_found]
 
-    # ── Step 5: 폴백 — 기존 윈도우 기반 polling ──
     unavailable = []
     for ing in ingredients:
         if ing not in genie_text:
@@ -284,11 +269,7 @@ def _detect_unavailable(ingredients: list, genie_text: str) -> list:
 
 
 def _build_catalog_query(targets: list[tuple[str, str, str]]) -> str:
-    """(input_name, db_name, db_unit) 튜플 목록으로 정확명 쿼리 생성.
-
-    Genie가 LIKE 검색이나 다른 단위 대체 없이 정확히 명시된 (재료명, 단위)로만
-    WHERE 절을 만들도록 유도한다.
-    """
+    """(input_name, db_name, db_unit) 튜플 목록으로 정확명 쿼리 생성."""
     lines = []
     for input_name, db_name, db_unit in targets:
         lines.append(f"- 재료명='{db_name}', 단위='{db_unit}'  (사용자 입력: '{input_name}')")
@@ -368,12 +349,12 @@ def price_search_node(state: dict) -> dict:
     ingredients = list(dict.fromkeys(ingredients))
 
     # 재료별 trace_id — 모든 archive에 동일 형식으로 박아 grep 추적용.
-    # missing_price_search 노드도 같은 형식을 사용한다.
     trace_ids = {ing: f"{loop_count}:{ing}" for ing in ingredients}
 
-    # ─── 카탈로그 기반 그룹 분리 ────────────────────────────────
-    # resolve_many()는 각 재료를 4가지 status로 분류한다:
+    # ─── 카탈로그 기반 그룹 분리 (4그룹) ────────────────────────
+    # resolve_many()는 각 재료를 5가지 status로 분류한다:
     #   matched         → 정확명 쿼리 그룹 (catalog_targets)
+    #   recipe_matched  → B2B 유통가 직접 사용 (recipe_direct) ★ NEW
     #   unmapped        → alias 미등록, 자유 쿼리로 시도 (passthrough)
     #   ambiguous       → 자동 매칭 금지, Genie 건너뛰고 곧장 unavailable (skip)
     #   not_in_catalog  → alias 매핑은 있는데 카탈로그엔 없음 (skip)
@@ -381,11 +362,14 @@ def price_search_node(state: dict) -> dict:
     resolved_by_input: dict[str, ResolveResult] = {r.input_name: r for r in resolved}
 
     catalog_targets: list[tuple[str, str, str]] = []  # (input, db_name, db_unit)
+    recipe_direct: list[str] = []  # recipe_matched → B2B 가격 직접 사용, Genie 건너뜀
     passthrough: list[str] = []
     skip_unavailable: list[str] = []
     for r in resolved:
         if r.status == "matched" and r.db_name and r.db_unit:
             catalog_targets.append((r.input_name, r.db_name, r.db_unit))
+        elif r.status == "recipe_matched":
+            recipe_direct.append(r.input_name)
         elif r.status == "unmapped":
             passthrough.append(r.input_name)
         else:
@@ -399,6 +383,7 @@ def price_search_node(state: dict) -> dict:
         "trace_ids": trace_ids,
         "groups": {
             "catalog_targets": [t[0] for t in catalog_targets],
+            "recipe_direct": recipe_direct,
             "passthrough": passthrough,
             "skip_unavailable": skip_unavailable,
         },
@@ -411,9 +396,6 @@ def price_search_node(state: dict) -> dict:
 
     try:
         # ─── 배치 계획 ───────────────────────────────────────
-        # 정확명 그룹과 자유 그룹은 쿼리 형식이 달라 별도 배치로 분리.
-        # 그룹 내에서만 _GENIE_BATCH_SIZE 단위로 묶는다.
-        # batches는 (mode, items) 형태로 통일. mode는 "catalog" | "passthrough".
         batches: list[tuple[str, list]] = []
         for i in range(0, len(catalog_targets), _GENIE_BATCH_SIZE):
             batches.append(("catalog", catalog_targets[i:i + _GENIE_BATCH_SIZE]))
@@ -422,6 +404,7 @@ def price_search_node(state: dict) -> dict:
 
         archive("price_search.batch_plan", {
             "num_batches": len(batches),
+            "num_recipe_direct": len(recipe_direct),
             "num_skip": len(skip_unavailable),
             "max_workers": _GENIE_MAX_WORKERS,
             "plan": [
@@ -441,14 +424,13 @@ def price_search_node(state: dict) -> dict:
                 query = _build_passthrough_query(items)
                 input_names = items
 
-            # --- 1. 캐시 확인 (반복 질문 시 즉시 반환) ---
             cache_key = tuple(sorted(input_names))
             if cache_key in _batch_cache:
                 cached_time, cached_result = _batch_cache[cache_key]
                 if time.time() - cached_time < _CACHE_TTL_SECONDS:
                     return (idx, mode, cached_result, input_names, None)
                 else:
-                    del _batch_cache[cache_key]  # 시간이 지나 만료된 캐시 삭제
+                    del _batch_cache[cache_key]
 
             archive("price_search.genie_query", {
                 "batch_index": idx,
@@ -471,10 +453,8 @@ def price_search_node(state: dict) -> dict:
                         "has_dataframe": result.get("dataframe") is not None,
                     })
 
-                # --- 2. 검색 성공 시 캐시에 결과 저장 ---
                 if result.get("text") or result.get("dataframe") is not None:
                     if len(_batch_cache) >= _MAX_CACHE_SIZE:
-                        # 용량 초과 시 가장 오래된 항목(FIFO) 삭제
                         oldest_key = next(iter(_batch_cache))
                         del _batch_cache[oldest_key]
                     _batch_cache[cache_key] = (time.time(), result)
@@ -525,15 +505,8 @@ def price_search_node(state: dict) -> dict:
                     all_tables.append(result["dataframe"].to_string(index=False, max_rows=15))
 
         # ─── 실패 배치 단건 재시도 ────────────────────────────
-        # 배치 단위 호출이 MessageStatus.FAILED 등으로 통째로 실패한 경우,
-        # 그 안의 항목을 1개씩 분리하여 다시 호출. 1건 처리 시 SQL 생성 자유도가
-        # 줄어 성공률이 올라가는 효과를 기대.
-        # mode는 catalog_targets에 포함된 입력명이면 'catalog', 아니면 'passthrough'.
         retry_recovered: list[str] = []
         catalog_input_map = {t[0]: t for t in catalog_targets}
-        # passthrough(KAMIS에 없는 게 거의 확실한 재료)는 단건 재시도해도 100% '없음'으로
-        # 나와 네이버로 갈 뿐이라, 재시도 대상에서 제외하고 곧장 실패 처리한다.
-        # (재시도 1건당 Genie 4~25초 × N개 = 수분 낭비의 주원인이었음)
         retry_targets = [i for i in failed_batch_items if i in catalog_input_map]
         skip_retry_passthrough = [i for i in failed_batch_items if i not in catalog_input_map]
         if skip_retry_passthrough:
@@ -599,11 +572,8 @@ def price_search_node(state: dict) -> dict:
                 if r.get("dataframe") is not None:
                     all_tables.append(r["dataframe"].to_string(index=False, max_rows=15))
 
-            # catalog 재시도 실패분 + 처음부터 재시도 스킵한 passthrough = 최종 실패 목록.
-            # (둘 다 unavailable로 흘러가 네이버 폴백 대상이 됨)
             failed_batch_items = still_failed_after_retry + skip_retry_passthrough
         else:
-            # 재시도할 catalog 항목이 없으면, 실패분은 스킵된 passthrough가 전부.
             failed_batch_items = skip_retry_passthrough
 
         price_data = {"source": "genie", "data": ingredients}
@@ -614,11 +584,59 @@ def price_search_node(state: dict) -> dict:
         if all_tables:
             price_data["table"] = "\n---\n".join(all_tables)
 
+        # ─── recipe_matched 재료 B2B 가격 즉시 투입 ────────────
+        # Genie를 거치지 않고 ingredient_recipe의 유통가를 structured_prices에 직접 삽입.
+        # cost_calculator가 structured_prices를 1순위로 참조하므로 이 재료들은 확정 가격.
+        if recipe_direct:
+            structured_prices = price_data.get("structured_prices", {})
+            recipe_text_lines = []
+            for ing_name in recipe_direct:
+                r = resolved_by_input.get(ing_name)
+                if r and r.recipe_info:
+                    ri_info = r.recipe_info
+                    price = ri_info.get("price", 0)
+                    unit = ri_info.get("unit", "")
+                    product_name = ri_info.get("product_name", "")
+                    unit_numeric = ri_info.get("unit_numeric")
+                    unit_text = (ri_info.get("unit_text") or "").lower().strip()
+                    price_per_kg = None
+                    if unit_numeric and unit_numeric > 0:
+                        if unit_text in ("g", "그램"):
+                            price_per_kg = int(price * 1000 / unit_numeric)
+                        elif unit_text in ("kg", "킬로그램"):
+                            price_per_kg = int(price / unit_numeric)
+                        elif unit_text in ("ml", "밀리리터"):
+                            price_per_kg = int(price * 1000 / unit_numeric)
+                        elif unit_text in ("l", "리터"):
+                            price_per_kg = int(price / unit_numeric)
+                    structured_prices[ing_name] = {
+                        "price_per_kg": price_per_kg,
+                        "confidence": "high",
+                        "unit_hint": f"{unit} (B2B 유통가, 상품: {product_name})",
+                        "note": "ingredient_recipe B2B 가격 직접 사용",
+                    }
+                    if price_per_kg:
+                        recipe_text_lines.append(
+                            f"{ing_name}: 약 ₩{price_per_kg:,}/kg (B2B 유통가, {product_name} {unit})"
+                        )
+                    else:
+                        recipe_text_lines.append(
+                            f"{ing_name}: ₩{price:,}/{unit} (B2B 유통가, {product_name})"
+                        )
+            if structured_prices:
+                price_data["structured_prices"] = structured_prices
+            if recipe_text_lines:
+                existing_text = price_data.get("text", "")
+                price_data["text"] = (
+                    existing_text + "\n\n[ingredient_recipe B2B 유통가]\n"
+                    + "\n".join(recipe_text_lines)
+                )
+            archive("price_search.recipe_direct_applied", {
+                "items": recipe_direct,
+                "num_priced": len(structured_prices),
+            })
+
         # ─── unavailable 판정 ─────────────────────────────────
-        # 1) skip 그룹은 처음부터 unavailable
-        # 2) Genie를 거친 재료 중 응답에 없는 것도 unavailable
-        # 3) 배치 실패분도 unavailable
-        # 판정은 input_name + db_name 둘 다로 — Genie가 어느 표기로 응답해도 잡힘.
         queried_input_names = [t[0] for t in catalog_targets] + passthrough
         judge_targets: list[str] = []
         for name in queried_input_names:
@@ -644,10 +662,6 @@ def price_search_node(state: dict) -> dict:
                 unavailable.append(item)
 
         # ─── 카탈로그 재질의 ──────────────────────────────────
-        # 'matched' 상태였는데 Genie 1차에서 unavailable로 분류된 재료를 한 번 더 질의.
-        # 카탈로그에 (db_name, db_unit)이 확실히 존재하므로 Genie의 LLM 비결정성으로
-        # SQL을 잘못 생성했을 가능성이 큼. 명시적 WHERE 조건을 자연어로 강하게 유도하여
-        # 재시도하고, 성공한 항목은 unavailable에서 제거.
         catalog_input_set = {t[0] for t in catalog_targets}
         recoverable = [ing for ing in unavailable if ing in catalog_input_set]
         requery_recovered: list[str] = []
@@ -682,7 +696,6 @@ def price_search_node(state: dict) -> dict:
                 if requery_result.get("dataframe") is not None:
                     requery_text += "\n" + requery_result["dataframe"].to_string(index=False, max_rows=15)
 
-                # 판정은 input_name + db_name 둘 다로 — Genie가 어느 표기로 응답해도 잡힘
                 requery_judge_targets: list[str] = []
                 for ing in recoverable:
                     requery_judge_targets.append(ing)
@@ -706,7 +719,6 @@ def price_search_node(state: dict) -> dict:
                     "text_preview": requery_text[:300],
                 })
 
-                # 재질의로 회복된 재료는 unavailable에서 제거하고, Genie 응답 텍스트는 누적
                 if found_now:
                     requery_recovered = list(found_now)
                     unavailable = [ing for ing in unavailable if ing not in found_now]
@@ -735,10 +747,6 @@ def price_search_node(state: dict) -> dict:
                 })
 
         # ─── direct_sql_fallback ──────────────────────────────
-        # matched 였는데 Genie 1차 + 카탈로그 재질의에도 회복 안 된 항목을 마지막으로 시도.
-        # statement_execution으로 (재료명, 단위) WHERE 절을 직접 작성해 평균 가격 조회.
-        # Genie의 LLM SQL 생성을 완전히 우회하므로 결정적이며, 카탈로그에 데이터가 실제로
-        # 존재한다면 거의 항상 회복 가능.
         direct_sql_recovered: list[str] = []
         unrecoverable_matched = [ing for ing in unavailable if ing in catalog_input_set]
         if unrecoverable_matched:
@@ -797,6 +805,52 @@ def price_search_node(state: dict) -> dict:
                     "items": unrecoverable_matched,
                 })
 
+        # ─── recipe B2B 최종 폴백 ─────────────────────────────
+        # direct_sql에서도 회복 안 된 항목 + passthrough 실패분에 대해
+        # ingredient_recipe에서 B2B 유통가를 마지막으로 시도.
+        # 이렇게 하면 Naver로 넘어가는 재료를 최소화.
+        recipe_fallback_recovered: list[str] = []
+        recipe_fallback_candidates = [
+            ing for ing in unavailable if ing not in skip_unavailable
+        ]
+        if recipe_fallback_candidates:
+            recipe_fallback_result = get_recipe_prices_for_items(recipe_fallback_candidates)
+            if recipe_fallback_result:
+                recipe_fallback_recovered = list(recipe_fallback_result.keys())
+                unavailable = [ing for ing in unavailable if ing not in recipe_fallback_recovered]
+                # structured_prices에 추가
+                structured_prices = price_data.get("structured_prices", {})
+                recipe_fb_lines = []
+                for ing_name, info in recipe_fallback_result.items():
+                    ppk = info.get("price_per_kg")
+                    structured_prices[ing_name] = {
+                        "price_per_kg": ppk,
+                        "confidence": "medium",
+                        "unit_hint": f"{info.get('unit', '')} (B2B 유통가 폴백, {info.get('product_name', '')})",
+                        "note": "Genie/direct_sql 실패 후 recipe B2B 폴백",
+                    }
+                    if ppk:
+                        recipe_fb_lines.append(
+                            f"{ing_name}: 약 ₩{ppk:,}/kg (B2B 유통가 폴백, {info.get('product_name', '')} {info.get('unit', '')})"
+                        )
+                    else:
+                        recipe_fb_lines.append(
+                            f"{ing_name}: ₩{info.get('price', 0):,}/{info.get('unit', '')} (B2B 유통가 폴백)"
+                        )
+                if structured_prices:
+                    price_data["structured_prices"] = structured_prices
+                if recipe_fb_lines:
+                    existing_text = price_data.get("text", "")
+                    price_data["text"] = (
+                        existing_text + "\n\n[recipe B2B 유통가 폴백]\n"
+                        + "\n".join(recipe_fb_lines)
+                    )
+                archive("price_search.recipe_fallback_applied", {
+                    "candidates": recipe_fallback_candidates,
+                    "recovered": recipe_fallback_recovered,
+                    "still_unavailable": [ing for ing in recipe_fallback_candidates if ing not in recipe_fallback_recovered],
+                })
+
         # skip 그룹 합류 (Genie를 거치지 않은 ambiguous/not_in_catalog)
         for item in skip_unavailable:
             if item not in unavailable:
@@ -804,7 +858,6 @@ def price_search_node(state: dict) -> dict:
 
         if unavailable:
             price_data["unavailable"] = unavailable
-            # missing_price_search 검증에 활용할 resolve 정보 첨부
             price_data["unavailable_resolved"] = {
                 ing: {
                     "status": resolved_by_input[ing].status,
@@ -821,6 +874,7 @@ def price_search_node(state: dict) -> dict:
             "requested": ingredients,
             "unavailable": unavailable,
             "num_batches_used": len(batches),
+            "num_recipe_direct": len(recipe_direct),
             "num_skipped_to_unavailable": len(skip_unavailable),
             "num_failed_batches": len(failed_batch_items),
             "num_retry_recovered": len(retry_recovered),
@@ -829,13 +883,15 @@ def price_search_node(state: dict) -> dict:
             "requery_recovered": requery_recovered,
             "num_direct_sql_recovered": len(direct_sql_recovered),
             "direct_sql_recovered": direct_sql_recovered,
+            "num_recipe_fallback_recovered": len(recipe_fallback_recovered),
+            "recipe_fallback_recovered": recipe_fallback_recovered,
             "has_text": bool(price_data.get("text")),
             "has_table": bool(price_data.get("table")),
             "text_preview": (price_data.get("text") or "")[:300],
             "unavailable_by_status": {
                 status: [ing for ing in unavailable
                          if ing in resolved_by_input and resolved_by_input[ing].status == status]
-                for status in ("matched", "ambiguous", "not_in_catalog", "unmapped")
+                for status in ("matched", "recipe_matched", "ambiguous", "not_in_catalog", "unmapped")
             },
         })
         return {"price_info": price_data}
