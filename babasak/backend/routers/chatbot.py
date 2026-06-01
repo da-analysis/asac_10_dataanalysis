@@ -39,7 +39,10 @@ def chat(req: ChatRequest):
         if not response and result.get("messages"):
             response = result["messages"][-1].content
 
+        # ★ 추가: 카드형 UI용 구조화 데이터 (없으면 None → 프론트가 마크다운 폴백)
+        card = result.get("card_data") or None
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    return {"response": response}
+    return {"response": response, "card": card}
