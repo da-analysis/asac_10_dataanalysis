@@ -57,7 +57,7 @@ _CATEGORY_COL_PATTERNS = re.compile(
 
 
 def _detect_date_col(df: pd.DataFrame) -> Optional[str]:
-    """DataFrame에서 날짜/시간 컬럼을 자동 감지."""
+    """DataFrame에서 날짜/시간 컬럼을 자동 감지"""
     # 1) 컬럼명 패턴 매칭
     for col in df.columns:
         if _DATE_COL_PATTERNS.search(col):
