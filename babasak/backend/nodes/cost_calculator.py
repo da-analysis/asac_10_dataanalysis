@@ -270,9 +270,26 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
                 "reason": "exceeds_max_per_kg", "cap": _MAX_PRICE_PER_KG,
             })
             continue
+        # 출처 표기: structured_prices에는 direct_sql(KAMIS)·recipe B2B·네이버가 모두
+        # 섞여 들어온다. 과거엔 일괄 "naver_llm"으로 하드코딩해 KAMIS 가격도 "네이버"로
+        # 잘못 표기됐다(cf. project_cost_calculator_source_regression). note/source 힌트로
+        # 실제 출처를 추론한다.
+        note = info.get("note") or ""
+        note_lower = note.lower()
+        src_hint = (info.get("source") or "").lower()
+        # B2B를 direct_sql보다 먼저 본다: "Genie/direct_sql 실패 후 recipe B2B 폴백"처럼
+        # note에 'direct_sql'과 'b2b'가 같이 있는 경우, 실제 출처는 B2B 폴백이기 때문.
+        if "b2b" in note_lower or "ingredient_recipe" in note:
+            source = "recipe_b2b"
+        elif "direct_sql" in note_lower or "kamis" in note_lower or "kamis" in src_hint:
+            source = "kamis_direct_sql"
+        elif src_hint:
+            source = src_hint
+        else:
+            source = "naver_llm"  # 출처 단서가 없으면 종전 기본값(네이버 LLM 정제)
         price_map[name] = {
             "price_per_kg": ppk,
-            "source": "naver_llm",
+            "source": source,
             "confidence": info.get("confidence", "medium"),
             "note": info.get("note"),
         }

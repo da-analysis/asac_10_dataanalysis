@@ -2,7 +2,6 @@ import os
 
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 
 API_URL = os.getenv("BACKEND_API_URL", "http://localhost:9000")
@@ -19,38 +18,18 @@ def render():
     _render_profile()
     st.divider()
 
-    for item in st.session_state.chat_history:
-        # ═══ [차트 렌더링 지원] ═══════════════════════════════════════
-        # chat_history 항목이 tuple이면 기존 (role, message) 형식.
-        # dict이면 {"role": ..., "message": ..., "chart_html": ...} 형식.
-        # 차트를 비활성화하려면 chart_utils.py의 ENABLE_CHART = False로 변경.
-        # ═══════════════════════════════════════════════════════════════
-        if isinstance(item, dict):
-            role = item["role"]
-            message = item["message"]
-            chart_html = item.get("chart_html")
-        else:
-            role, message = item
-            chart_html = None
-
+    for role, message in st.session_state.chat_history:
         with st.chat_message(role):
             st.write(message)
-            # ═══ [차트 HTML 렌더링] ═══
-            if chart_html:
-                components.html(chart_html, height=420, scrolling=False)
 
     user_input = st.chat_input("예: 감자, 양파, 돼지등뼈가 있는데 마진 좋은 메뉴 추천해줘")
     if user_input:
-        st.session_state.chat_history.append({"role": "user", "message": user_input})
+        st.session_state.chat_history.append(("user", user_input))
         with st.chat_message("user"):
             st.write(user_input)
         with st.spinner("챗봇이 답변을 생성 중입니다..."):
-            bot_response, chart_html = _fetch_response(user_input)
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "message": bot_response,
-            "chart_html": chart_html,
-        })
+            bot_response = _fetch_response(user_input)
+        st.session_state.chat_history.append(("assistant", bot_response))
         st.rerun()
 
 
@@ -106,16 +85,9 @@ def _render_profile():
                 st.warning("업종과 지역을 모두 입력해주세요.")
 
 
-def _fetch_response(message: str) -> tuple[str, str | None]:
-    """백엔드 API 호출. (응답 텍스트, 차트 HTML 또는 None) 튜플 반환."""
+def _fetch_response(message: str) -> str:
     try:
-        history = []
-        for item in st.session_state.chat_history[:-1]:
-            if isinstance(item, dict):
-                history.append({"role": item["role"], "content": item["message"]})
-            else:
-                history.append({"role": item[0], "content": item[1]})
-
+        history = [{"role": role, "content": msg} for role, msg in st.session_state.chat_history[:-1]]
         resp = requests.post(
             f"{API_URL}/api/chatbot/chat",
             json={
@@ -127,10 +99,6 @@ def _fetch_response(message: str) -> tuple[str, str | None]:
             timeout=180,
         )
         resp.raise_for_status()
-        data = resp.json()
-        response_text = data.get("response", "응답을 가져올 수 없습니다.")
-        # ═══ [차트 HTML 수신] ═══
-        chart_html = data.get("chart_html")
-        return response_text, chart_html
+        return resp.json().get("response", "응답을 가져올 수 없습니다.")
     except Exception as exc:
-        return f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. ({exc})", None
+        return f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. ({exc})"
