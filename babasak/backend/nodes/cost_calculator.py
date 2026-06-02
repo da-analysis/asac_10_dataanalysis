@@ -18,6 +18,7 @@ import re
 
 from backend.debug_log import archive
 from backend.price_bounds import MAX_PRICE_PER_KG
+from backend.db import suggest_substitute_ingredient, get_menu_main_ingredient
 
 
 # ════════════════════════════════════════════════════════════════
@@ -60,6 +61,8 @@ _UNIT_TABLE = {
     "뿌리": 100.0,
     "포기": 2500.0,
     "단": 250.0
+    "cc": 1.0,      # 1cc = 1ml
+    "근": 600.0,    # 1근 = 600g (육류 기준)
 }
 
 # 개당 무게 추정 (재료별)
@@ -111,6 +114,18 @@ _QUALITATIVE_GRAMS = {
     "적당량": 3.0, "취향껏": 3.0,
 }
 
+# ── 수량이 비어있을 때 쓰는 일관된 기본값 (전 메뉴 동일) ──
+# 양념/소스류는 소량, 그 외는 적당량으로 가정. '(수량 추정)'으로 표기되어 출처를 정직하게.
+_DEFAULT_SEASONING_HINTS = (
+    "고춧가루", "후춧가루", "후추", "설탕", "소금", "간장", "고추장", "된장", "쌈장",
+    "참기름", "들기름", "식용유", "포도씨유", "올리브유", "고추기름",
+    "마늘", "다진마늘", "생강", "다진생강", "다시다", "미원", "맛술", "미림", "청주",
+    "식초", "물엿", "올리고당", "조청", "매실액", "액젓", "젓갈", "굴소스", "두반장",
+    "깨", "통깨", "참깨", "전분", "녹말",
+)
+_DEFAULT_GRAMS_SEASONING = 10.0   # 양념류 기본 ~1작은술 수준
+_DEFAULT_GRAMS_OTHER = 80.0       # 그 외(주/부재료) 기본
+
 # 분수 패턴: "1/2", "1/3", "2/3" 등
 _FRACTION_RE = re.compile(r"^(\d+)\s*/\s*(\d+)$")
 # 수량 + 단위: "1큰술", "1.5kg", "200g", "1/2모", "5개" 등
@@ -138,8 +153,13 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
     reason은 디버깅용으로 어떤 경로로 환산했는지 표시.
     환산 실패 시 (None, 사유).
     """
-    if not quantity:
-        return (None, "no_quantity")
+    # ★ 수량이 비어있으면 일관된 기본값 사용 (전 메뉴 동일 규칙).
+    #   '단가는 있는데 수량이 없어서 원가가 안 나오던' 문제 해결.
+    #   양념·소스류는 소량(10g), 그 외 주/부재료는 적당량(80g)으로 가정하고 '(수량 추정)' 표기.
+    if not quantity or not quantity.strip():
+        if any(h in ingredient_name for h in _DEFAULT_SEASONING_HINTS):
+            return (_DEFAULT_GRAMS_SEASONING, "default_seasoning")
+        return (_DEFAULT_GRAMS_OTHER, "default_other")
     q = quantity.strip()
 
     # 정성 표현
@@ -168,7 +188,7 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
         return (num * _UNIT_TABLE[unit], f"unit:{unit}")
 
     # 개수 단위(개/모/대/장/포기/쪽/캔/조각 등)
-    if unit in ("개", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통"):
+    if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리"):
         ppg = _PER_PIECE_GRAMS.get(ingredient_name)
         if ppg:
             return (num * ppg, f"piece:{ppg}g/{unit}")
@@ -201,7 +221,7 @@ _PRICE_LINE_PATTERNS = [
 #   → 단위가 괄호 안에 있고, 가격엔 /kg가 안 붙음. 단위로 kg당 환산.
 # 예: 꽃게(1kg)…15,300원 → 15,300/kg,  돼지고기(100g)…2,000원 → 20,000/kg
 _GENIE_PRICE_PATTERN = re.compile(
-    r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|마리|포기|장|손|쪽|단|모)\s*\)"
+    r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|알|마리|포기|장|손|쪽|단|모|봉|팩|통)\s*\)"
     r"[^\n]*?(?P<price>[\d,]+)\s*원"
 )
 # 괄호 단위 → 그램 (개수 단위는 _PER_PIECE_GRAMS로 별도 처리하므로 여기선 무게 단위만)
@@ -211,7 +231,7 @@ _GENIE_UNIT_TO_GRAMS = {"kg": 1000.0, "g": 1.0}
 # "계란(30개)입니다. ...\n- 강원: 7,750원" 처럼 단위와 가격이 다른 줄에 있음.
 # 재료명(단위) 뒤 최대 80자 이내(다른 재료 설명이 끼기 전)의 첫 가격을 묶는다.
 _GENIE_PRICE_MULTILINE = re.compile(
-    r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|마리|포기|장|손|쪽|단|모)\s*\)"
+    r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|알|마리|포기|장|손|쪽|단|모|봉|팩|통)\s*\)"
     r".{0,80}?(?P<price>[\d,]{3,})\s*원",
     re.DOTALL,
 )
@@ -550,6 +570,10 @@ def _format_recipe_section(calc: dict) -> str:
         else:
             cost = "시세/사용량 미확인"
         qty = it.get("quantity") or "-"
+        # 수량이 비어 기본값으로 추정한 경우 → 추정한 그램값을 같이 보여줌 (예: '약 10g(추정)')
+        if (it.get("qty_reason") or "").startswith("default") and not (it.get("quantity") or "").strip():
+            g = it.get("grams")
+            qty = f"약 {int(g)}g(추정)" if g else "추정"
         lines.append(f"| {it['name']} | {qty} | {ppk} | {cost} |")
 
     total = calc["total_cost"]
@@ -568,6 +592,82 @@ def _format_recipe_section(calc: dict) -> str:
 # ════════════════════════════════════════════════════════════════
 # 노드 진입점
 # ════════════════════════════════════════════════════════════════
+
+def _strong_family(target_name: str, cand_name: str) -> bool:
+    """후보가 target과 '진짜 같은 계열'인지 엄격 판정.
+
+    짧은 이름(2글자)의 우연 매칭을 막는다:
+      - 돼지고기앞다리살 ↔ 돼지고기목살 : 공통 접두 '돼지고기'(4글자) → True ✅
+      - 돼지고기 ↔ 돼지고기목살           : 포함 + 4글자 → True ✅
+      - 고추 ↔ 고추냉이                   : 공통 '고추' 2글자뿐 → False ✅ (오매칭 차단)
+      - 미역 ↔ 다시마                     : 공통 없음 → False ✅
+    """
+    if not target_name or not cand_name or target_name == cand_name:
+        return False
+    # 한쪽이 다른 쪽을 포함 + 포함되는 이름이 3글자 이상 (의미있는 계열명)
+    if target_name in cand_name and len(target_name) >= 3:
+        return True
+    if cand_name in target_name and len(cand_name) >= 3:
+        return True
+    # 공통 접두 3글자 이상
+    common = 0
+    for a, b in zip(target_name, cand_name):
+        if a == b:
+            common += 1
+        else:
+            break
+    return common >= 3
+
+
+def _build_substitute_line(calc: dict, price_map: dict) -> str:
+    """비싼 재료를 '같은 계열 + 더 싼' 재료로 1개만 제안하는 라인 생성.
+
+    규칙(사용자 요구 반영):
+      - 비싼 재료부터 순서대로 시도 (핵심재료 포함 — 돼지고기앞다리살→돼지고기목살 OK)
+      - 후보는 ① 강한 계열 매칭(_strong_family) ② price_map에서 실제로 더 싼 것만
+      - 조건 만족하는 게 없으면 추천 안 함('' 반환) — 엉뚱한 대체(미역→다시마) 금지
+    """
+    items = [
+        it for it in calc.get("items", [])
+        if it.get("cost") and it.get("source") != "non_cost" and it.get("price_per_kg")
+    ]
+    if not items:
+        return ""
+    items.sort(key=lambda it: it["cost"], reverse=True)
+    menu = calc.get("menu") or ""
+
+    for target in items[:6]:  # 비싼 순 최대 6개까지만 시도(성능)
+        tname = target["name"]
+        tppk = target["price_per_kg"]
+        try:
+            cands = suggest_substitute_ingredient(menu, tname, limit=8)
+        except Exception:
+            cands = []
+        for c in cands:
+            cname = c.get("name", "")
+            if not _strong_family(tname, cname):
+                continue
+            cinfo = price_map.get(cname) if isinstance(price_map, dict) else None
+            cppk = cinfo.get("price_per_kg") if isinstance(cinfo, dict) else None
+            if not cppk or cppk >= tppk:
+                continue  # 후보가 더 싸야 의미 있음
+            saving_pct = round((tppk - cppk) / tppk * 100)
+            archive("cost_calculator.substitute", {
+                "menu": menu, "target": tname, "target_ppk": tppk,
+                "candidate": cname, "candidate_ppk": cppk, "saving_pct": saving_pct,
+            })
+            # ★ 카드 UI용 구조화 저장 (calc_results에 실려 report_generator→프론트로 전달)
+            calc["substitute"] = {
+                "target": tname, "candidates": [cname], "saving_pct": saving_pct,
+                "target_ppk": tppk, "candidate_ppk": cppk,
+            }
+            return (
+                f"\n\n💡 **대체 제안:** **{tname}**(단가 {tppk:,}원/kg)이 비싼 편이에요 "
+                f"→ 같은 계열 **{cname}**(단가 {cppk:,}원/kg)(으)로 바꾸면 "
+                f"약 **{saving_pct}%** 저렴해요."
+            )
+    return ""  # 적절한 '같은 계열 + 더 싼' 대체재 없음 → 추천 생략
+
 
 def cost_calculator_node(state: dict) -> dict:
     """레시피 재료 + 가격 데이터를 코드로 매칭하여 원가를 계산합니다."""
@@ -614,8 +714,14 @@ def cost_calculator_node(state: dict) -> dict:
         "unconfirmed_counts": [c["unconfirmed_count"] for c in calc_results],
     })
 
-    # 마크다운 조합
-    sections = [_format_recipe_section(c) for c in calc_results]
+    # 마크다운 조합 (+ 비싼 보조재료 대체 제안 라인 부착)
+    sections = []
+    for c in calc_results:
+        sec = _format_recipe_section(c)
+        sub_line = _build_substitute_line(c, price_map)
+        if sub_line:
+            sec += sub_line
+        sections.append(sec)
 
     # 인기 순위별 비교 요약
     if len(calc_results) > 1:

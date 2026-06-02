@@ -396,7 +396,9 @@ def recipe_search_node(state: dict) -> dict:
 
         # === 시나리오 7: 메뉴 키워드 검색 + 재료 상세 + 조리단계 (기본) ===
         if menu:
-            recipes = search_recipes(menu, limit=10)
+            # 30개로 넓게 가져온다 — 인기 본체(예: '제육볶음')가 상위를 다 차지해도
+            # 변형(김치제육볶음 등)이 상위권에 들어올 기회를 주기 위함. 아래에서 3개로 추림.
+            recipes = search_recipes(menu, limit=30)
 
             # ★ 원본 사용자 쿼리 추출 — preprocessor가 menu를 정규화(예: "마라김치찌개"→"김치찌개")
             #    하기 때문에, modifier(마라) 정보를 살리려면 원본 쿼리에서 가져와야 함.
@@ -406,23 +408,27 @@ def recipe_search_node(state: dict) -> dict:
                 last_msg = messages[-1]
                 user_query = getattr(last_msg, "content", "") or ""
 
-            # 의도 단어 제거해서 핵심 키워드만 남김
+            # 의도 단어 + 원가/가격류 단어 제거해서 핵심 키워드만 남김
+            # ('원가/가격' 같은 단어가 안 지워지면 '원가랑'이 modifier(예:'마라')로 오인돼
+            #  멀쩡한 '김치찌개'가 "(레시피 조합 제안)"으로 잘못 분류되던 버그 수정)
             clean_query = re.sub(
-                r'(레시피|알려줘|만드는\s*법|조리법|추천|어떻게|만들기|만들고\s*싶어|알고\s*싶어|보여줘)',
+                r'(레시피|알려줘|만드는\s*법|조리법|추천|어떻게|만들기|만들고\s*싶어|알고\s*싶어|보여줘|'
+                r'원가|판매가|단가|가격|시세|마진율|마진|얼마|비용|값)',
                 '',
                 user_query,
             ).strip()
             clean_query_compact = re.sub(r'\s+', '', clean_query)
             menu_compact = re.sub(r'\s+', '', menu)
 
-            # 원본 쿼리가 menu보다 더 긴 키워드를 포함하면 → modifier가 있다
-            # 예: clean_query="마라김치찌개", menu="김치찌개" → modifier="마라"
-            has_modifier = (
-                clean_query_compact
-                and menu_compact
-                and clean_query_compact != menu_compact
-                and len(clean_query_compact) > len(menu_compact)
+            # menu를 뺀 '나머지'에서 조사/연결어까지 제거하고, 실제 수식어가 남는지 본다.
+            # 예: "김치찌개원가랑" → menu 제거 → "원가랑" → (원가는 위에서 제거됨) "랑" → 조사 제거 → "" → 수식어 없음
+            #     "마라김치찌개"   → menu 제거 → "마라" → 수식어 있음
+            leftover = (
+                clean_query_compact.replace(menu_compact, "", 1)
+                if menu_compact else clean_query_compact
             )
+            leftover = re.sub(r'(이?랑|하고|와|과|및|그리고|좀|는|은|을|를|도|의|에|대해서?|대한|요|줘)', '', leftover)
+            has_modifier = bool(menu_compact) and len(leftover) >= 1
 
             # 1) DB 결과가 비었거나
             # 2) menu가 결과에 매칭 안 되거나
@@ -458,43 +464,38 @@ def recipe_search_node(state: dict) -> dict:
                     if match:
                         filtered.append(r)
                 recipes = filtered if filtered else recipes
-            # 같은 메뉴명 중복 제거 — [:3] 이전에 수행
-            # search_recipes_smart는 score DESC로 가져오므로,
-            # 같은 이름 중에선 자동으로 1등(점수 최고)이 채택됨.
-            # 그 후 다른 변형 메뉴들이 2~3번에 들어와 다양성 확보.
-            # 예: ["김치찌개"(A,점수1위), "김치찌개"(B), "김치찌개"(C), "차돌김치찌개", "돼지목살김치찌개"]
-            #     → 중복 제거 → ["김치찌개"(A), "차돌김치찌개", "돼지목살김치찌개"]
-            #     → [:3] → 그대로 3개 ✅
+            # 중복 제거 + 3개 채우기 — [:3] 이전에 수행. score DESC 정렬 기준.
+            # 1순위: 이름 다른 변형 우선 (다양성)
+            #   예) 김치찌개 → 김치찌개, 차돌김치찌개, 돼지목살김치찌개
+            # 2순위: 변형이 3개 안 되면 같은 이름이라도 '다른 레시피(rcp_sno 다름)'로 채움
+            #   예) 제육볶음 변형이 없으면 → 제육볶음(A), 제육볶음(B), 제육볶음(C)
+            # 진짜 똑같은 레시피(같은 id)만 제거. → "1개"는 그 메뉴가 DB에 정말 하나뿐일 때만.
+            TARGET_COUNT = 3
+            seen_ids = set()
             seen_names = set()
-            unique_recipes = []
+            primary = []   # 이름 다른 변형 (다양성 우선)
+            fillers = []   # 같은 이름·다른 레시피 (채움용)
             for r in recipes:
+                rid = r.get("id")
+                if rid is not None and rid in seen_ids:
+                    continue   # 완전히 같은 레시피만 제거
+                if rid is not None:
+                    seen_ids.add(rid)
                 if r["name"] not in seen_names:
                     seen_names.add(r["name"])
-                    unique_recipes.append(r)
-            recipes = unique_recipes[:3]
+                    primary.append(r)
+                else:
+                    fillers.append(r)
+            recipes = (primary + fillers)[:TARGET_COUNT]
 
             for recipe in recipes:
                 ings = get_recipe_ingredients(recipe["id"])
                 detail = get_recipe_detail(recipe["id"])
 
-                # 주재료 1개에 대한 대체재 후보 미리 조회 (report_generator의
-                # '💡 비싼 재료 → 대체 제안' 섹션에서 활용).
-                # Neo4j 쿼리 1회 추가 — 레시피 3개 × 1회 = 3회. 테스트 단계에서는 감수.
-                main_ing = _pick_main_ingredient(ings)
-                substitute_suggestions = None
-                if main_ing:
-                    try:
-                        subs = suggest_substitute_ingredient(
-                            recipe["name"], main_ing, limit=3
-                        )
-                        if subs:
-                            substitute_suggestions = {
-                                "target": main_ing,
-                                "candidates": subs,
-                            }
-                    except Exception:
-                        substitute_suggestions = None
-
+                # ★ 대체재는 여기서 붙이지 않는다.
+                #   (기존엔 주재료=핵심재료(돼지고기)에 대체재를 붙여 '돼지고기→스팸' 같은
+                #    정체성 깨짐이 발생했음. 대체재는 가격을 아는 cost_calculator에서
+                #    '핵심 제외 + 비싼 보조재료'를 기준으로 1개만 제안한다.)
                 recipe_data.append({
                     "menu": recipe["name"],
                     "id": recipe["id"],
@@ -505,7 +506,6 @@ def recipe_search_node(state: dict) -> dict:
                     "description": detail.get("description") if detail else None,
                     "steps": detail.get("steps") if detail else None,
                     "ingredients": ings,
-                    "substitute_suggestions": substitute_suggestions,
                 })
 
             # 부분 매칭만 됐을 때 OR modifier가 있을 때 — graph_relation 컨텍스트 같이 반환
@@ -533,8 +533,13 @@ def recipe_search_node(state: dict) -> dict:
                     #    예: clean_query="마라김치찌개", menu="김치찌개" → modifier="마라"
                     modifier_text = ""
                     if has_modifier:
-                        modifier_text = clean_query_compact.replace(menu_compact, "").strip()
-                    if modifier_text:
+                        mt = clean_query_compact.replace(menu_compact, "", 1).strip()
+                        # 남은 조사/연결어 제거 ('원가/가격'은 위 clean 단계에서 이미 제거됨)
+                        mt = re.sub(
+                            r'(이?랑|하고|와|과|및|그리고|좀|는|은|을|를|도|의|에|대해서?|대한|요|줘)',
+                            '', mt)
+                        modifier_text = mt
+                    if modifier_text and len(modifier_text) >= 1:
                         result_payload["ai_new_menu_suggestions"] = [{
                             "name": graph_query,
                             "base_menu": menu,
