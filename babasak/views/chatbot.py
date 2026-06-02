@@ -1,9 +1,35 @@
+import base64
 import os
+from pathlib import Path
+
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
 API_URL = os.getenv("BACKEND_API_URL", "http://localhost:9000")
+
+# 로고 (사이드바 외에 챗봇 헤더에도 표시). 없으면 이모지 폴백.
+_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
+
+# 우측 '추천 질문' 패널의 칩 (라벨, 보낼 질문). 클릭 시 바로 전송된다.
+_SUGGESTED_QUESTIONS = [
+    ("메뉴", "지금 마진 좋은 메뉴 추천해줘"),
+    ("원가", "감자탕 1인분 원가 계산해줘"),
+    ("대체", "대파 대신 쓸 대체 재료는?"),
+    ("시세", "다음 주 채소 시세 전망은?"),
+    ("절감", "이번 달 식재료비 줄이는 법"),
+]
+
+# 메뉴 칩만 사용자가 요청한 문구로 교체
+_SUGGESTED_QUESTIONS[0] = ("메뉴", "제육볶음 레시피 알려줘")
+
+
+def _logo_img_html(height: int = 34) -> str:
+    if _LOGO_PATH.exists():
+        b64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+        return (f'<img src="data:image/png;base64,{b64}" '
+                f'style="height:{height}px;width:auto;object-fit:contain;vertical-align:middle;" />')
+    return f'<span style="font-size:{height}px;line-height:1;">🍽️</span>'
 
 
 def _unpack(item):
@@ -30,55 +56,107 @@ def _unpack(item):
     return "assistant", str(item), None, None
 
 
+def _queue_message(text: str):
+    """사용자 메시지를 히스토리에 넣고 '답변 대기' 플래그만 세운 뒤 rerun.
+    실제 백엔드 호출은 화면(헤더·채팅·패널)이 그려진 뒤 채팅 영역 안에서 수행한다.
+    입력창과 추천 질문 칩이 공유하는 진입점."""
+    text = (text or "").strip()
+    if not text:
+        return
+    st.session_state.chat_history.append(
+        {"role": "user", "message": text, "chart_html": None, "card": None}
+    )
+    st.session_state["_pending_answer"] = text
+    st.rerun()
+
+
 def render():
+    _inject_card_css()
+
     if st.button("← 홈으로", key="chatbot_home"):
         st.session_state.page = "home"
         st.rerun()
 
-    st.title("💬 챗봇")
-    st.caption("메뉴 추천, 원가 계산, 대체 재료, 시세 분석에 대해 질문할 수 있습니다.")
+    # ── 상단 헤더: 로고 + 타이틀 + 지역/업종 ─────────────────────
+    region = st.session_state.get("user_region", "")
+    industry = st.session_state.get("user_industry", "")
+    loc_txt = region or "지역 미설정"
+    ind_txt = industry or "업종 미설정"
+    st.markdown(
+        f"""
+    <div class="cb-header">
+        <div class="cb-header-left">
+            <div class="cb-logo">{_logo_img_html(38)}</div>
+            <div>
+                <div class="cb-title">바바삭 챗봇 <span class="cb-badge">● 응답중</span></div>
+                <div class="cb-subtitle">메뉴 추천 · 원가 계산 · 대체 재료 · 시세 분석</div>
+            </div>
+        </div>
+        <div class="cb-header-right">
+            <div class="cb-chip-info">📍 지역 · {loc_txt}</div>
+            <div class="cb-chip-info">🏷️ 업종 · {ind_txt}</div>
+        </div>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
-    _inject_card_css()
     _render_profile()
     st.divider()
 
-    for item in st.session_state.chat_history:
-        role, message, chart_html, card = _unpack(item)
-        
-        with st.chat_message(role):
-            # 1. 챗봇 답변 카드 렌더링 로직 (하단 코드 기능)
-            if role == "assistant" and card and card.get("recipes"):
-                _render_cards(card, message)
-            else:
-                st.write(message)
-                
-            # 2. 차트 HTML 렌더링 로직 (상단 코드 기능)
-            if chart_html:
-                components.html(chart_html, height=420, scrolling=False)
+    # ── 본문: 좌(채팅) / 우(추천질문 + Tip) 2단 ──────────────────
+    col_chat, col_side = st.columns([7, 3], gap="large")
 
-    user_input = st.chat_input("예: 감자, 양파, 돼지등뼈가 있는데 마진 좋은 메뉴 추천해줘")
+    with col_chat:
+        for item in st.session_state.chat_history:
+            role, message, chart_html, card = _unpack(item)
+            with st.chat_message(role):
+                if role == "assistant" and card and card.get("recipes"):
+                    _render_cards(card, message)
+                else:
+                    st.write(message)
+                if chart_html:
+                    components.html(chart_html, height=420, scrolling=False)
+
+        # 대기 중인 질문이 있으면 채팅 영역 안에서 로딩 → 응답 받기
+        pending = st.session_state.pop("_pending_answer", None)
+        if pending:
+            with st.chat_message("assistant"):
+                with st.spinner("챗봇이 답변을 생성 중입니다..."):
+                    bot_text, chart_html, bot_card = _fetch_response(pending)
+            st.session_state.chat_history.append(
+                {"role": "assistant", "message": bot_text,
+                 "chart_html": chart_html, "card": bot_card}
+            )
+            st.rerun()
+
+    with col_side:
+        _render_side_panel()
+
+    # 입력창 (placeholder 제거)
+    user_input = st.chat_input("")
     if user_input:
-        # 유저 메시지 저장 및 출력
-        st.session_state.chat_history.append({
-            "role": "user", 
-            "message": user_input, 
-            "chart_html": None, 
-            "card": None
-        })
-        with st.chat_message("user"):
-            st.write(user_input)
-            
-        with st.spinner("챗봇이 답변을 생성 중입니다..."):
-            bot_text, chart_html, bot_card = _fetch_response(user_input)
-            
-        # 챗봇 응답 데이터 모두를 구조화된 dict로 저장
-        st.session_state.chat_history.append({
-            "role": "assistant",
-            "message": bot_text,
-            "chart_html": chart_html,
-            "card": bot_card,
-        })
-        st.rerun()
+        _queue_message(user_input)
+
+
+def _render_side_panel():
+    """우측 패널: 추천 질문 칩 + 챗봇 답변 활용 Tip."""
+    st.markdown('<div class="cb-panel-title">✦ 추천 질문</div>', unsafe_allow_html=True)
+    st.markdown('<div class="cb-panel-sub">이런 걸 물어보세요</div>', unsafe_allow_html=True)
+    for i, (label, question) in enumerate(_SUGGESTED_QUESTIONS):
+        if st.button(f"[{label}]  {question}", key=f"suggest_{i}", use_container_width=True):
+            _queue_message(question)
+
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        """
+    <div class="cb-tip">
+        <div class="cb-tip-title">💡 챗봇 답변 활용 Tip</div>
+        <div class="cb-tip-item">원가 · 마진율은 추정치예요.</div>
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -122,6 +200,29 @@ def _inject_card_css():
       .fc-nm-name { font-weight:800; font-size:1.05rem; color:#0f172a; margin-left:6px; }
       .fc-combo { background:#fff; border:1px dashed #cbd5e1; border-radius:10px;
                   padding:9px 12px; text-align:center; color:#475569; margin:9px 0; font-weight:600; }
+
+      /* ── 챗봇 헤더 ── */
+      .cb-header { display:flex; justify-content:space-between; align-items:center;
+                   gap:16px; flex-wrap:wrap; margin:4px 0 10px; }
+      .cb-header-left { display:flex; align-items:center; gap:14px; }
+      .cb-logo { display:flex; align-items:center; }
+      .cb-title { font-size:1.5rem; font-weight:900; color:#0f172a; }
+      .cb-badge { font-size:.72rem; font-weight:800; color:#16a34a;
+                  background:#dcfce7; border-radius:100px; padding:2px 10px;
+                  vertical-align:middle; margin-left:6px; }
+      .cb-subtitle { font-size:.9rem; color:#64748b; margin-top:2px; }
+      .cb-header-right { display:flex; gap:10px; flex-wrap:wrap; }
+      .cb-chip-info { background:#fff; border:1px solid #e5e7eb; border-radius:12px;
+                      padding:8px 14px; font-size:.85rem; font-weight:700; color:#334155;
+                      box-shadow:0 2px 8px rgba(15,23,42,.04); }
+
+      /* ── 우측 패널 ── */
+      .cb-panel-title { font-size:1rem; font-weight:900; color:#0f172a; margin-bottom:2px; }
+      .cb-panel-sub { font-size:.8rem; color:#94a3b8; margin-bottom:12px; }
+      .cb-tip { background:#fffbeb; border:1px solid #fde68a; border-radius:16px;
+                padding:16px 18px; }
+      .cb-tip-title { font-size:.9rem; font-weight:800; color:#92400e; margin-bottom:8px; }
+      .cb-tip-item { font-size:.85rem; color:#78350f; line-height:1.6; }
     </style>
     """, unsafe_allow_html=True)
 

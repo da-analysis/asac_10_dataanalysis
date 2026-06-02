@@ -12,7 +12,7 @@ def _img_b64(path: str) -> str:
 _ASSETS = Path(__file__).parent / "assets"
 
 
-st.set_page_config(page_title="바바삭", page_icon="🍽️", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="바바삭", page_icon="🍽️", layout="wide", initial_sidebar_state="expanded")
 
 # databricks workspace import-dir app /Workspace/Users/jyj000818@gmail.com/databricks_apps_jyjtest --profile DEFAULT --overwrite
 # databricks apps deploy jyjtest --source-code-path /Workspace/Users/jyj000818@gmail.com/databricks_apps_jyjtest --profile DEFAULT
