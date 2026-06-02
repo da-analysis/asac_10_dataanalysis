@@ -1,22 +1,3 @@
-"""
-재료명 카탈로그 + alias 매핑 + ingredient_recipe 폴백 + ingredient_mapping 통합.
-
-목적:
-- silver.ingredient.ingredient 테이블의 distinct (재료명, 단위)를 ground truth로 보관.
-- silver.ingredient.ingredient_recipe 테이블을 2순위 가격 소스로 활용.
-- silver.ingredient.ingredient_mapping 테이블로 recipe→KAMIS 매핑을 활용하여
-  recipe_matched 재료도 실시간 KAMIS 도매가를 조회할 수 있도록 승격.
-- 사용자/레시피의 재료명(예: '마늘')을 DB 표준명('깐마늘', '20kg')으로 정규화.
-- KAMIS에도 없고 alias에도 없는 재료는 ingredient_recipe의 B2B 유통가를 직접 제공.
-
-설계:
-- KAMIS 카탈로그: statement_execution 1회 호출 + 24h TTL 인메모리 캐싱
-- recipe 카탈로그: statement_execution 1회 호출 + 24h TTL 인메모리 캐싱
-- mapping 카탈로그: statement_execution 1회 호출 + 24h TTL 인메모리 캐싱
-- alias: backend/ingredient_aliases.yaml lazy load + mtime 기반 갱신
-- resolve_ingredient(): 사용자 입력 → ResolveResult(status, db_name, db_unit, reason)
-  - 4단계 탐색: alias → KAMIS catalog → mapping table → recipe catalog → unmapped
-"""
 from __future__ import annotations
 
 import os
@@ -32,9 +13,6 @@ from databricks.sdk.service.sql import StatementState
 from backend.debug_log import archive
 
 
-# ════════════════════════════════════════════════════════════════
-# 공통: WorkspaceClient + warehouse 헬퍼
-# ════════════════════════════════════════════════════════════════
 
 def _get_warehouse_id(w: WorkspaceClient) -> str | None:
     """databricks_db.py의 동일 헬퍼를 카탈로그용으로 재현."""
@@ -55,9 +33,7 @@ def _get_ws_client() -> WorkspaceClient:
     return WorkspaceClient(host=host, token=token) if host and token else WorkspaceClient()
 
 
-# ════════════════════════════════════════════════════════════════
 # 1차 카탈로그: silver.ingredient.ingredient distinct (재료명, 단위)
-# ════════════════════════════════════════════════════════════════
 
 _CATALOG_SQL = """
 SELECT DISTINCT `재료명`, `단위`
@@ -121,9 +97,7 @@ def get_catalog(force_reload: bool = False) -> dict[str, set[str]]:
     return _catalog_cache
 
 
-# ════════════════════════════════════════════════════════════════
 # 매핑 테이블: silver.ingredient.ingredient_mapping (recipe→KAMIS 연결)
-# ════════════════════════════════════════════════════════════════
 
 _MAPPING_SQL = """
 SELECT std_name, kamis_name, kamis_unit, mapping_method, confidence
@@ -200,9 +174,7 @@ def get_mapping_table(force_reload: bool = False) -> dict[str, dict]:
     return _mapping_cache
 
 
-# ════════════════════════════════════════════════════════════════
 # 2차 카탈로그: silver.ingredient.ingredient_recipe (B2B 유통가)
-# ════════════════════════════════════════════════════════════════
 
 _RECIPE_CATALOG_SQL = """
 SELECT
@@ -335,9 +307,7 @@ def get_recipe_catalog(force_reload: bool = False) -> dict[str, dict]:
     return _recipe_cache
 
 
-# ════════════════════════════════════════════════════════════════
 # 재료명 매칭 로직: 정확 → 공백정규화 → 접두사제거 → 부분매칭 → 접미사 매칭
-# ════════════════════════════════════════════════════════════════
 
 _COOKING_PREFIXES = (
     "잘게썬", "얇게썬", "굵게썬", "채썬", "깍둑썬",
@@ -443,9 +413,7 @@ def get_recipe_price(name: str) -> RecipeIngredientInfo | None:
     return None
 
 
-# ════════════════════════════════════════════════════════════════
 # Alias 테이블: backend/ingredient_aliases.yaml
-# ════════════════════════════════════════════════════════════════
 
 _ALIAS_YAML_PATH = Path(__file__).parent / "ingredient_aliases.yaml"
 
@@ -508,9 +476,7 @@ def get_alias_table() -> dict[str, dict | None]:
     return _alias_cache
 
 
-# ════════════════════════════════════════════════════════════════
-# Resolve: 입력 재료명 → DB 표준명/단위 (4단계 탐색)
-# ════════════════════════════════════════════════════════════════
+# Resolve
 
 ResolveStatus = Literal[
     "matched",           # KAMIS alias/catalog/mapping 정확 매칭 → 실시간 도매가 조회 가능
@@ -677,9 +643,6 @@ def resolve_many(names: list[str]) -> list[ResolveResult]:
     return results
 
 
-# ════════════════════════════════════════════════════════════════
-# Direct SQL: Genie 우회 직접 조회
-# ════════════════════════════════════════════════════════════════
 
 def direct_sql_query_kamis(targets: list[tuple[str, str, str]]) -> dict:
     """KAMIS 테이블에 대해 (재료명, 단위) 조합으로 직접 SQL 조회.

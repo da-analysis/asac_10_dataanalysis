@@ -11,7 +11,7 @@ class AgentState(TypedDict):
     price_info: Dict[str, Any]
     cost_info: Dict[str, Any]
     final_report: str
-    card_data: Dict[str, Any]   # ★ 추가: 프론트 카드 렌더용 구조화 데이터 (없으면 마크다운 폴백)
+    card_data: Dict[str, Any]
     error_log: Annotated[List[str], operator.add]
     next_action: str
     loop_count: int

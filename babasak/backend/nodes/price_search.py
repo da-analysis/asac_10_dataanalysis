@@ -1,17 +1,3 @@
-"""
-Genie Space로 KAMIS 도매가를 조회하는 노드.
-
-흐름:
-  1. 입력 재료 목록을 catalog.resolve_many()로 정규화하여 4그룹으로 분리
-       - matched       : (db_name, db_unit)로 정확명 쿼리 ─ Genie/direct_sql 대상
-       - recipe_direct : ingredient_recipe B2B 유통가 직접 사용 ─ Genie 건너뜀
-       - passthrough   : alias 미등록('unmapped') ─ 원본 이름 그대로 자유 쿼리
-       - skip          : 카탈로그에 없는 게 명백('ambiguous', 'not_in_catalog')
-                         Genie를 거치지 않고 곧장 unavailable로 분류
-  2. recipe_direct는 즉시 structured_prices에 투입 (Genie 호출 불필요)
-  3. matched/passthrough만 배치로 묶어 Genie에 병렬 호출
-  4. Genie 실패 시 direct_sql + recipe B2B 폴백 후 최종 unavailable만 missing_price_search로
-"""
 import os
 import time
 import re
@@ -25,13 +11,8 @@ from databricks.sdk.service.sql import StatementState
 from backend.debug_log import archive
 from backend.catalog import resolve_many, ResolveResult, get_recipe_prices_for_items
 
-# ═══ [차트 생성 모듈] ═══ 비활성화하려면 chart_utils.py에서 ENABLE_CHART = False
 from backend.nodes.chart_utils import generate_chart_html
 
-# ═══ [시계열 추이 요청 감지] ═══════════════════════════════════════════════
-# "시세/추이/그래프/트렌드" 등을 요청하면 Genie 배치 대신 시계열 SQL 직접 실행.
-# 차트를 비활성화하려면 chart_utils.py의 ENABLE_CHART = False로 변경.
-# ═══════════════════════════════════════════════════════════════════════════════
 _TREND_KEYWORDS = re.compile(r"(추이|추세|그래프|트렌드|변동|변화|시세|동향|trend|graph|일별|주별|월별)")
 _PERIOD_MAP = {
     "일주일": 7, "1주일": 7, "7일": 7, "한주": 7,
@@ -46,7 +27,6 @@ _PERIOD_MAP = {
 }
 # 동적 기간 파싱 정규식: "N개월", "N달", "N일", "N주", "N년"
 _PERIOD_DYNAMIC_RE = re.compile(r"(\d+)\s*(개월|달|일|주|주일|년)")
-# 한글 숫자 → 정수 매핑
 _KOR_NUM = {"한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10}
 _PERIOD_KOR_RE = re.compile(r"(" + "|".join(_KOR_NUM.keys()) + r")\s*(개월|달|일|주|주일|년)")
 

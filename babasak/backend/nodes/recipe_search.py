@@ -1,21 +1,3 @@
-"""
-Neo4j 레시피 검색 노드.
-db.py의 그래프 함수를 활용해 LangGraph state에 recipe_info를 채움.
-
-지원 시나리오:
-  1. 인기 레시피 폴백
-  2. 조건 기반 추천 (난이도, 인분, 종류, 조리법)
-  3. 재료 제외 검색 (알레르기 대응)
-  4. 대체재 제안 (시나리오 4 — "두부 대신 쓸 거" 유사레시피 기반, 기존)
-  5. 다중 재료 AND 검색
-  6. 단일 재료 기반 검색
-  7. 메뉴 키워드 검색 + 재료 상세 + 조리단계
-     ↳ 없는 메뉴면 build_graph_relation_context로 그래프 조합 컨텍스트 생성
-  8. 유사 레시피 추천 (재료 공유도 기반) — is_similar 또는 reference_menu
-  9. 1:1 대체재 추천 (RAG 그래프) — substitute_for 들어왔을 때
-     ↳ 같은 lv1 카테고리 + 해당 메뉴에 자주 등장하는 재료 후보 5개 반환
-     ↳ cost_calculator가 이 후보를 가격사전과 매칭해 원가 낮은 거 선택 가능
-"""
 import re
 
 from backend.db import (
@@ -27,15 +9,14 @@ from backend.db import (
     get_recipes_excluding_ingredient,
     recommend_recipes,
     get_popular_recipes,
-    # 신규: 그래프 RAG 강화
-    build_graph_relation_context,   # DB 없는 메뉴 → 그래프 조합 컨텍스트
-    find_similar_recipes,           # 재료 공유도 기반 유사 레시피
-    suggest_substitute_ingredient,  # 같은 카테고리 + 메뉴 빈도 기반 대체재
+    build_graph_relation_context,   
+    find_similar_recipes,           
+    suggest_substitute_ingredient, 
 )
 from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
-# 폴백용 키워드 리스트 (LLM 장애 시 보험)
+# 폴백용 키워드 리스트
 _KNOWN_MENUS = [
     '김치찌개', '된장찌개', '불고기', '순두부찌개', '비빔밥',
     '제육볶음', '김치전', '떡볶이', '잡채', '오므라이스',
@@ -58,7 +39,7 @@ _ALIASES = {
     '돈까쓰': '돈까스', '떡볶히': '떡볶이',
 }
 
-# 양념/조미료/잡재료 — substitute 대상에서 제외 (대체할 가치 적음)
+# 양념/조미료/잡재료
 _SEASONING_TOKENS = {
     '소금', '후추', '설탕', '간장', '식용유', '참기름', '들기름', '올리브유',
     '마늘', '다진마늘', '생강', '고춧가루', '된장', '고추장', '다시다', '미원',
@@ -67,14 +48,14 @@ _SEASONING_TOKENS = {
     '굴소스', '두반장', '연두', '간마늘', '월계수잎', '월계수',
 }
 
-# 비싼 단백질/해산물 — substitute 1순위 (원가 절감 효과 큼)
+# 비싼 단백질/해산물
 _PREMIUM_HINTS = (
     '고기', '살', '갈비', '삼겹', '목살', '안심', '등심', '닭', '돼지', '소', '오리',
     '새우', '오징어', '낙지', '문어', '조개', '꽃게', '전복', '관자',
     '연어', '참치', '고등어', '갈치', '명태', '코다리', '꽁치', '광어', '대구', '동태',
     '햄', '소시지', '베이컨', '스팸',
 )
-# 보조 주재료 — 단백질 없을 때 2순위
+# 보조 주재료 —없을 때 2순위
 _SECONDARY_HINTS = ('두부', '유부', '버섯', '계란', '달걀', '어묵', '게맛살')
 
 
@@ -112,7 +93,6 @@ def _pick_main_ingredient(ings: list) -> str | None:
 
     return candidates[0]
 
-# ── LLM 키워드 추출 (lazy init) ──
 _llm_keyword = None
 
 
@@ -145,7 +125,6 @@ def _llm_extract_menu_keyword(query: str) -> str | None:
         if not result or result.upper() == "NONE":
             return None
 
-        # 쉼표로 구분된 경우 첫 번째만 사용
         keyword = result.split(",")[0].strip()
         # 빈 문자열이나 너무 긴 결과 필터링 (할루시네이션 방지)
         if not keyword or len(keyword) > 20:
@@ -189,19 +168,15 @@ def recipe_search_node(state: dict) -> dict:
     existing_errors = state.get("error_log", [])
 
     menu = entities.get("menu")
-    ingredient = entities.get("ingredient")  # list or str or None
+    ingredient = entities.get("ingredient") 
     exclude = entities.get("exclude")
     is_alternative = entities.get("is_alternative", False)
-    conditions = entities.get("conditions")  # dict or None
+    conditions = entities.get("conditions") 
     is_popular = entities.get("is_popular", False)
-    # 신규(시나리오 8): "비슷한/유사한" 의도 + 기준 메뉴
     is_similar = entities.get("is_similar", False)
     reference_menu = entities.get("reference_menu") or menu
-    # 신규(시나리오 9): "X 대신 Y" 1:1 대체재 추천 의도
-    # preprocessor가 잡거나, cost_calculator가 원가 비싼 재료 발견 후 호출 가능
     substitute_for = entities.get("substitute_for")  # 대체할 재료 이름 (예: "돼지고기")
 
-    # ingredient 정규화: str → list
     if isinstance(ingredient, str):
         ingredients = [ingredient]
     elif isinstance(ingredient, list):
@@ -209,7 +184,6 @@ def recipe_search_node(state: dict) -> dict:
     else:
         ingredients = []
 
-    # ★ fallback: entities 못 잡았으면 LLM → 고정 리스트 순서로 추출 시도
     if not menu and not ingredients and not is_popular and not conditions:
         query = state["messages"][-1].content if state.get("messages") else ""
 
@@ -230,10 +204,6 @@ def recipe_search_node(state: dict) -> dict:
     recipe_data = []
 
     try:
-        # === 시나리오 9: 대체재 1:1 추천 (RAG 그래프 기반) ===
-        # "김치찌개에 돼지고기 대신 뭐 써?"
-        # cost_calculator가 원가 비싼 재료 찾고 이 노드 재호출할 때도 사용 가능
-        # → 같은 lv1 카테고리 + 해당 메뉴에 자주 나오는 재료 5개 반환
         if substitute_for and (menu or reference_menu):
             target_menu = menu or reference_menu
             substitutes = suggest_substitute_ingredient(
@@ -250,10 +220,6 @@ def recipe_search_node(state: dict) -> dict:
                 ),
             }}
 
-        # === 시나리오 8: 유사 레시피 추천 (재료 공유도) ===
-        # "김치찌개랑 비슷한 거", "김치찌개 대체메뉴" 등
-        # 기준 메뉴 1개로 base recipe 잡고 → find_similar_recipes
-        # steps도 같이 가져옴 (LLM 환각 방지, DB 원문 활용)
         if is_similar and reference_menu:
             base_recipes = search_recipes(reference_menu, limit=1)
             if base_recipes:
@@ -356,8 +322,6 @@ def recipe_search_node(state: dict) -> dict:
             return {"recipe_info": {"data": recipe_data, "search_type": "by_ingredient", "note": f"{target_ingredient} 대체재 검색 시도했으나 결과 부족"}}
 
         # === 시나리오 5: 다중 재료 AND 검색 ===
-        # menu가 같이 잡혔으면 시나리오 7(메뉴 검색)이 우선 — 메뉴 + 재료 둘 다일 때
-        # ingredients만 있는 케이스로 한정 (조리단계 포함하는 시나리오 7 보존)
         if len(ingredients) >= 2 and not menu:
             recipes = get_recipes_by_multiple_ingredients(ingredients, limit=5)
             if recipes:
@@ -396,21 +360,13 @@ def recipe_search_node(state: dict) -> dict:
 
         # === 시나리오 7: 메뉴 키워드 검색 + 재료 상세 + 조리단계 (기본) ===
         if menu:
-            # 30개로 넓게 가져온다 — 인기 본체(예: '제육볶음')가 상위를 다 차지해도
-            # 변형(김치제육볶음 등)이 상위권에 들어올 기회를 주기 위함. 아래에서 3개로 추림.
             recipes = search_recipes(menu, limit=30)
-
-            # ★ 원본 사용자 쿼리 추출 — preprocessor가 menu를 정규화(예: "마라김치찌개"→"김치찌개")
-            #    하기 때문에, modifier(마라) 정보를 살리려면 원본 쿼리에서 가져와야 함.
             user_query = ""
             messages = state.get("messages", [])
             if messages:
                 last_msg = messages[-1]
                 user_query = getattr(last_msg, "content", "") or ""
 
-            # 의도 단어 + 원가/가격류 단어 제거해서 핵심 키워드만 남김
-            # ('원가/가격' 같은 단어가 안 지워지면 '원가랑'이 modifier(예:'마라')로 오인돼
-            #  멀쩡한 '김치찌개'가 "(레시피 조합 제안)"으로 잘못 분류되던 버그 수정)
             clean_query = re.sub(
                 r'(레시피|알려줘|만드는\s*법|조리법|추천|어떻게|만들기|만들고\s*싶어|알고\s*싶어|보여줘|'
                 r'원가|판매가|단가|가격|시세|마진율|마진|얼마|비용|값)',
@@ -420,9 +376,6 @@ def recipe_search_node(state: dict) -> dict:
             clean_query_compact = re.sub(r'\s+', '', clean_query)
             menu_compact = re.sub(r'\s+', '', menu)
 
-            # menu를 뺀 '나머지'에서 조사/연결어까지 제거하고, 실제 수식어가 남는지 본다.
-            # 예: "김치찌개원가랑" → menu 제거 → "원가랑" → (원가는 위에서 제거됨) "랑" → 조사 제거 → "" → 수식어 없음
-            #     "마라김치찌개"   → menu 제거 → "마라" → 수식어 있음
             leftover = (
                 clean_query_compact.replace(menu_compact, "", 1)
                 if menu_compact else clean_query_compact
@@ -464,17 +417,11 @@ def recipe_search_node(state: dict) -> dict:
                     if match:
                         filtered.append(r)
                 recipes = filtered if filtered else recipes
-            # 중복 제거 + 3개 채우기 — [:3] 이전에 수행. score DESC 정렬 기준.
-            # 1순위: 이름 다른 변형 우선 (다양성)
-            #   예) 김치찌개 → 김치찌개, 차돌김치찌개, 돼지목살김치찌개
-            # 2순위: 변형이 3개 안 되면 같은 이름이라도 '다른 레시피(rcp_sno 다름)'로 채움
-            #   예) 제육볶음 변형이 없으면 → 제육볶음(A), 제육볶음(B), 제육볶음(C)
-            # 진짜 똑같은 레시피(같은 id)만 제거. → "1개"는 그 메뉴가 DB에 정말 하나뿐일 때만.
             TARGET_COUNT = 3
             seen_ids = set()
             seen_names = set()
-            primary = []   # 이름 다른 변형 (다양성 우선)
-            fillers = []   # 같은 이름·다른 레시피 (채움용)
+            primary = []   # 이름 다른 변형
+            fillers = []   # 같은 이름·다른 레시피 
             for r in recipes:
                 rid = r.get("id")
                 if rid is not None and rid in seen_ids:
@@ -492,10 +439,6 @@ def recipe_search_node(state: dict) -> dict:
                 ings = get_recipe_ingredients(recipe["id"])
                 detail = get_recipe_detail(recipe["id"])
 
-                # ★ 대체재는 여기서 붙이지 않는다.
-                #   (기존엔 주재료=핵심재료(돼지고기)에 대체재를 붙여 '돼지고기→스팸' 같은
-                #    정체성 깨짐이 발생했음. 대체재는 가격을 아는 cost_calculator에서
-                #    '핵심 제외 + 비싼 보조재료'를 기준으로 1개만 제안한다.)
                 recipe_data.append({
                     "menu": recipe["name"],
                     "id": recipe["id"],
@@ -508,8 +451,6 @@ def recipe_search_node(state: dict) -> dict:
                     "ingredients": ings,
                 })
 
-            # 부분 매칭만 됐을 때 OR modifier가 있을 때 — graph_relation 컨텍스트 같이 반환
-            # ("마라김치찌개" → 김치찌개 3개 + 마라 그래프 컨텍스트로 짬뽕)
             result_payload = {
                 "data": recipe_data,
                 "search_type": "keyword",
@@ -526,15 +467,9 @@ def recipe_search_node(state: dict) -> dict:
                     )
                     result_payload["original_query"] = graph_query
 
-                    # 'ai_new_menu_suggestions' — 사용자가 실제 입력한 modifier만 사용.
-                    # ★ graph_rows의 modifier_menus는 substring 오매칭(마라→고구마라떼)이
-                    #    섞일 수 있어 신메뉴 후보로는 쓰지 않는다.
-                    #    대신 원본 쿼리에서 base 메뉴를 뺀 나머지를 modifier로 본다.
-                    #    예: clean_query="마라김치찌개", menu="김치찌개" → modifier="마라"
                     modifier_text = ""
                     if has_modifier:
                         mt = clean_query_compact.replace(menu_compact, "", 1).strip()
-                        # 남은 조사/연결어 제거 ('원가/가격'은 위 clean 단계에서 이미 제거됨)
                         mt = re.sub(
                             r'(이?랑|하고|와|과|및|그리고|좀|는|은|을|를|도|의|에|대해서?|대한|요|줘)',
                             '', mt)

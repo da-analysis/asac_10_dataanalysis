@@ -9,7 +9,6 @@ dbutils.library.restartPython()
 
 # MAGIC %md
 # MAGIC ## 1. Neo4j 연결
-# MAGIC ⚠️ neo4j-scope/neo4j_uri 가 **새 인스턴스(9165c00a)** 를 가리키는지 먼저 확인!
 
 # COMMAND ----------
 
@@ -23,20 +22,17 @@ driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
 with driver.session() as session:
     msg = session.run("RETURN 'Connected!' AS msg").single()["msg"]
-    # 적재 대상이 새 인스턴스인지 눈으로 확인
     print(f"{msg}  →  {NEO4J_URI}")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 1-1. 스트리밍 배치 헬퍼
-# MAGIC 전체 적재는 `.collect()`로 드라이버에 다 못 올림(220만 관계 → OOM).
-# MAGIC `toLocalIterator()`로 파티션 단위로 흘려보내며 배치 단위로만 메모리에 유지.
+# MAGIC
 
 # COMMAND ----------
 
 def iter_batches(df, size):
-    """Spark df를 드라이버 전체 적재 없이 size개씩 dict 배치로 yield."""
     batch = []
     for row in df.toLocalIterator():
         batch.append(row.asDict())
@@ -48,7 +44,6 @@ def iter_batches(df, size):
 
 
 def run_batches(df, size, cypher, label, total=None):
-    """df를 배치로 끊어 cypher(UNWIND $items)를 실행. 단일 세션 재사용."""
     done = 0
     with driver.session() as session:
         for batch in iter_batches(df, size):
@@ -75,9 +70,6 @@ print("기존 데이터 삭제 완료")
 
 # MAGIC %md
 # MAGIC ## 3. 데이터 준비 (전체 — LIMIT/IN 필터 없음)
-# MAGIC - 레시피: `silver.10000recipe.recipes` 전체
-# MAGIC - 재료: `silver.10000recipe.ingredients_final` 전체
-# MAGIC - ★ 기존의 `WHERE RCP_SNO IN (...)` 제거 — 전체 적재라 불필요하고 대량이면 SQL이 터짐
 
 # COMMAND ----------
 
@@ -86,7 +78,6 @@ recipes_df = spark.sql("""
     WHERE CKG_NM IS NOT NULL
 """)
 
-# 같은 (RCP_SNO, core_name) 여러 row면 대표 수량 1개만
 ingredients_df = spark.sql("""
     SELECT
         RCP_SNO,
@@ -101,8 +92,6 @@ ingredients_df = spark.sql("""
 
 unique_ingredients = ingredients_df.select("core_name", "lv1", "lv2").dropDuplicates(["core_name"])
 
-# count는 한 번만 (action) — 이후엔 재사용 위해 cache 대신 변수 보관
-# ※ serverless라 .cache()/.persist() 금지 → count만 뽑고 df는 그대로 재질의
 n_recipes = recipes_df.count()
 n_rels = ingredients_df.count()
 n_ings = unique_ingredients.count()
@@ -160,11 +149,11 @@ run_batches(recipes_df, 1000, RECIPE_CYPHER, "Recipe", total=n_recipes)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 6. Ingredient 노드 (고유 재료 — 작아서 한 번에)
+# MAGIC ## 6. Ingredient 노드
 
 # COMMAND ----------
 
-ing_list = [row.asDict() for row in unique_ingredients.collect()]  # 5만 내외, 안전
+ing_list = [row.asDict() for row in unique_ingredients.collect()]
 with driver.session() as session:
     session.run("""
         UNWIND $items AS item
@@ -247,4 +236,3 @@ with driver.session() as session:
 
 driver.close()
 print("드라이버 종료")
-

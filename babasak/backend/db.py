@@ -71,9 +71,6 @@ def get_session():
     return get_driver().session()
 
 
-# ============================================================
-# 사전 로딩 / 토크나이저
-# ============================================================
 
 def _load_dictionaries(menu_limit=2000, ing_limit=5000):
     global _KNOWN_MENUS, _KNOWN_INGREDIENTS, _DICT_LOADED
@@ -383,10 +380,7 @@ def build_graph_relation_context(query, limit=3):
     }]
 
 
-# ============================================================
 # 1. 통합 검색
-# ============================================================
-
 def search_recipes_smart(query, limit=3, fallback_popular=False):
     """레시피명/재료명 기반 통합 검색.
     기존 코드와 다른 핵심:
@@ -500,13 +494,8 @@ def _search_by_tokens(menu_tokens, ing_tokens, limit):
         return rows
 
 
-# ============================================================
 # 2. 레시피 상세/재료
-# ============================================================
 
-# ── 재료 노이즈 필터 (발표용 가벼운 버전, _DROP_NOISE_INGREDIENTS=False로 끄기 가능) ──
-# 근본 재파싱(silver) 대신, 그래프에서 재료를 꺼낼 때 명백한 파편만 거른다.
-# 표시 단계 필터라 ETL/silver는 안 건드리며, 모든 하위(원가·가격·답변)에 동일 적용됨.
 _DROP_NOISE_INGREDIENTS = True
 _NOISE_TOKENS = ("국그릇", "그릇", "한그릇")  # 수량/그릇이 재료명에 붙은 파편 (예: '신김치국그릇')
 
@@ -559,9 +548,7 @@ def get_recipe_detail(rcp_sno):
         return record.data() if record else None
 
 
-# ============================================================
 # 3. 재료 기반 검색
-# ============================================================
 
 def get_recipes_by_ingredient(ingredient_name, limit=3):
     """특정 재료가 들어간 레시피. 자연어 표현도 처리."""
@@ -638,9 +625,7 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
         return [r.data() for r in result]
 
 
-# ============================================================
-# 4. 대체재 추천 (그래프 기반 RAG)
-# ============================================================
+# 4. 대체재 추천
 
 def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
     """주어진 메뉴에서 특정 재료를 대체할 만한 재료를 그래프 관계로 추천.
@@ -765,9 +750,8 @@ def get_menu_main_ingredient(menu):
         return (row["mi"] if row else "") or ""
 
 
-# ============================================================
 # 5. 유사 레시피 추천
-# ============================================================
+
 
 def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
     """주어진 레시피와 재료를 공유하는 유사 레시피 추천."""
@@ -791,9 +775,7 @@ def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
         return [r.data() for r in result]
 
 
-# ============================================================
 # 5. 인기/조건 추천
-# ============================================================
 
 def get_popular_recipes(limit=3):
     """전체 인기 레시피 top N."""
@@ -850,9 +832,7 @@ def recommend_recipes(
         return [r.data() for r in result]
 
 
-# ============================================================
 # 6. 챗봇/기존 import 호환
-# ============================================================
 
 def search_recipes(keyword, limit=5):
     """기존 search_recipes 인터페이스 유지."""

@@ -16,8 +16,6 @@ _NAVER_DEFAULT_MAX_WORKERS = 2
 _NAVER_DEFAULT_MIN_INTERVAL = 0.25
 _NAVER_RETRY_DELAYS = (0.7, 1.5)
 
-# 합성 재료명(예: '돼지고기앞다리살')에서 부위명을 따로 떼어내 상품명과
-# 순서·띄어쓰기 무관하게 매칭하기 위한 부위 토큰 목록. 긴 것부터 검사.
 _MEAT_PART_TOKENS = (
     "앞다리살", "뒷다리살", "항정살", "갈매기살", "가브리살", "등심덧살",
     "삼겹살", "오겹살", "목살", "등심", "안심", "갈비", "사태", "전지", "후지",
@@ -64,9 +62,6 @@ def _parse_ingredients(text: str) -> list[str]:
     return items
 
 
-# ────────────────────────────────────────────────────────────
-# 단위 정규화: 네이버 상품가 → kg당 단가 환산
-# ────────────────────────────────────────────────────────────
 
 _TITLE_TAG_RE = re.compile(r"<[^>]+>")
 _WEIGHT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b", re.IGNORECASE)
@@ -127,10 +122,6 @@ def _per_kg_prices(items: list[dict]) -> list[int]:
     return out
 
 
-# ────────────────────────────────────────────────────────────
-# LLM 정제: 네이버 raw 결과 5개 → 적합 상품 선별 + kg당 단가 산정
-# ────────────────────────────────────────────────────────────
-# 재료당 1회 호출(작고 빠름). 호출 부담을 줄이려고 lazy init + 짧은 출력.
 _refine_llm = None
 
 
@@ -243,10 +234,6 @@ def _refine_with_llm(item: str, items_raw: list[dict]) -> dict:
                 "confidence": "none", "note": f"refine_error: {e}"}
 
 
-# ────────────────────────────────────────────────────────────
-# 버전 1 : DuckDuckGo  ← 기본값 / 롤백용  (SEARCH_BACKEND=duckduckgo)
-# ────────────────────────────────────────────────────────────
-
 def duckduckgo_search(ingredients_text: str) -> str:
     try:
         from langchain_community.tools import DuckDuckGoSearchRun
@@ -255,9 +242,6 @@ def duckduckgo_search(ingredients_text: str) -> str:
         return f"웹 검색 실패: {e}"
 
 
-# ────────────────────────────────────────────────────────────
-# 버전 2 : 네이버 쇼핑 API  (SEARCH_BACKEND=naver)
-# ────────────────────────────────────────────────────────────
 
 def naver_search_structured(ingredients_text: str) -> dict:
     """네이버 검색 + 재료별 LLM 정제 → 구조화된 결과 dict.
@@ -394,10 +378,6 @@ def naver_search_structured(ingredients_text: str) -> dict:
         })
         return kept
 
-    # ── 재시도 단계 정의 ───────────────────────────────────────
-    # 1차: "{재료} 식자재 도매" + display=5 → 업소 묶음 위주
-    # 2차: "{재료}" 단독 + display=15 → 일반 상품 포함 더 넓은 후보
-    # LLM이 1차에서 "전부 부적합" 판정하면 2차로 자동 진행.
     _ATTEMPTS = [
         {"label": "narrow", "query_suffix": " 식자재 도매", "display": 5},
         {"label": "wider",  "query_suffix": "",             "display": 15},
@@ -563,9 +543,6 @@ def naver_search(ingredients_text: str) -> str:
     return naver_search_structured(ingredients_text)["text"]
 
 
-# ────────────────────────────────────────────────────────────
-# 디스패처  ←  app.yml의 SEARCH_BACKEND 값으로 버전 전환
-# ────────────────────────────────────────────────────────────
 
 def search(ingredients_text: str) -> str:
     backend = os.getenv("SEARCH_BACKEND", "naver")

@@ -1,19 +1,3 @@
-"""
-레시피 재료 + 가격 데이터를 바탕으로 원가를 계산하는 노드.
-
-설계:
-  - 가격 매칭/계산은 코드로 (결정적)
-  - LLM은 결과 표/요약 포맷팅만 (창의성 영역)
-
-가격 소스 우선순위:
-  1. price_info["structured_prices"][재료명]   ← LLM 정제로 만든 신뢰 가능한 dict
-  2. price_info["text"]에서 정규식으로 KAMIS 단가 추출 (Genie 응답)
-  3. 위 모두 없으면 "시세 미확인"
-
-사용량 환산:
-  - 코드 상수 _UNIT_TABLE (1큰술=15g 등) + 개당 무게(_PER_PIECE_GRAMS)
-  - 매칭 안 되는 단위는 "사용량 미상"으로 표시
-"""
 import re
 
 from backend.debug_log import archive
@@ -21,16 +5,10 @@ from backend.price_bounds import MAX_PRICE_PER_KG
 from backend.db import suggest_substitute_ingredient, get_menu_main_ingredient
 
 
-# ════════════════════════════════════════════════════════════════
-# 가격 sanity 필터
-# ════════════════════════════════════════════════════════════════
 
-# kg당 단가 상한. 공유 모듈(price_bounds)에서 가져와 네이버 검색·LLM 추정과
-# 동일 기준을 쓴다. (예: '김칫국물 소금맛 68g' → ₩112,000/kg 케이스 방지)
+
+
 _MAX_PRICE_PER_KG = MAX_PRICE_PER_KG
-
-# 원가 계산에서 제외할 재료. 물처럼 사실상 무료이거나, '국물류'처럼
-# 레시피상 다른 재료에서 파생되어 별도 시세로 잡으면 과대계산되는 항목.
 _NON_COST_INGREDIENTS = ("물",)
 _NON_COST_KEYWORDS = ("국물",)
 
@@ -42,11 +20,8 @@ def _is_non_cost_ingredient(name: str) -> bool:
     return any(kw in name for kw in _NON_COST_KEYWORDS)
 
 
-# ════════════════════════════════════════════════════════════════
-# 사용량 → 그램 환산 테이블
-# ════════════════════════════════════════════════════════════════
 
-# 부피·중량 단위 (재료 무관 공통)
+
 _UNIT_TABLE = {
     "큰술": 15.0, "테이블스푼": 15.0, "ts": 15.0, "스푼": 15.0, "T": 15.0,
     "작은술": 5.0, "티스푼": 5.0, "tsp": 5.0, "t": 5.0,
@@ -108,14 +83,11 @@ _PER_PIECE_GRAMS = {
     "어묵": 40.0,  # 1장 기준
 }
 
-# 정성 표현 → 그램
 _QUALITATIVE_GRAMS = {
     "약간": 1.0, "소량": 1.0, "조금": 1.0,
     "적당량": 3.0, "취향껏": 3.0,
 }
 
-# ── 수량이 비어있을 때 쓰는 일관된 기본값 (전 메뉴 동일) ──
-# 양념/소스류는 소량, 그 외는 적당량으로 가정. '(수량 추정)'으로 표기되어 출처를 정직하게.
 _DEFAULT_SEASONING_HINTS = (
     "고춧가루", "후춧가루", "후추", "설탕", "소금", "간장", "고추장", "된장", "쌈장",
     "참기름", "들기름", "식용유", "포도씨유", "올리브유", "고추기름",
@@ -153,9 +125,6 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
     reason은 디버깅용으로 어떤 경로로 환산했는지 표시.
     환산 실패 시 (None, 사유).
     """
-    # ★ 수량이 비어있으면 일관된 기본값 사용 (전 메뉴 동일 규칙).
-    #   '단가는 있는데 수량이 없어서 원가가 안 나오던' 문제 해결.
-    #   양념·소스류는 소량(10g), 그 외 주/부재료는 적당량(80g)으로 가정하고 '(수량 추정)' 표기.
     if not quantity or not quantity.strip():
         if any(h in ingredient_name for h in _DEFAULT_SEASONING_HINTS):
             return (_DEFAULT_GRAMS_SEASONING, "default_seasoning")
@@ -204,12 +173,7 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
     return (None, f"unknown_unit:{unit}")
 
 
-# ════════════════════════════════════════════════════════════════
-# 가격 추출: structured_prices(LLM 정제) + KAMIS 텍스트
-# ════════════════════════════════════════════════════════════════
 
-# Genie/네이버 텍스트에서 단가를 뽑는 패턴들.
-# "고춧가루: 약 ₩2,100/kg", "**고춧가루(1kg)**의 ... 36,900원" 같은 다양한 표기 대응.
 _PRICE_LINE_PATTERNS = [
     # "재료명: ... ₩12,345/kg" 또는 "재료명: ... 12,345원/kg"
     re.compile(r"(?P<name>[가-힣]+)[^\n]*?(?:₩|약\s*₩)?\s*(?P<price>[\d,]+)\s*원?\s*/\s*kg"),
@@ -217,9 +181,7 @@ _PRICE_LINE_PATTERNS = [
     re.compile(r"(?P<name>[가-힣]+)[^\n]*?(?P<price>[\d,]+)\s*원\s*/\s*100\s*g"),
 ]
 
-# Genie가 자연어로 주는 형식: "**꽃게(1kg)**의 ... 평균 도매가는 **15,300원**"
-#   → 단위가 괄호 안에 있고, 가격엔 /kg가 안 붙음. 단위로 kg당 환산.
-# 예: 꽃게(1kg)…15,300원 → 15,300/kg,  돼지고기(100g)…2,000원 → 20,000/kg
+
 _GENIE_PRICE_PATTERN = re.compile(
     r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|알|마리|포기|장|손|쪽|단|모|봉|팩|통)\s*\)"
     r"[^\n]*?(?P<price>[\d,]+)\s*원"
@@ -227,23 +189,14 @@ _GENIE_PRICE_PATTERN = re.compile(
 # 괄호 단위 → 그램 (개수 단위는 _PER_PIECE_GRAMS로 별도 처리하므로 여기선 무게 단위만)
 _GENIE_UNIT_TO_GRAMS = {"kg": 1000.0, "g": 1.0}
 
-# Genie가 재료명(단위)과 가격을 줄바꿈으로 분리해 주는 경우 대응.
-# "계란(30개)입니다. ...\n- 강원: 7,750원" 처럼 단위와 가격이 다른 줄에 있음.
-# 재료명(단위) 뒤 최대 80자 이내(다른 재료 설명이 끼기 전)의 첫 가격을 묶는다.
+
 _GENIE_PRICE_MULTILINE = re.compile(
     r"(?P<name>[가-힣]+)\s*\(\s*(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>kg|g|개|알|마리|포기|장|손|쪽|단|모|봉|팩|통)\s*\)"
     r".{0,80}?(?P<price>[\d,]{3,})\s*원",
     re.DOTALL,
 )
 
-# Genie가 catalog 모드에서 주는 콤마 나열 형식 대응:
-#   "...1kg 단위 도매 평균가격은 고춧가루 27,170원, 대파 2,420원, 깐마늘 11,400원입니다."
-# 특징: 재료명에 괄호 단위가 안 붙고, 가격 뒤에 /kg도 없음. 위 패턴들이 전부 놓침.
-# 안전을 위해 '평균가격/평균가/도매 평균/평균 도매가'로 시작하는 '가격 선언 문장'으로
-# 범위를 한정한 뒤, 그 안에서만 "재료명 NN,NNN원" 쌍을 뽑는다.
-# (이렇게 하면 "변동폭(10,500~49,500원)", "최저가(660원)" 같은 비가격 숫자는 제외됨)
-# 단위는 보통 같은 문장에 'kg 단위'/'1kg'로 명시되므로 원/kg로 해석하되, '100g'이 명시된
-# 경우만 /100g로 환산한다.
+
 _GENIE_PRICE_DECL = re.compile(
     r"(?:평균\s*가격|평균가|도매\s*평균|평균\s*도매가)[은는]?\s*(?P<body>.+?)(?:입니다|이다|이며|\.|\n)",
     re.DOTALL,
@@ -256,7 +209,6 @@ def _genie_price_to_per_kg(qty: float, unit: str, price: int, name: str) -> int 
     if unit in _GENIE_UNIT_TO_GRAMS:
         grams = qty * _GENIE_UNIT_TO_GRAMS[unit]
     else:
-        # 개/마리/포기 등 개수 단위 → 개당 무게 테이블로 환산
         ppg = _PER_PIECE_GRAMS.get(name)
         if not ppg:
             return None
@@ -290,15 +242,9 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
                 "reason": "exceeds_max_per_kg", "cap": _MAX_PRICE_PER_KG,
             })
             continue
-        # 출처 표기: structured_prices에는 direct_sql(KAMIS)·recipe B2B·네이버가 모두
-        # 섞여 들어온다. 과거엔 일괄 "naver_llm"으로 하드코딩해 KAMIS 가격도 "네이버"로
-        # 잘못 표기됐다(cf. project_cost_calculator_source_regression). note/source 힌트로
-        # 실제 출처를 추론한다.
         note = info.get("note") or ""
         note_lower = note.lower()
         src_hint = (info.get("source") or "").lower()
-        # B2B를 direct_sql보다 먼저 본다: "Genie/direct_sql 실패 후 recipe B2B 폴백"처럼
-        # note에 'direct_sql'과 'b2b'가 같이 있는 경우, 실제 출처는 B2B 폴백이기 때문.
         if "b2b" in note_lower or "ingredient_recipe" in note:
             source = "recipe_b2b"
         elif "direct_sql" in note_lower or "kamis" in note_lower or "kamis" in src_hint:
@@ -324,8 +270,6 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
 
     # 단순 "재료명: ... NNN원/kg" 같은 라인 스캔
     for line in raw_text.split("\n"):
-        # Genie 자연어 형식 우선: "꽃게(1kg)…15,300원" → 단위로 kg당 환산
-        # (KAMIS 실제 도매가라 네이버 추정보다 신뢰도 높음)
         mg = _GENIE_PRICE_PATTERN.search(line)
         if mg:
             name = mg.group("name")
@@ -378,8 +322,6 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
             except ValueError:
                 pass
 
-    # 보완: 재료명(단위)과 가격이 줄바꿈으로 분리된 Genie 응답 대응.
-    # 예: "계란(30개)입니다.\n- 강원: 7,750원" → 위 줄단위 스캔에서 놓친 것만 흡수.
     for mg in _GENIE_PRICE_MULTILINE.finditer(raw_text):
         name = mg.group("name")
         if name in price_map:
@@ -397,9 +339,6 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
         except ValueError:
             pass
 
-    # 보완: catalog 모드의 콤마 나열 형식 대응.
-    # "...1kg 단위 도매 평균가격은 고춧가루 27,170원, 대파 2,420원, 깐마늘 11,400원입니다."
-    # 가격 선언 문장 안에서만 "재료명 NN,NNN원" 쌍을 뽑아 안전하게 흡수한다.
     for decl in _GENIE_PRICE_DECL.finditer(raw_text):
         body = decl.group("body")
         # 단위 환산 계수: 같은 문장(또는 선언 직전 문맥)에 '100g'이 명시되면 /100g,
@@ -454,10 +393,6 @@ def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
             return info
     return None
 
-
-# ════════════════════════════════════════════════════════════════
-# 레시피별 원가 계산
-# ════════════════════════════════════════════════════════════════
 
 def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
     """한 레시피의 재료별 원가 계산.
@@ -589,19 +524,9 @@ def _format_recipe_section(calc: dict) -> str:
     return "\n".join(lines)
 
 
-# ════════════════════════════════════════════════════════════════
-# 노드 진입점
-# ════════════════════════════════════════════════════════════════
+
 
 def _strong_family(target_name: str, cand_name: str) -> bool:
-    """후보가 target과 '진짜 같은 계열'인지 엄격 판정.
-
-    짧은 이름(2글자)의 우연 매칭을 막는다:
-      - 돼지고기앞다리살 ↔ 돼지고기목살 : 공통 접두 '돼지고기'(4글자) → True ✅
-      - 돼지고기 ↔ 돼지고기목살           : 포함 + 4글자 → True ✅
-      - 고추 ↔ 고추냉이                   : 공통 '고추' 2글자뿐 → False ✅ (오매칭 차단)
-      - 미역 ↔ 다시마                     : 공통 없음 → False ✅
-    """
     if not target_name or not cand_name or target_name == cand_name:
         return False
     # 한쪽이 다른 쪽을 포함 + 포함되는 이름이 3글자 이상 (의미있는 계열명)

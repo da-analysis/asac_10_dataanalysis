@@ -1,13 +1,3 @@
-"""
-LangGraph 노드 순환 그래프 조립.
-
-흐름:
-  START → preprocessor → router ─┬→ recipe_search        → router (순환)
-                                  ├→ price_search         → router (순환)
-                                  ├→ missing_price_search → router (순환)
-                                  ├→ cost_calculator      → router (순환)
-                                  └→ report_generator     → END
-"""
 import os
 import traceback
 import mlflow
@@ -16,8 +6,7 @@ from langgraph.graph import StateGraph, START, END
 from backend.state import AgentState
 from backend.nodes.preprocessor import preprocessor_node
 
-# MLflow Tracing — LangGraph/ChatDatabricks 호출을 자동 캡처.
-# Apps 환경에선 DATABRICKS_HOST/credential이 자동 주입되므로 set_experiment만 지정.
+
 _MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", "/Shared/babasak-traces")
 try:
     mlflow.set_tracking_uri("databricks")

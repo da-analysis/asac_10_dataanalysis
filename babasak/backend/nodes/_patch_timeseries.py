@@ -1,13 +1,3 @@
-"""
-price_search.py: 기간 파싱을 동적으로 개선.
-
-문제: "세달", "6개월", "1년" 등 _PERIOD_MAP에 없는 기간은 기본값 7일로 폴백.
-해결: 정규식으로 "N개월", "N달", "N일", "N주", "N년" 등을 동적 파싱.
-      기본값도 30일로 변경 (추이를 물어보는 사용자에겐 7일보다 30일이 적절).
-
-price_search.py의 _timeseries_sql_query 함수를 패치하는 스크립트.
-실행 후 삭제해도 됩니다.
-"""
 import os
 
 file_path = "/Workspace/Users/rimmyeb@gmail.com/asac_10_dataanalysis/babasak/backend/nodes/price_search.py"

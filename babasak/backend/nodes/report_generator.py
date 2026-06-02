@@ -7,10 +7,6 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from backend.debug_log import archive
 
 
-# ═══════════════════════════════════════════════════════════════
-# Hallucination 검증 (가격 날조 + 도메인 이탈 실시간 차단)
-# ═══════════════════════════════════════════════════════════════
-
 _DOMAIN_BLACKLIST = [
     '비트코인', '주식', '부동산', '암호화폐', '코인', '투자',
     '로또', '도박', '성인', '정치', '선거', '종교',
@@ -23,7 +19,6 @@ _BLOCK_FALLBACK = (
 
 
 def _extract_prices_from_text(text: str) -> set:
-    """텍스트에서 가격 수치(원 단위)를 추출하여 set으로 반환."""
     matches = re.findall(r'([\d,]+)\s*원', text)
     prices = set()
     for m in matches:
@@ -45,7 +40,7 @@ def _check_hallucination(final_answer: str, context: str, intent: str) -> str:
         if keyword in answer_lower:
             return "block"
 
-    # Rule 2: 가격 날조 (극단적 가격이 context에 없을 때)
+    # Rule 2: 가격 날조
     if intent in ('cost_analysis', 'price_inquiry'):
         answer_prices = _extract_prices_from_text(final_answer)
         context_prices = _extract_prices_from_text(context)
@@ -65,13 +60,11 @@ def _check_hallucination(final_answer: str, context: str, intent: str) -> str:
     return "pass"
 
 def _get_last_human_query(messages: list) -> str:
-    """메시지 리스트에서 마지막 HumanMessage의 content를 반환"""
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
             return msg.content
     return ""
 
-# lazy init
 _llm_report = None
 
 def _get_llm_report():
@@ -82,24 +75,17 @@ def _get_llm_report():
 
 
 def _format_price_info(price_info: dict) -> str:
-    """
-    price_info dict를 LLM이 읽기 좋은 텍스트로 변환.
-    raw dict 대신 핵심 데이터(table, text)만 추출하여 전달.
-    """
     if not price_info or not isinstance(price_info, dict):
         return str(price_info)
 
     parts = []
 
-    # 테이블 데이터가 가장 구체적인 정보
     if price_info.get("table"):
         parts.append(price_info["table"])
 
-    # Genie의 텍스트 요약
     if price_info.get("text"):
         parts.append(price_info["text"])
 
-    # 누락 재료 정보
     if price_info.get("unavailable"):
         parts.append(f"시세 DB에 없는 재료: {', '.join(price_info['unavailable'])}")
 
@@ -110,7 +96,7 @@ _FALLBACK_SYSTEM_PROMPT = (
     "당신은 소상공인을 위한 물가 연동형 메뉴 추천 AI '바바삭'입니다. "
     "사용자 메시지에 [업종: X, 지역: Y] 형태가 있으면 그 맥락에 맞춰 답하세요.\n"
     "\n"
-    # ─── 핵심 원칙 (정확성 1순위) ───
+    # ─── 핵심 원칙───
     "[핵심 원칙]\n"
     "1. **DB 데이터 우선.** 입력 데이터에 있는 값은 그대로 사용. 절대 변형/요약하지 마세요.\n"
     "2. **DB에 없는 건 LLM이 보완해도 됨.** 단 그 부분 옆에 '(LLM 추정)' 또는 '(LLM 일반 지식)'을 표기.\n"
@@ -127,7 +113,7 @@ _FALLBACK_SYSTEM_PROMPT = (
     "   - '[누락 재료 LLM 추정]' 섹션 또는 `estimated_prices` 필드 → '(LLM 추정가)' 표기.\n"
     "3. [원가 분석] — 사용량 기준 비례 계산 결과.\n"
     "\n"
-    # ─── 답변 형식 (일관성) ───
+    # ─── 답변 형식 ───
     "[답변 형식 — 카드 디자인의 정보 밀도를 텍스트로 표현]\n"
     "\n"
     "메뉴 질문이면 다음 구조로. **있는 정보만 출력, 없는 섹션은 통째로 생략.**\n"
@@ -198,7 +184,7 @@ _FALLBACK_SYSTEM_PROMPT = (
     "- 네이버: `1,500원 (네이버 쇼핑, KAMIS 미수록)`\n"
     "- LLM 추정: `약 2,000원 (LLM 추정가, 참고용)`\n"
     "\n"
-    # ─── 조리단계 규칙 (본질 보존 + 수다 정리) ───
+    # ─── 조리단계 규칙 ───
     "[조리단계]\n"
     "- `steps` 필드가 있으면 그것을 기반으로 답변. DB 데이터를 무시하고 자기 지식으로 덮어쓰지 마세요.\n"
     "- **각 step의 핵심 액션·재료·수량·순서는 절대 변경 금지.** "
@@ -212,7 +198,7 @@ _FALLBACK_SYSTEM_PROMPT = (
     "  새 step '4-1. 김치 같이 넣고 한소끔 끓이기'로 추가 가능. 단 base step의 핵심은 보존.\n"
     "- `steps`가 없거나 비어 있으면 LLM 일반 지식으로 작성해도 OK. 단 제목에 '(LLM 일반 지식, DB 미수록)' 명시.\n"
     "\n"
-    # ─── 의도(intent)별 톤 ───
+    # ─── 의도별 톤 ───
     "[의도별 답변 톤]\n"
     "- `recipe_only` → 조리법 위주. 가격/원가 섹션 생략 또는 매우 짧게.\n"
     "- `cost_analysis` → 재료 표는 반드시 '단가(원/kg)·원가' 칸이 있는 원가 표 사용([원가 분석] 숫자 그대로). '변동' 표 쓰지 말 것. 조리단계는 요약만.\n"
@@ -256,12 +242,6 @@ except Exception:
     SYSTEM_PROMPT = _FALLBACK_SYSTEM_PROMPT
 
 
-# ═══════════════════════════════════════════════════════════════
-# 카드형 UI용 구조화 데이터 (프론트가 카드로 렌더 — views/chatbot.py)
-# ═══════════════════════════════════════════════════════════════
-# 마크다운(final_report)은 그대로 두고, 같은 데이터를 dict(card_data)로도 반환.
-# LLM이 JSON을 만드는 게 아니라 이미 계산된 state(recipe_info / cost_info)에서
-# 코드로 결정적으로 조립한다. card_data가 없으면 프론트는 마크다운으로 폴백.
 
 _STEP_NOISE_RE = re.compile(r'^[\s\d.\-)]*$')
 _STEP_NOISE_KEYWORDS = ("손질법 레시피", "레시피 보기", "바로가기", "더보기")
@@ -289,8 +269,6 @@ def _clean_steps_for_card(steps_text) -> list:
     return out
 
 
-# 카드용 수량 추정 (원가가 안 돈 '레시피만' 질문에서도 추정값을 보여주기 위함).
-# cost_calculator의 기본값과 동일한 기준.
 _CARD_SEASONING_HINTS = (
     "고춧가루", "후춧가루", "후추", "설탕", "소금", "간장", "고추장", "된장", "쌈장",
     "참기름", "들기름", "식용유", "포도씨유", "올리브유", "마늘", "다진마늘", "생강",
@@ -313,7 +291,6 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
     if not isinstance(recipes_src, list) or not recipes_src:
         return {}
 
-    # cost_info.calc_results를 메뉴명으로 인덱싱 (원가/단가/대체재 붙이기용)
     calc_by_menu = {}
     if isinstance(cost_info, dict):
         for c in (cost_info.get("calc_results") or []):
@@ -340,7 +317,7 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
             if not iname:
                 continue
             ci = cost_items.get(iname, {})
-            # 수량이 비면 추정값 표시 (원가가 돌았으면 cost_calc 추정, 아니면 카드 자체 추정)
+
             if not iqty:
                 if (ci.get("qty_reason") or "").startswith("default") and ci.get("grams"):
                     iqty = f"약 {int(ci['grams'])}g(추정)"
@@ -358,12 +335,12 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
             "servings": recipe.get("servings"),
             "difficulty": recipe.get("difficulty"),
             "cooking_time": recipe.get("cooking_time"),
-            "has_cost": has_cost,                       # ★ 프론트가 단가·원가 칸 표시 여부 결정
+            "has_cost": has_cost,                   
             "total_cost": total if total else None,
             "suggested_price": int(total / 0.7) if total else None,
             "ingredients": ings_out,
             "steps": _clean_steps_for_card(recipe.get("steps")),
-            "substitute": calc.get("substitute"),  # cost_calc가 구조화해 둔 것
+            "substitute": calc.get("substitute"), 
         })
 
     new_menus = []
@@ -406,16 +383,15 @@ def report_generator_node(state: dict) -> dict:
 
     cost_info = state.get("cost_info", {})
 
-    # 컨텍스트 조합 — LLM이 읽기 좋은 형태로 정리
+    #LLM이 읽기 좋은 형태로 정리
     context_parts = []
 
-    # ★ preprocessor 분석 결과를 맨 앞에 배치 (답변 포커스 결정)
+    #preprocessor 분석 결과를 맨 앞에 배치
     if rewritten_query and rewritten_query != user_query:
         context_parts.append(f"[분석된 의도]\n질문 해석: {rewritten_query}\n의도 유형: {intent}")
 
     if recipe_info and recipe_info.get("data"):
         # 레시피별로 분리해서 컨텍스트 구성. steps는 별도 섹션으로 강조.
-        # LLM이 dict 통째로 받으면 요약 본능 발휘하므로, 명시적으로 떼어내야 함.
         recipes_data = recipe_info["data"]
         if isinstance(recipes_data, list) and recipes_data:
             recipe_blocks = []
@@ -426,13 +402,12 @@ def report_generator_node(state: dict) -> dict:
                 lines = [f"[레시피 {idx}: {recipe.get('menu', '이름없음')}]"]
                 for k, v in recipe.items():
                     if k in ("steps", "substitute_suggestions"):
-                        continue  # steps / 대체재는 따로 처리
+                        continue
                     if v is None or v == "":
                         continue
                     lines.append(f"- {k}: {v}")
                 recipe_blocks.append("\n".join(lines))
 
-                # 대체재 후보 — '💡 비싼 재료 → 대체 제안' 섹션 재료로 활용
                 subs = recipe.get("substitute_suggestions")
                 if subs and isinstance(subs, dict) and subs.get("candidates"):
                     target = subs.get("target", "주재료")
@@ -458,8 +433,6 @@ def report_generator_node(state: dict) -> dict:
                             + ", ".join(cand_lines)
                         )
 
-                # steps — 핵심 조리정보는 보존하되 블로그 수다는 정리하게 지시.
-                # (기존 '그대로 복사' 지시가 [조리단계] 규칙과 충돌해 수다가 그대로 남던 문제 해결)
                 steps = recipe.get("steps")
                 if steps:
                     recipe_blocks.append(
@@ -482,11 +455,8 @@ def report_generator_node(state: dict) -> dict:
                     )
             context_parts.append("[레시피/재료 정보]\n\n" + "\n\n".join(recipe_blocks))
         else:
-            # data가 list가 아닌 경우 (기존 동작)
             context_parts.append(f"[레시피/재료 정보]\n{recipes_data}")
 
-        # graph_context — DB에 정확 매칭 없는 메뉴(예: 김치된장찌개, 마라김치찌개)에서
-        # base 메뉴 + modifier 메뉴/재료 정보를 그래프 RAG로 추출한 컨텍스트
         graph_context = recipe_info.get("graph_context")
         if graph_context:
             original_query = recipe_info.get("original_query", "조합 메뉴")
@@ -512,7 +482,6 @@ def report_generator_node(state: dict) -> dict:
                         graph_lines.append(line)
             context_parts.append("\n".join(graph_lines))
 
-        # ai_new_menu_suggestions — '✨ AI 신메뉴 제안' 카드 섹션 재료
         ai_suggestions = recipe_info.get("ai_new_menu_suggestions")
         if ai_suggestions and isinstance(ai_suggestions, list):
             sugg_lines = [
@@ -550,20 +519,12 @@ def report_generator_node(state: dict) -> dict:
         response = _get_llm_report().invoke(messages)
         final_answer = response.content
 
-        # 마크다운 취소선 충돌 방지
-        # DB의 조리단계에 "5~10분", "6~7마리" 같은 범위 표현이 많음.
-        # 마크다운에서 ~ 가 두 개 이상이면 ~~취소선~~ 으로 해석돼 텍스트 사라짐.
-        # 숫자~숫자 패턴은 의미 보존하면서 unicode 물결표(∼)로 치환.
         final_answer = re.sub(r'(\d+)\s*~\s*(\d+)', r'\1∼\2', final_answer)
 
-        # 블로그 수다 후처리 안전망 (LLM이 놓친 것만, 아주 보수적으로)
-        #  - 'ㅋㅋ/ㅎㅎ' 웃음, 느낌표 남발
-        #  - '(전 다 사용했어요!)' 처럼 1인칭 개인후기 괄호. '전 '(전+공백)만 잡아 '전분/전복' 오삭제 방지
         final_answer = re.sub(r'\(\s*(?:전 |저[는도가]|제가)[^)]{0,40}?\)', '', final_answer)
         final_answer = re.sub(r'\s*[ㅋㅎ]{2,}', '', final_answer)
         final_answer = re.sub(r'!{2,}', '!', final_answer)
 
-        # Hallucination 검증 — 가격 날조/도메인 이탈 시 차단
         check_result = _check_hallucination(final_answer, context, intent)
         if check_result == "block":
             final_answer = _BLOCK_FALLBACK
@@ -573,7 +534,6 @@ def report_generator_node(state: dict) -> dict:
                 "messages": [AIMessage(content=final_answer)]
             }
     except Exception as e:
-        # LLM 호출 실패 시 기본 포맷으로 폴백
         final_answer = f"요청하신 {entities} 관련 답변입니다.\n\n"
         if recipe_info and recipe_info.get("data"):
             final_answer += f"[레시피 정보]\n{recipe_info['data']}\n\n"
@@ -581,7 +541,6 @@ def report_generator_node(state: dict) -> dict:
             final_answer += f"[가격 정보]\n{_format_price_info(price_info)}\n\n"
         final_answer += f"\n(자연어 요약 생성 중 오류 발생: {e})"
 
-    # 카드형 UI용 구조화 데이터 (프론트가 카드로 렌더, 없으면 마크다운 폴백)
     try:
         card_data = _build_card_data(recipe_info, cost_info)
     except Exception as _card_exc:
