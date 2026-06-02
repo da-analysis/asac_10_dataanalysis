@@ -1,20 +1,33 @@
 import os
-
 import requests
 import streamlit as st
-
+import streamlit.components.v1 as components
 
 API_URL = os.getenv("BACKEND_API_URL", "http://localhost:9000")
 
 
 def _unpack(item):
-    """chat_history 항목을 (role, message, card)로 정규화. 기존 2-tuple도 호환."""
-    if isinstance(item, (list, tuple)):
+    """
+    chat_history 항목을 (role, message, chart_html, card) 구조로 안전하게 정규화합니다.
+    기존의 tuple(2구조, 3구조) 및 dict 형식 모두와 호환됩니다.
+    """
+    if isinstance(item, dict):
+        return (
+            item.get("role", "assistant"),
+            item.get("message", ""),
+            item.get("chart_html"),
+            item.get("card"),
+        )
+    elif isinstance(item, (list, tuple)):
+        role = item[0]
+        message = item[1]
+        chart_html = None
+        card = None
         if len(item) >= 3:
-            return item[0], item[1], item[2]
-        if len(item) == 2:
-            return item[0], item[1], None
-    return "assistant", str(item), None
+            # 하단 코드 호환 (role, message, card)
+            card = item[2]
+        return role, message, chart_html, card
+    return "assistant", str(item), None, None
 
 
 def render():
@@ -30,31 +43,50 @@ def render():
     st.divider()
 
     for item in st.session_state.chat_history:
-        role, message, card = _unpack(item)
+        role, message, chart_html, card = _unpack(item)
+        
         with st.chat_message(role):
+            # 1. 챗봇 답변 카드 렌더링 로직 (하단 코드 기능)
             if role == "assistant" and card and card.get("recipes"):
                 _render_cards(card, message)
             else:
                 st.write(message)
+                
+            # 2. 차트 HTML 렌더링 로직 (상단 코드 기능)
+            if chart_html:
+                components.html(chart_html, height=420, scrolling=False)
 
     user_input = st.chat_input("예: 감자, 양파, 돼지등뼈가 있는데 마진 좋은 메뉴 추천해줘")
     if user_input:
-        st.session_state.chat_history.append(("user", user_input, None))
+        # 유저 메시지 저장 및 출력
+        st.session_state.chat_history.append({
+            "role": "user", 
+            "message": user_input, 
+            "chart_html": None, 
+            "card": None
+        })
         with st.chat_message("user"):
             st.write(user_input)
+            
         with st.spinner("챗봇이 답변을 생성 중입니다..."):
-            bot_text, bot_card = _fetch_response(user_input)
-        st.session_state.chat_history.append(("assistant", bot_text, bot_card))
+            bot_text, chart_html, bot_card = _fetch_response(user_input)
+            
+        # 챗봇 응답 데이터 모두를 구조화된 dict로 저장
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "message": bot_text,
+            "chart_html": chart_html,
+            "card": bot_card,
+        })
         st.rerun()
 
 
 # ──────────────────────────────────────────────────────────────
-# 카드 렌더링
+# 카드 렌더링 스타일 및 함수 (하단 코드 로직 그대로 유지)
 # ──────────────────────────────────────────────────────────────
 def _inject_card_css():
     st.markdown("""
     <style>
-      /* 목업과 거의 동일한 카드 — 전체를 HTML로 렌더 */
       .fc-card { background:#fff; border:1px solid #dbe3ef; border-radius:16px;
                  padding:18px 20px; margin:6px 0 14px; box-shadow:0 6px 18px rgba(15,23,42,.06); }
       .fc-head { display:flex; justify-content:space-between; align-items:center; }
@@ -132,7 +164,6 @@ def _recipe_card_html(rc: dict, idx: int, single: bool) -> str:
     pill = ('<span class="fc-pill">오늘의 추천</span>' if single
             else f'<span class="fc-pill rank">{idx}위</span>')
 
-    # 요약 (원가 있을 때만)
     summary = ""
     if total:
         srows = [f'<div class="fc-srow"><span class="k">예상 원가</span><span class="v">{_won(total)}</span></div>']
@@ -143,7 +174,6 @@ def _recipe_card_html(rc: dict, idx: int, single: bool) -> str:
                      '<span class="v fc-green">30% ▲</span></div>')
         summary = '<div class="fc-summary">' + "".join(srows) + '</div>'
 
-    # 상세 (재료·대체재·조리순서)
     meta = " · ".join(str(x) for x in [rc.get("servings"), rc.get("difficulty"),
                                        rc.get("cooking_time")] if x)
     body = f'<div class="fc-sec">📋 재료{f"  ({meta})" if meta else ""}</div>'
@@ -152,7 +182,7 @@ def _recipe_card_html(rc: dict, idx: int, single: bool) -> str:
     sub = rc.get("substitute")
     if sub and sub.get("candidates"):
         cands = " · ".join(f'🍗 {c}' for c in sub["candidates"])
-        body += (f'<div class="fc-sub">💡 <b>{sub.get("target","주재료")} 비싸면 이렇게 바꿔보세요</b><br>'
+        body += (f'<div class="fc-sub">💡 <b>{sub.get("target","주재료")} 비새면 이렇게 바꿔보세요</b><br>'
                  f'<span class="fc-chip">{cands}</span></div>')
 
     steps = rc.get("steps") or []
@@ -186,12 +216,11 @@ def _render_cards(card: dict, fallback_text: str):
     if new_menus:
         html += "".join(_new_menu_html(m, i) for i, m in enumerate(new_menus, 1))
 
-    # 전체 카드를 한 번에 렌더 (markdown이 끼어들지 않게 줄바꿈 없이)
     st.markdown(html, unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────
-# 프로필 (ROH_67 그대로)
+# 프로필 렌더링 (공통)
 # ──────────────────────────────────────────────────────────────
 def _render_profile():
     if st.session_state.profile_saved:
@@ -245,13 +274,17 @@ def _render_profile():
                 st.warning("업종과 지역을 모두 입력해주세요.")
 
 
-def _fetch_response(message: str):
-    """백엔드 호출. (응답텍스트, card dict|None) 반환."""
+# ──────────────────────────────────────────────────────────────
+# 백엔드 API 호출 통합
+# ──────────────────────────────────────────────────────────────
+def _fetch_response(message: str) -> tuple[str, str | None, dict | None]:
+    """백엔드 API 호출. (응답 텍스트, 차트 HTML, 카드 dict) 튜플 반환."""
     try:
         history = []
         for item in st.session_state.chat_history[:-1]:
-            role, msg, _ = _unpack(item)
+            role, msg, _, _ = _unpack(item)
             history.append({"role": role, "content": msg})
+
         resp = requests.post(
             f"{API_URL}/api/chatbot/chat",
             json={
@@ -264,6 +297,11 @@ def _fetch_response(message: str):
         )
         resp.raise_for_status()
         data = resp.json()
-        return data.get("response", "응답을 가져올 수 없습니다."), data.get("card")
+        
+        response_text = data.get("response", "응답을 가져올 수 없습니다.")
+        chart_html = data.get("chart_html")
+        card = data.get("card")
+        
+        return response_text, chart_html, card
     except Exception as exc:
-        return f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. ({exc})", None
+        return f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. ({exc})", None, None
