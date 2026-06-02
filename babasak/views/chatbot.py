@@ -133,7 +133,17 @@ def _won(n):
         return "-"
 
 
-def _ing_rows_html(ings: list) -> str:
+def _ing_rows_html(ings: list, has_cost: bool = True) -> str:
+    # 원가 계산이 없는 '레시피만' 질문이면 단가·원가 칸을 아예 빼고 '재료 | 수량'만 보여줌
+    if not has_cost:
+        rows = "".join(
+            f"<tr><td>{it.get('name','')}</td>"
+            f"<td style='text-align:right'>{it.get('quantity') or '-'}</td></tr>"
+            for it in ings
+        )
+        return ("<table class='fc-itable'><tr><th>재료</th>"
+                "<th style='text-align:right'>수량</th></tr>"
+                f"{rows}</table>")
     rows = ""
     for it in ings:
         name = it.get("name", "")
@@ -177,12 +187,13 @@ def _recipe_card_html(rc: dict, idx: int, single: bool) -> str:
     meta = " · ".join(str(x) for x in [rc.get("servings"), rc.get("difficulty"),
                                        rc.get("cooking_time")] if x)
     body = f'<div class="fc-sec">📋 재료{f"  ({meta})" if meta else ""}</div>'
-    body += _ing_rows_html(rc.get("ingredients") or [])
+    # has_cost(원가 계산 여부)에 따라 단가·원가 칸 표시 결정. 없으면(레시피만) '재료|수량'만.
+    body += _ing_rows_html(rc.get("ingredients") or [], has_cost=bool(total) or rc.get("has_cost"))
 
     sub = rc.get("substitute")
     if sub and sub.get("candidates"):
         cands = " · ".join(f'🍗 {c}' for c in sub["candidates"])
-        body += (f'<div class="fc-sub">💡 <b>{sub.get("target","주재료")} 비새면 이렇게 바꿔보세요</b><br>'
+        body += (f'<div class="fc-sub">💡 <b>{sub.get("target","주재료")} 비싸면 이렇게 바꿔보세요</b><br>'
                  f'<span class="fc-chip">{cands}</span></div>')
 
     steps = rc.get("steps") or []
