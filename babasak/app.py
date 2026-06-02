@@ -1,5 +1,15 @@
+import base64
+from pathlib import Path
+
 import streamlit as st
 from views import home, chatbot, dashboard
+
+
+def _img_b64(path: str) -> str:
+    return base64.b64encode(Path(path).read_bytes()).decode()
+
+
+_ASSETS = Path(__file__).parent / "assets"
 
 
 st.set_page_config(page_title="바바삭", page_icon="🍽️", layout="wide", initial_sidebar_state="collapsed")
@@ -115,7 +125,12 @@ st.markdown(
 }
 
 .logo-icon {
-    font-size: 30px;
+    font-size: 120px;
+    width: 100%;
+    max-width: 200px;
+    height: auto;
+    object-fit: contain;
+    vertical-align: middle;
 }
 
 .logo-text {
@@ -427,12 +442,17 @@ st.markdown(
 
 
 with st.sidebar:
+    _logo_path = _ASSETS / "logo.png"
+    _logo_icon = (
+        f'<img class="logo-icon" src="data:image/png;base64,{_img_b64(str(_logo_path))}" />'
+        if _logo_path.exists()
+        else '<div class="logo-icon">🍽️</div>'
+    )
     st.markdown(
-        """
+        f"""
     <a href="?goto=home" target="_self" style="text-decoration:none;">
         <div class="logo-box">
-            <div class="logo-icon">🍽️</div>
-            <div class="logo-text">바바삭</div>
+            {_logo_icon}
         </div>
     </a>
     <div class="logo-sub">소상공인을 지원하는 비서</div>
