@@ -25,6 +25,124 @@ from databricks.sdk.service.sql import StatementState
 from backend.debug_log import archive
 from backend.catalog import resolve_many, ResolveResult, get_recipe_prices_for_items
 
+# ═══ [차트 생성 모듈] ═══ 비활성화하려면 chart_utils.py에서 ENABLE_CHART = False
+from backend.nodes.chart_utils import generate_chart_html
+
+# ═══ [시계열 추이 요청 감지] ═══════════════════════════════════════════════
+# "시세/추이/그래프/트렌드" 등을 요청하면 Genie 배치 대신 시계열 SQL 직접 실행.
+# 차트를 비활성화하려면 chart_utils.py의 ENABLE_CHART = False로 변경.
+# ═══════════════════════════════════════════════════════════════════════════════
+_TREND_KEYWORDS = re.compile(r"(추이|추세|그래프|트렌드|변동|변화|시세|동향|trend|graph|일별|주별|월별)")
+_PERIOD_MAP = {
+    "일주일": 7, "1주일": 7, "7일": 7, "한주": 7,
+    "2주": 14, "이주일": 14,
+    "한달": 30, "1달": 30, "한 달": 30, "30일": 30, "1개월": 30,
+    "두달": 60, "2달": 60, "2개월": 60,
+    "세달": 90, "석달": 90, "3달": 90, "3개월": 90,
+    "넉달": 120, "4달": 120, "4개월": 120,
+    "5개월": 150, "5달": 150,
+    "반년": 180, "6개월": 180, "6달": 180,
+    "1년": 365, "일년": 365, "12개월": 365,
+}
+# 동적 기간 파싱 정규식: "N개월", "N달", "N일", "N주", "N년"
+_PERIOD_DYNAMIC_RE = re.compile(r"(\d+)\s*(개월|달|일|주|주일|년)")
+# 한글 숫자 → 정수 매핑
+_KOR_NUM = {"한": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10}
+_PERIOD_KOR_RE = re.compile(r"(" + "|".join(_KOR_NUM.keys()) + r")\s*(개월|달|일|주|주일|년)")
+
+
+def _detect_trend_request(user_query: str) -> bool:
+    """사용자 질문이 시계열 추이 요청인지 감지."""
+    return bool(_TREND_KEYWORDS.search(user_query))
+
+
+def _extract_trend_days(user_query: str) -> int:
+    """추이 기간 추출. 기간 제한 없이 자유롭게 지원. 기본 30일."""
+    # 1단계: 고정 키워드 매칭 (정확한 표현 우선)
+    for keyword, days in _PERIOD_MAP.items():
+        if keyword in user_query:
+            return days
+    # 2단계: 동적 숫자 파싱 ("5개월", "14일", "2주" 등)
+    m = _PERIOD_DYNAMIC_RE.search(user_query)
+    if m:
+        num = int(m.group(1))
+        unit = m.group(2)
+        if unit in ("개월", "달"):
+            return num * 30
+        elif unit == "일":
+            return num
+        elif unit in ("주", "주일"):
+            return num * 7
+        elif unit == "년":
+            return num * 365
+    # 3단계: 한글 숫자 파싱 ("세 달", "다섯 개월" 등)
+    km = _PERIOD_KOR_RE.search(user_query)
+    if km:
+        num = _KOR_NUM[km.group(1)]
+        unit = km.group(2)
+        if unit in ("개월", "달"):
+            return num * 30
+        elif unit == "일":
+            return num
+        elif unit in ("주", "주일"):
+            return num * 7
+        elif unit == "년":
+            return num * 365
+    # 기본값: 30일 (추이를 물어보는 사용자에겐 7일보다 30일이 더 적절)
+    return 30
+
+
+def _timeseries_sql_query(ingredient_name: str, db_name: str, db_unit: str, days: int) -> dict:
+    """시계열 가격 데이터 직접 SQL 조회 -> 날짜별 평균가격 DataFrame 반환.
+
+    날짜당 여러 지역/출처의 가격이 있으므로 GROUP BY + AVG로 집계하여
+    Genie Space와 동일한 깔끔한 라인 차트를 생성.
+    """
+    safe_name = (db_name or "").replace("'", "''")
+    safe_unit = (db_unit or "").replace("'", "''")
+    sql = f"""
+SELECT `날짜`, ROUND(AVG(`가격`)) AS `평균가격`
+FROM silver.ingredient.ingredient
+WHERE `재료명` = '{safe_name}'
+  AND `단위` = '{safe_unit}'
+  AND `날짜` >= DATE_SUB(CURRENT_DATE(), {days})
+  AND `가격` IS NOT NULL
+GROUP BY `날짜`
+ORDER BY `날짜`
+""".strip()
+
+    try:
+        host = os.environ.get("DATABRICKS_HOST")
+        token = os.environ.get("DATABRICKS_TOKEN")
+        w = WorkspaceClient(host=host, token=token) if host and token else WorkspaceClient()
+        warehouse_id = _get_warehouse_id(w)
+        if not warehouse_id:
+            return {"dataframe": None, "text": "", "sql": sql, "error": "warehouse_not_found"}
+
+        resp = w.statement_execution.execute_statement(
+            warehouse_id=warehouse_id,
+            statement=sql,
+            wait_timeout="50s",
+        )
+        if not resp.status or resp.status.state != StatementState.SUCCEEDED:
+            err_msg = resp.status.error.message if resp.status and resp.status.error else "unknown"
+            return {"dataframe": None, "text": "", "sql": sql, "error": f"sql_failed: {err_msg}"}
+
+        rows = resp.result.data_array or []
+        if not rows:
+            return {"dataframe": None, "text": f"{ingredient_name}: 최근 {days}일 데이터 없음", "sql": sql, "error": None}
+
+        df = pd.DataFrame(rows, columns=["날짜", "평균가격"])
+        df["평균가격"] = pd.to_numeric(df["평균가격"], errors="coerce")
+        df["날짜"] = pd.to_datetime(df["날짜"], errors="coerce")
+        df = df.dropna(subset=["날짜", "평균가격"]).sort_values("날짜")
+
+        # 가격 텍스트 요약 제거 - 차트만 표시
+        return {"dataframe": df, "text": "", "sql": sql, "error": None}
+    except Exception as e:
+        return {"dataframe": None, "text": "", "sql": sql, "error": f"exception: {str(e)}"}
+
+
 GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID", "01f148e5845f1f68843892ceb53abd32")
 
 # Genie 한 번에 조회할 재료 수 제한 (작게 잡을수록 SQL 생성 안정성 ↑)
@@ -321,6 +439,60 @@ def price_search_node(state: dict) -> dict:
     elif entities.get("menu"):
         ingredients = [entities["menu"]] if isinstance(entities["menu"], str) else entities["menu"]
 
+    # ═══ [시계열 추이 요청 감지] ═══════════════════════════════════════════════
+    # "계란 가격 추이 보여줘", "양파 시세 알려줘" 등 시계열 요청은
+    # Genie 배치 대신 직접 SQL로 일별 평균가격을 조회 -> 차트 생성.
+    # 차트를 비활성화하려면 chart_utils.py의 ENABLE_CHART = False로 변경.
+    # ═══════════════════════════════════════════════════════════════════════════
+    user_query = state["messages"][-1].content if state.get("messages") else ""
+    if ingredients and _detect_trend_request(user_query):
+        from backend.catalog import resolve_ingredient
+        trend_days = _extract_trend_days(user_query)
+        target_name = ingredients[0]
+        resolved = resolve_ingredient(target_name)
+        if resolved.status == "matched" and resolved.db_name and resolved.db_unit:
+            ts_result = _timeseries_sql_query(
+                target_name, resolved.db_name, resolved.db_unit, trend_days
+            )
+            price_data = {
+                "source": "timeseries_direct",
+                "data": [target_name],
+            }
+            if ts_result["text"]:
+                price_data["text"] = ts_result["text"]
+            if ts_result["sql"]:
+                price_data["sql"] = ts_result["sql"]
+            if ts_result["dataframe"] is not None and not ts_result["dataframe"].empty:
+                df = ts_result["dataframe"]
+                chart_html = generate_chart_html(df, user_query=user_query)
+                if chart_html:
+                    price_data["chart_html"] = chart_html
+                    # 차트가 있으면 전체 테이블 대신 간단 요약만 전달 (가독성 향상)
+                    avg_price = int(df["평균가격"].mean())
+                    max_price = int(df["평균가격"].max())
+                    min_price = int(df["평균가격"].min())
+                    start_date = df["날짜"].min().strftime("%Y-%m-%d")
+                    end_date = df["날짜"].max().strftime("%Y-%m-%d")
+                    price_data["text"] = (
+                        f"{target_name} 최근 {trend_days}일 가격 추이를 조회했습니다. "
+                        f"(기간: {start_date} ~ {end_date}, "
+                        f"평균 \u20a9{avg_price:,}, 최고 \u20a9{max_price:,}, 최저 \u20a9{min_price:,}) "
+                        f"인터랙티브 차트가 아래에 표시됩니다. "
+                        f"[주의: 날짜별 가격 목록, 텍스트 그래프, ASCII 차트를 절대 작성하지 마세요. "
+                        f"위 요약 한 줄만 전달하세요.]"
+                    )
+                else:
+                    # 차트 생성 실패 시에만 테이블 표시 (최대 7행)
+                    price_data["table"] = df.to_string(index=False, max_rows=7)
+            archive("price_search.timeseries_direct", {
+                "ingredient": target_name,
+                "days": trend_days,
+                "has_chart": bool(price_data.get("chart_html")),
+                "num_rows": len(ts_result["dataframe"]) if ts_result["dataframe"] is not None else 0,
+                "error": ts_result.get("error"),
+            })
+            return {"price_info": price_data}
+
     if not ingredients:
         user_query = state["messages"][-1].content if state.get("messages") else ""
         if user_query:
@@ -341,7 +513,17 @@ def price_search_node(state: dict) -> dict:
                         price_data["sql"] = result["sql"]
                     if result["dataframe"] is not None:
                         price_data["table"] = result["dataframe"].to_string(index=False, max_rows=15)
-                    return {"price_info": price_data}
+
+                    # ═══ [차트 생성] ═══════════════════════════════════════
+                    # Genie API는 차트를 반환하지 않으므로 DataFrame에서 직접 생성.
+                    # 차트를 비활성화하려면 chart_utils.py의 ENABLE_CHART = False로 변경.
+                    # ═══════════════════════════════════════════════════════════════
+                    chart_html = generate_chart_html(result["dataframe"], user_query=user_query)
+                    if chart_html:
+                        price_data["chart_html"] = chart_html
+           
+                    return {"price_info": price_data}   
+
             except Exception:
                 pass
         return {"price_info": {"source": "genie", "data": [], "note": "조회할 재료 없음"}}

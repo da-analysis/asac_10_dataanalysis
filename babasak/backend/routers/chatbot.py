@@ -39,7 +39,20 @@ def chat(req: ChatRequest):
         if not response and result.get("messages"):
             response = result["messages"][-1].content
 
+        # ═══ [차트 HTML 추출] ═══════════════════════════════════════
+        # price_search_node가 price_info["chart_html"]에 차트를 저장함.
+        # 차트가 있으면 프론트엔드로 함께 전달.
+        # 차트를 비활성화하려면 chart_utils.py의 ENABLE_CHART = False로 변경.
+        # ═══════════════════════════════════════════════════════════════
+        chart_html = None
+        price_info = result.get("price_info")
+        if isinstance(price_info, dict):
+            chart_html = price_info.get("chart_html")
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    return {"response": response}
+    resp_body = {"response": response}
+    if chart_html:
+        resp_body["chart_html"] = chart_html
+    return resp_body
