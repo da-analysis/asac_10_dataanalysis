@@ -129,6 +129,7 @@ def _tokenize(query):
 
 
 def _resolve_ingredient_candidates(text, limit=5):
+    """
     안전화 규칙:
     - exact 매칭 우선
     - substring 매칭은 한 방향만:
@@ -175,7 +176,6 @@ def _resolve_ingredient_candidates(text, limit=5):
 
 def _extract_graph_parts(query):
     """없는 메뉴를 조합하기 위한 base menu + modifier 추출 (재료 + 메뉴 둘 다).
-
     동작:
       1) _KNOWN_MENUS 매칭으로 base 메뉴들 추출 (가장 첫 매칭이 base)
       2) 남은 토큰을 modifier로 분류:
@@ -389,7 +389,6 @@ def build_graph_relation_context(query, limit=3):
 
 def search_recipes_smart(query, limit=3, fallback_popular=False):
     """레시피명/재료명 기반 통합 검색.
-
     기존 코드와 다른 핵심:
     - 재료만 있는 쿼리도 검색함: "두부 들어간 요리" -> 두부 레시피
     - 기본적으로 인기 레시피 fallback을 하지 않음.
@@ -431,7 +430,6 @@ def search_recipes_smart(query, limit=3, fallback_popular=False):
 
 def _search_by_name(keyword, limit):
     """이름 매칭 — 짧은 쿼리는 prefix만, 긴 건 substring.
-
     [한국어 메뉴명 특성]
     띄어쓰기 없는 합성어 많음 → substring 매칭이 우연 매칭 일으킴.
       예) "장어" CONTAINS → "고추장어묵볶음"의 "장+어" 부분 매칭 ❌
@@ -471,7 +469,6 @@ def _search_by_name(keyword, limit):
 
 def _search_by_tokens(menu_tokens, ing_tokens, limit):
     """메뉴 토큰 매칭 + 재료 토큰 일치당 +1000점 가중.
-
     _search_by_name과 같은 길이 분기 룰 적용 (짧은 토큰은 prefix만).
     """
     if not menu_tokens:
