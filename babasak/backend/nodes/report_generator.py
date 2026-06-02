@@ -106,9 +106,7 @@ def _format_price_info(price_info: dict) -> str:
     return "\n".join(parts) if parts else str(price_info)
 
 
-# UC 프롬프트 로드 (폴백: 하드코딩)
 _FALLBACK_SYSTEM_PROMPT = (
-
     "당신은 소상공인을 위한 물가 연동형 메뉴 추천 AI '바바삭'입니다. "
     "사용자 메시지에 [업종: X, 지역: Y] 형태가 있으면 그 맥락에 맞춰 답하세요.\n"
     "\n"

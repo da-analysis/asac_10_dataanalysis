@@ -102,7 +102,6 @@ def _get_llm():
     return _llm
 
 
-# UC 프롬프트 로드 (폴백: 하드코딩)
 _FALLBACK_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입니다.
 사용자의 질문을 분석하여 아래 형식으로 답하세요.
 

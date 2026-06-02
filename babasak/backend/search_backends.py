@@ -147,7 +147,6 @@ def _get_refine_llm():
     return _refine_llm
 
 
-# UC 프롬프트 로드 (폴백: 하드코딩)
 _FALLBACK_REFINE_SYSTEM = """당신은 식재료 도매가 분석가입니다.
 네이버 검색 결과 중 사용자가 찾는 식재료에 정확히 일치하는 상품만 골라서 kg당 도매가를 산정합니다.
 

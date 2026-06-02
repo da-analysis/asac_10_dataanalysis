@@ -17,19 +17,19 @@
 import re
 
 from backend.debug_log import archive
+from backend.price_bounds import MAX_PRICE_PER_KG
 
 
 # ════════════════════════════════════════════════════════════════
 # 가격 sanity 필터
 # ════════════════════════════════════════════════════════════════
 
-# kg당 단가 상한. 이보다 비싸면 네이버 검색이 엉뚱한 상품(소량 조미료, 수입
-# 가공품 등)을 잡아 환산을 잘못한 것으로 보고 가격을 버린다.
-# (예: '김칫국물 소금맛 68g' → ₩112,000/kg 같은 케이스 방지)
-_MAX_PRICE_PER_KG = 100_000
+# kg당 단가 상한. 공유 모듈(price_bounds)에서 가져와 네이버 검색·LLM 추정과
+# 동일 기준을 쓴다. (예: '김칫국물 소금맛 68g' → ₩112,000/kg 케이스 방지)
+_MAX_PRICE_PER_KG = MAX_PRICE_PER_KG
 
 # 원가 계산에서 제외할 재료. 물처럼 사실상 무료이거나, '국물류'처럼
-# 레시피상 다른 재료에서 파생되어 별도 시세로 잡으면 과대계상되는 항목.
+# 레시피상 다른 재료에서 파생되어 별도 시세로 잡으면 과대계산되는 항목.
 _NON_COST_INGREDIENTS = ("물",)
 _NON_COST_KEYWORDS = ("국물",)
 
@@ -56,6 +56,10 @@ _UNIT_TABLE = {
     "l": 1000.0, "L": 1000.0,
     "꼬집": 1.0,
     "줌": 5.0,
+    "근":  600.0,
+    "뿌리": 100.0,
+    "포기": 2500.0,
+    "단": 250.0
 }
 
 # 개당 무게 추정 (재료별)
@@ -64,7 +68,7 @@ _PER_PIECE_GRAMS = {
     "대파": 100.0,
     "쪽파": 30.0,
     "감자": 150.0,
-    "당근": 150.0,
+    "당근": 200.0,
     "애호박": 250.0,
     "호박": 250.0,
     "오이": 200.0,
@@ -73,6 +77,7 @@ _PER_PIECE_GRAMS = {
     "청양고추": 7.0,
     "풋고추": 10.0,
     "홍고추": 10.0,
+    "청고추": 10.0,
     "마늘": 5.0,
     "두부": 300.0,  # 1모 기준
     "계란": 60.0,
@@ -92,6 +97,7 @@ _PER_PIECE_GRAMS = {
     "팽이버섯": 100.0,  # 1봉 기준
     "배추": 2500.0,  # 1포기 기준
     "무": 1000.0,  # 1개 기준
+    "무우": 1000.0, # 무 변형 표기
     "파": 100.0,
     "생강": 20.0,
     "레몬": 100.0,
@@ -210,6 +216,20 @@ _GENIE_PRICE_MULTILINE = re.compile(
     re.DOTALL,
 )
 
+# Genie가 catalog 모드에서 주는 콤마 나열 형식 대응:
+#   "...1kg 단위 도매 평균가격은 고춧가루 27,170원, 대파 2,420원, 깐마늘 11,400원입니다."
+# 특징: 재료명에 괄호 단위가 안 붙고, 가격 뒤에 /kg도 없음. 위 패턴들이 전부 놓침.
+# 안전을 위해 '평균가격/평균가/도매 평균/평균 도매가'로 시작하는 '가격 선언 문장'으로
+# 범위를 한정한 뒤, 그 안에서만 "재료명 NN,NNN원" 쌍을 뽑는다.
+# (이렇게 하면 "변동폭(10,500~49,500원)", "최저가(660원)" 같은 비가격 숫자는 제외됨)
+# 단위는 보통 같은 문장에 'kg 단위'/'1kg'로 명시되므로 원/kg로 해석하되, '100g'이 명시된
+# 경우만 /100g로 환산한다.
+_GENIE_PRICE_DECL = re.compile(
+    r"(?:평균\s*가격|평균가|도매\s*평균|평균\s*도매가)[은는]?\s*(?P<body>.+?)(?:입니다|이다|이며|\.|\n)",
+    re.DOTALL,
+)
+_GENIE_PRICE_DECL_PAIR = re.compile(r"(?P<name>[가-힣]+)\s+(?P<price>\d[\d,]{2,})\s*원")
+
 
 def _genie_price_to_per_kg(qty: float, unit: str, price: int, name: str) -> int | None:
     """Genie 괄호 단위(예: '1kg', '100g', '6마리')와 가격을 kg당 단가로 환산."""
@@ -250,9 +270,26 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
                 "reason": "exceeds_max_per_kg", "cap": _MAX_PRICE_PER_KG,
             })
             continue
+        # 출처 표기: structured_prices에는 direct_sql(KAMIS)·recipe B2B·네이버가 모두
+        # 섞여 들어온다. 과거엔 일괄 "naver_llm"으로 하드코딩해 KAMIS 가격도 "네이버"로
+        # 잘못 표기됐다(cf. project_cost_calculator_source_regression). note/source 힌트로
+        # 실제 출처를 추론한다.
+        note = info.get("note") or ""
+        note_lower = note.lower()
+        src_hint = (info.get("source") or "").lower()
+        # B2B를 direct_sql보다 먼저 본다: "Genie/direct_sql 실패 후 recipe B2B 폴백"처럼
+        # note에 'direct_sql'과 'b2b'가 같이 있는 경우, 실제 출처는 B2B 폴백이기 때문.
+        if "b2b" in note_lower or "ingredient_recipe" in note:
+            source = "recipe_b2b"
+        elif "direct_sql" in note_lower or "kamis" in note_lower or "kamis" in src_hint:
+            source = "kamis_direct_sql"
+        elif src_hint:
+            source = src_hint
+        else:
+            source = "naver_llm"  # 출처 단서가 없으면 종전 기본값(네이버 LLM 정제)
         price_map[name] = {
             "price_per_kg": ppk,
-            "source": "naver_llm",
+            "source": source,
             "confidence": info.get("confidence", "medium"),
             "note": info.get("note"),
         }
@@ -339,6 +376,30 @@ def _build_price_map(price_info: dict) -> dict[str, dict]:
                 }
         except ValueError:
             pass
+
+    # 보완: catalog 모드의 콤마 나열 형식 대응.
+    # "...1kg 단위 도매 평균가격은 고춧가루 27,170원, 대파 2,420원, 깐마늘 11,400원입니다."
+    # 가격 선언 문장 안에서만 "재료명 NN,NNN원" 쌍을 뽑아 안전하게 흡수한다.
+    for decl in _GENIE_PRICE_DECL.finditer(raw_text):
+        body = decl.group("body")
+        # 단위 환산 계수: 같은 문장(또는 선언 직전 문맥)에 '100g'이 명시되면 /100g,
+        # 그 외(기본값)는 '1kg 단위' 도매가로 보고 그대로 원/kg.
+        per_100g = "100g" in body or "100 g" in body
+        for mg in _GENIE_PRICE_DECL_PAIR.finditer(body):
+            name = mg.group("name")
+            if name in price_map:
+                continue
+            try:
+                raw_price = int(mg.group("price").replace(",", ""))
+            except ValueError:
+                continue
+            ppk = raw_price * 10 if per_100g else raw_price
+            if 100 <= ppk <= _MAX_PRICE_PER_KG:
+                price_map[name] = {
+                    "price_per_kg": ppk,
+                    "source": "kamis_genie_decl",
+                    "confidence": "high",
+                }
 
     return price_map
 

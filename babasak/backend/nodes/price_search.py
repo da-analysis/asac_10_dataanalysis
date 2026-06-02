@@ -183,6 +183,9 @@ _batch_cache = {}
 _MAX_CACHE_SIZE = 100       # 최대 100개의 배치 묶음만 기억
 _CACHE_TTL_SECONDS = 3600   # 1시간(3600초)이 지나면 만료
 
+# direct_sql 1차 조회 결과 캐시 (같은 (재료명,단위) 조합 반복 조회 시 warehouse 재호출 회피)
+_direct_sql_cache: dict[tuple, tuple[float, dict]] = {}
+
 
 def _get_warehouse_id(w: WorkspaceClient) -> str | None:
     """direct_sql 폴백용 warehouse 조회. databricks_db.py / catalog.py와 동일 패턴."""
@@ -203,21 +206,34 @@ def _direct_sql_query(targets: list[tuple[str, str, str]]) -> dict:
     재질의도 실패한 matched 항목의 마지막 폴백으로 사용한다.
 
     Returns:
-        {"text": "재료명: ₩가격/kg ..." 형식 문자열, "found": [회복된 input_name], "error": Optional[str]}
-        결과가 없거나 실패하면 found=[]로 반환.
+        {
+          "text": "재료명: ₩가격/kg ..." 형식 문자열(report_generator/사람용),
+          "found": [회복된 input_name],
+          "prices": {input_name: {"price_per_kg": int, "unit_hint": str}}  # 무게단위 환산분만
+          "error": Optional[str], "sql": str,
+        }
+        결과가 없거나 실패하면 found=[]/prices={}로 반환.
     """
     if not targets:
-        return {"text": "", "found": [], "error": None}
+        return {"text": "", "found": [], "prices": {}, "error": None}
+
+    # (db_name, db_unit) → 행 데이터(avg_price, db_unit). 캐시는 이 db단위 행만 저장하고,
+    # input_name 입히기(text/found/prices 구성)는 캐시 hit/miss 공통으로 마지막에 1회만
+    # 수행한다. → 같은 db재료를 다른 input_name으로 조회해도(예: '마늘'/'다진마늘'→'깐마늘')
+    # 캐시가 input_name에 오염되지 않는다.
+    cache_key = tuple(sorted((t[1], t[2]) for t in targets))
+    cached = _direct_sql_cache.get(cache_key)
+    if cached and (time.time() - cached[0] < _CACHE_TTL_SECONDS):
+        rows_by_db, sql = cached[1], cached[2]
+        return _direct_sql_assemble(targets, rows_by_db, sql, cached_hit=True)
 
     # WHERE 절 동적 생성: (재료명='X' AND 단위='Y') OR ...
     where_clauses = []
-    db_to_input: dict[tuple[str, str], str] = {}
-    for input_name, db_name, db_unit in targets:
+    for _input_name, db_name, db_unit in targets:
         # SQL 인젝션 방지: 작은따옴표 escape
         safe_name = (db_name or "").replace("'", "''")
         safe_unit = (db_unit or "").replace("'", "''")
         where_clauses.append(f"(`재료명` = '{safe_name}' AND `단위` = '{safe_unit}')")
-        db_to_input[(db_name, db_unit)] = input_name
 
     sql = f"""
 SELECT `재료명`, `단위`, ROUND(AVG(`가격`)) AS `평균가격`, COUNT(*) AS `행수`
@@ -229,12 +245,11 @@ GROUP BY `재료명`, `단위`
 """.strip()
 
     try:
-        host = os.environ.get("DATABRICKS_HOST")
-        token = os.environ.get("DATABRICKS_TOKEN")
-        w = WorkspaceClient(host=host, token=token) if host and token else WorkspaceClient()
+        # WorkspaceClient 싱글턴 재사용 (매 호출 인증 핸드셰이크 회피).
+        w = _get_client()
         warehouse_id = _get_warehouse_id(w)
         if not warehouse_id:
-            return {"text": "", "found": [], "error": "warehouse_not_found"}
+            return {"text": "", "found": [], "prices": {}, "error": "warehouse_not_found"}
 
         resp = w.statement_execution.execute_statement(
             warehouse_id=warehouse_id,
@@ -243,11 +258,10 @@ GROUP BY `재료명`, `단위`
         )
         if not resp.status or resp.status.state != StatementState.SUCCEEDED:
             err_msg = resp.status.error.message if resp.status and resp.status.error else "unknown"
-            return {"text": "", "found": [], "error": f"sql_failed: {err_msg}"}
+            return {"text": "", "found": [], "prices": {}, "error": f"sql_failed: {err_msg}"}
 
-        # 결과 파싱: 재료명, 단위 → 평균가격 (cost_calculator의 정규식이 잡도록 "재료명: ₩X/kg" 포맷)
-        lines: list[str] = []
-        found_inputs: list[str] = []
+        # db단위 행 데이터만 추출 (input_name 무관).
+        rows_by_db: dict[tuple[str, str], int] = {}
         for row in (resp.result.data_array or []):
             db_name = str(row[0] or "").strip()
             db_unit = str(row[1] or "").strip()
@@ -257,40 +271,81 @@ GROUP BY `재료명`, `단위`
                 avg_price = None
             if avg_price is None or avg_price <= 0:
                 continue
-            input_name = db_to_input.get((db_name, db_unit), db_name)
-            # cost_calculator._PRICE_LINE_PATTERNS이 "재료명: ... NNN원/kg" 형식을 잡음
-            unit_lower = db_unit.lower().replace(" ", "")
-            kg_match = re.match(r"^(\d+(?:\.\d+)?)kg$", unit_lower)
-            g_match = re.match(r"^(\d+(?:\.\d+)?)g$", unit_lower)
-            if kg_match:
-                kg_val = float(kg_match.group(1))
-                price_per_kg = int(avg_price / kg_val) if kg_val > 0 else avg_price
-                lines.append(
-                    f"{input_name}: 약 ₩{price_per_kg:,}/kg "
-                    f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
-                )
-            elif g_match:
-                g_val = float(g_match.group(1))
-                price_per_kg = int(avg_price * 1000 / g_val) if g_val > 0 else avg_price
-                lines.append(
-                    f"{input_name}: 약 ₩{price_per_kg:,}/kg "
-                    f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
-                )
-            else:
-                lines.append(
-                    f"{input_name}: 약 ₩{avg_price:,}/{db_unit} "
-                    f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
-                )
-            found_inputs.append(input_name)
+            rows_by_db[(db_name, db_unit)] = avg_price
 
-        return {
-            "text": "\n".join(lines),
-            "found": found_inputs,
-            "error": None,
-            "sql": sql,
-        }
+        # 캐시 적재 (용량 초과 시 가장 오래된 항목 제거)
+        if len(_direct_sql_cache) >= _MAX_CACHE_SIZE:
+            del _direct_sql_cache[next(iter(_direct_sql_cache))]
+        _direct_sql_cache[cache_key] = (time.time(), rows_by_db, sql)
+
+        return _direct_sql_assemble(targets, rows_by_db, sql, cached_hit=False)
     except Exception as e:
-        return {"text": "", "found": [], "error": f"exception: {str(e)}"}
+        return {"text": "", "found": [], "prices": {}, "error": f"exception: {str(e)}"}
+
+
+def _direct_sql_assemble(
+    targets: list[tuple[str, str, str]],
+    rows_by_db: dict[tuple[str, str], int],
+    sql: str,
+    cached_hit: bool,
+) -> dict:
+    """db단위 행 데이터(rows_by_db)에 호출자 targets의 input_name을 입혀 결과 구성.
+
+    무게 단위(kg/g)는 원/kg로 환산해 prices(구조화)에 직접 담아 cost_calculator가
+    텍스트 파싱 없이 1순위로 쓰게 한다. 그 외 단위(개/마리 등)는 환산 불가라 text/found
+    에만 넣고 prices에는 안 넣는다(cost_calculator가 사용량 기준으로 환산).
+    """
+    lines: list[str] = []
+    found_inputs: list[str] = []
+    prices: dict[str, dict] = {}
+    for input_name, db_name, db_unit in targets:
+        avg_price = rows_by_db.get((db_name, db_unit))
+        if avg_price is None or avg_price <= 0:
+            continue
+        unit_lower = db_unit.lower().replace(" ", "")
+        kg_match = re.match(r"^(\d+(?:\.\d+)?)kg$", unit_lower)
+        g_match = re.match(r"^(\d+(?:\.\d+)?)g$", unit_lower)
+        if kg_match:
+            kg_val = float(kg_match.group(1))
+            price_per_kg = int(avg_price / kg_val) if kg_val > 0 else avg_price
+            prices[input_name] = {
+                "price_per_kg": price_per_kg,
+                "confidence": "high",
+                "unit_hint": f"{db_unit} (KAMIS direct_sql)",
+                "note": "KAMIS direct_sql 평균 도매가",
+            }
+            lines.append(
+                f"{input_name}: 약 ₩{price_per_kg:,}/kg "
+                f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
+            )
+        elif g_match:
+            g_val = float(g_match.group(1))
+            price_per_kg = int(avg_price * 1000 / g_val) if g_val > 0 else avg_price
+            prices[input_name] = {
+                "price_per_kg": price_per_kg,
+                "confidence": "high",
+                "unit_hint": f"{db_unit} → kg 환산 (KAMIS direct_sql)",
+                "note": "KAMIS direct_sql 평균 도매가",
+            }
+            lines.append(
+                f"{input_name}: 약 ₩{price_per_kg:,}/kg "
+                f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
+            )
+        else:
+            lines.append(
+                f"{input_name}: 약 ₩{avg_price:,}/{db_unit} "
+                f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
+            )
+        found_inputs.append(input_name)
+
+    return {
+        "text": "\n".join(lines),
+        "found": found_inputs,
+        "prices": prices,
+        "error": None,
+        "sql": sql,
+        "cached_hit": cached_hit,
+    }
 
 
 def _ask_genie(question: str, conversation_id: str = None) -> dict:
@@ -342,18 +397,64 @@ _NOT_FOUND_LIST_RE = re.compile(
 )
 
 
+def _has_price_evidence(ing: str, genie_text: str, other_names: list | None = None) -> bool:
+    """genie_text 안에서 ing '자신'의 가격 숫자가 부정어 없이 있으면 True.
+
+    이전 버전은 이름 주변 윈도우(-30~+80)에 '아무' 가격 숫자만 있으면 True였다.
+    그 결과 "조회된 재료는 …양파, 청양고추입니다. … 고춧가루 49,500원, …"처럼
+    재료를 콤마로 나열하면, 양파 본인 가격이 없어도 뒤따라오는 '남의 가격'을
+    자기 것으로 오인해 True가 되어 unavailable 폴백을 못 받는 결함이 있었다.
+    (cf. project_onion_judgment_fix / project_genie_format_parsing)
+
+    수정: 이름 '바로 뒤(+35자)' 또는 '바로 앞(-25자)' 좁은 구간만 보고,
+    이름과 그 가격 사이에 콤마/줄바꿈/다른 재료명 같은 '경계'가 끼면 남의 가격으로
+    간주하여 제외한다. 이로써 판정이 cost_calculator의 실제 가격 파싱과 일치하게 된다.
+    """
+    if ing not in genie_text:
+        return False
+    others = [n for n in (other_names or []) if n and n != ing]
+    for match in re.finditer(re.escape(ing), genie_text):
+        # 뒤쪽 구간(가장 흔한 "재료명 NN,NNN원" 순서). 콤마 나열에서 다음 재료
+        # 가격이 안 새어들도록 +80 → +35로 좁힘.
+        fwd = genie_text[match.end():match.end() + 35]
+        # 앞쪽 구간(역순 표기 대비). 이름과 가격 사이 경계는 가격 '뒤쪽'으로 검사.
+        bwd = genie_text[max(0, match.start() - 25):match.start()]
+        for window, is_forward in ((fwd, True), (bwd, False)):
+            if any(p.search(window) for p in _NEGATION_PATTERNS):
+                continue
+            pm = _PRICE_PATTERN.search(window)
+            if not pm:
+                continue
+            # 이름 ↔ 가격 사이 구간(seg)에 경계가 있으면 그 가격은 남의 것.
+            seg = window[:pm.start()] if is_forward else window[pm.end():]
+            if "," in seg or "\n" in seg:
+                continue
+            if any(o in seg for o in others):
+                continue
+            return True
+    return False
+
+
 def _detect_unavailable(ingredients: list, genie_text: str) -> list:
-    """요청한 재료 vs Genie 응답을 비교하여 누락된 재료 반환."""
+    """요청한 재료 vs Genie 응답을 비교하여 누락된 재료 반환.
+
+    전략:
+    1) Genie가 "조회된 재료는 X, Y, Z" 식으로 명시한 경우 → 그 외는 모두 unavailable
+    2) "나머지 재료(A, B, C)는 ... 없" 패턴이 있으면 그것도 활용
+    3) 명시적 패턴 없으면 기존 윈도우 기반 polling으로 폴백
+    """
     if not genie_text or not ingredients:
         return list(ingredients)
 
+    # ── Step 1: "조회된 재료는 X, Y, Z" 명시적 추출 ──
     explicit_found = set()
     for fm in _FOUND_LIST_RE.finditer(genie_text):
-        found_text = re.sub(r"\*+", "", fm.group(1))
+        found_text = re.sub(r"\*+", "", fm.group(1))  # markdown ** 제거
         for ing in ingredients:
             if ing in found_text:
                 explicit_found.add(ing)
 
+    # ── Step 2: "나머지 재료(A, B, C)는 ... 없" 명시적 추출 ──
     explicit_not_found = set()
     for nm in _NOT_FOUND_LIST_RE.finditer(genie_text):
         nf_text = nm.group(1)
@@ -361,29 +462,26 @@ def _detect_unavailable(ingredients: list, genie_text: str) -> list:
             if ing in nf_text:
                 explicit_not_found.add(ing)
 
+    # ── Step 3: 명시적 found 리스트가 있으면, 단 가격 숫자가 실제로 있는지 재확인 ──
+    # Genie가 "조회된 재료는 …양파…입니다"라고 이름만 말하고 가격 줄을 안 주는 경우가 있다.
+    # 이름이 found 목록에 있어도 응답 본문에 그 재료의 가격 숫자가 없으면 unavailable로 내려
+    # 기존 폴백(카탈로그 재질의 → direct_sql)이 가격을 채우게 한다.
     if explicit_found:
-        return [ing for ing in ingredients if ing not in explicit_found]
+        unavailable = []
+        for ing in ingredients:
+            if ing not in explicit_found:
+                unavailable.append(ing)
+                continue
+            if not _has_price_evidence(ing, genie_text, ingredients):
+                unavailable.append(ing)
+        return unavailable
+
+    # ── Step 4: 명시적 not_found 리스트만 있으면 그것만 unavailable ──
     if explicit_not_found:
         return [ing for ing in ingredients if ing in explicit_not_found]
 
-    unavailable = []
-    for ing in ingredients:
-        if ing not in genie_text:
-            unavailable.append(ing)
-            continue
-        positive_evidence = False
-        for match in re.finditer(re.escape(ing), genie_text):
-            start = max(0, match.start() - 30)
-            end = min(len(genie_text), match.end() + 80)
-            window = genie_text[start:end]
-            has_negation = any(p.search(window) for p in _NEGATION_PATTERNS)
-            has_price = bool(_PRICE_PATTERN.search(window))
-            if has_price and not has_negation:
-                positive_evidence = True
-                break
-        if not positive_evidence:
-            unavailable.append(ing)
-    return unavailable
+    # ── Step 5: 폴백 — 기존 윈도우 기반 polling ──
+    return [ing for ing in ingredients if not _has_price_evidence(ing, genie_text, ingredients)]
 
 
 def _build_catalog_query(targets: list[tuple[str, str, str]]) -> str:
@@ -577,15 +675,69 @@ def price_search_node(state: dict) -> dict:
     })
 
     try:
-        # ─── 배치 계획 ───────────────────────────────────────
+        # ─── direct_sql 1차 조회 (catalog 재료) ──────────────
+        # 방침 변경(2026-06-01): KAMIS 정확명(matched)으로 매칭된 재료는 결정적인
+        # statement_execution(direct_sql)을 '먼저' 돌린다. LLM이 SQL을 생성·실행하는
+        # Genie(배치당 ~40초)를 건너뛰어 속도가 크게 빨라지고, 자연어→정규식 파싱의
+        # 비결정성도 회피한다. direct_sql이 못 잡은 catalog 재료만 Genie로 폴백.
+        # passthrough(alias 미등록)는 정확명이 없어 direct_sql 불가 → 기존대로 Genie.
+        direct_first_texts: list[str] = []
+        direct_first_sqls: list[str] = []
+        direct_first_recovered: set[str] = set()
+        # direct_sql이 환산한 원/kg 구조화 가격 — structured_prices에 직접 투입해
+        # cost_calculator가 텍스트 파싱 없이 1순위로 쓰게 한다(B 전환의 핵심 이득).
+        direct_first_prices: dict[str, dict] = {}
+        remaining_catalog: list[tuple[str, str, str]] = list(catalog_targets)
+        if catalog_targets:
+            archive("price_search.direct_first_attempt", {
+                "items": [t[0] for t in catalog_targets],
+                "trace_ids": [trace_ids.get(t[0], t[0]) for t in catalog_targets],
+            })
+            try:
+                with mlflow.start_span(
+                    name=f"direct_sql_first_[{','.join(t[0] for t in catalog_targets)[:60]}]",
+                    span_type=SpanType.RETRIEVER,
+                ) as span:
+                    span.set_inputs({"targets": catalog_targets})
+                    df_result = _direct_sql_query(catalog_targets)
+                    span.set_outputs({
+                        "found": df_result.get("found"),
+                        "error": df_result.get("error"),
+                        "text_preview": (df_result.get("text") or "")[:200],
+                    })
+                direct_first_recovered = set(df_result.get("found") or [])
+                direct_first_prices = df_result.get("prices") or {}
+                if df_result.get("text"):
+                    direct_first_texts.append(df_result["text"])
+                if df_result.get("sql"):
+                    direct_first_sqls.append(df_result["sql"])
+                remaining_catalog = [
+                    t for t in catalog_targets if t[0] not in direct_first_recovered
+                ]
+                archive("price_search.direct_first_result", {
+                    "recovered": list(direct_first_recovered),
+                    "num_structured": len(direct_first_prices),
+                    "still_missing": [t[0] for t in remaining_catalog],
+                    "error": df_result.get("error"),
+                    "cached_hit": df_result.get("cached_hit"),
+                })
+            except Exception as df_exc:
+                archive("price_search.direct_first_error", {
+                    "error": str(df_exc),
+                    "items": [t[0] for t in catalog_targets],
+                })
+                remaining_catalog = list(catalog_targets)
+
+        # ─── 배치 계획 (direct_sql 실패 catalog + passthrough만 Genie로) ───
         batches: list[tuple[str, list]] = []
-        for i in range(0, len(catalog_targets), _GENIE_BATCH_SIZE):
-            batches.append(("catalog", catalog_targets[i:i + _GENIE_BATCH_SIZE]))
+        for i in range(0, len(remaining_catalog), _GENIE_BATCH_SIZE):
+            batches.append(("catalog", remaining_catalog[i:i + _GENIE_BATCH_SIZE]))
         for i in range(0, len(passthrough), _GENIE_BATCH_SIZE):
             batches.append(("passthrough", passthrough[i:i + _GENIE_BATCH_SIZE]))
 
         archive("price_search.batch_plan", {
             "num_batches": len(batches),
+            "num_direct_first_recovered": len(direct_first_recovered),
             "num_recipe_direct": len(recipe_direct),
             "num_skip": len(skip_unavailable),
             "max_workers": _GENIE_MAX_WORKERS,
@@ -646,8 +798,9 @@ def price_search_node(state: dict) -> dict:
                 return (idx, mode, None, input_names, str(batch_exc))
 
         # ── 병렬 호출 ──
-        all_texts: list[str] = []
-        all_sqls: list[str] = []
+        # direct_sql 1차에서 이미 회복한 결과를 출발점으로 둔다(텍스트/SQL 합류).
+        all_texts: list[str] = list(direct_first_texts)
+        all_sqls: list[str] = list(direct_first_sqls)
         all_tables: list[str] = []
         failed_batch_items: list[str] = []
 
@@ -766,12 +919,21 @@ def price_search_node(state: dict) -> dict:
         if all_tables:
             price_data["table"] = "\n---\n".join(all_tables)
 
+        # ─── direct_sql 1차 구조화 가격 투입 ──────────────────
+        # direct_sql이 환산한 원/kg를 structured_prices에 직접 넣어 cost_calculator가
+        # 텍스트 파싱 없이 1순위로 쓰게 한다(B 전환의 핵심 — 정규식 비결정성 우회).
+        if direct_first_prices:
+            structured_prices = price_data.get("structured_prices", {})
+            structured_prices.update(direct_first_prices)
+            price_data["structured_prices"] = structured_prices
+
         # ─── recipe_matched 재료 B2B 가격 즉시 투입 ────────────
         # Genie를 거치지 않고 ingredient_recipe의 유통가를 structured_prices에 직접 삽입.
         # cost_calculator가 structured_prices를 1순위로 참조하므로 이 재료들은 확정 가격.
         if recipe_direct:
             structured_prices = price_data.get("structured_prices", {})
             recipe_text_lines = []
+            recipe_priced_count = 0  # recipe_direct로 실제 structured에 넣은 개수(전용 카운트)
             for ing_name in recipe_direct:
                 r = resolved_by_input.get(ing_name)
                 if r and r.recipe_info:
@@ -791,17 +953,23 @@ def price_search_node(state: dict) -> dict:
                             price_per_kg = int(price * 1000 / unit_numeric)
                         elif unit_text in ("l", "리터"):
                             price_per_kg = int(price / unit_numeric)
-                    structured_prices[ing_name] = {
-                        "price_per_kg": price_per_kg,
-                        "confidence": "high",
-                        "unit_hint": f"{unit} (B2B 유통가, 상품: {product_name})",
-                        "note": "ingredient_recipe B2B 가격 직접 사용",
-                    }
-                    if price_per_kg:
+                    # price_per_kg를 환산했고(=None 아님), 아직 다른 출처(direct_sql 등)가
+                    # 그 재료를 안 채웠을 때만 structured에 넣는다.
+                    #  - None 주입 금지: cost_calculator가 어차피 거르고, 의미만 흐림.
+                    #  - 덮어쓰기 금지: direct_sql(KAMIS 확정가)을 B2B로 날리지 않게.
+                    if price_per_kg and ing_name not in structured_prices:
+                        structured_prices[ing_name] = {
+                            "price_per_kg": price_per_kg,
+                            "confidence": "high",
+                            "unit_hint": f"{unit} (B2B 유통가, 상품: {product_name})",
+                            "note": "ingredient_recipe B2B 가격 직접 사용",
+                        }
+                        recipe_priced_count += 1
                         recipe_text_lines.append(
                             f"{ing_name}: 약 ₩{price_per_kg:,}/kg (B2B 유통가, {product_name} {unit})"
                         )
                     else:
+                        # 환산 불가(개/봉 등)거나 이미 다른 출처가 채운 경우: 텍스트로만 참고 제공.
                         recipe_text_lines.append(
                             f"{ing_name}: ₩{price:,}/{unit} (B2B 유통가, {product_name})"
                         )
@@ -815,7 +983,8 @@ def price_search_node(state: dict) -> dict:
                 )
             archive("price_search.recipe_direct_applied", {
                 "items": recipe_direct,
-                "num_priced": len(structured_prices),
+                "num_priced": recipe_priced_count,
+                "num_structured_total": len(structured_prices),
             })
 
         # ─── unavailable 판정 ─────────────────────────────────
@@ -832,6 +1001,10 @@ def price_search_node(state: dict) -> dict:
 
         unavailable: list[str] = []
         for name in queried_input_names:
+            # direct_sql 1차에서 확정된 재료는 구조화 가격이 이미 있으므로 정규식
+            # 판정을 거치지 않고 무조건 available 처리한다(B 전환의 판정 일치).
+            if name in direct_first_recovered:
+                continue
             r = resolved_by_input.get(name)
             in_response_by_input = name not in missing_set
             in_response_by_db = bool(r and r.db_name and r.db_name not in missing_set)
@@ -928,7 +1101,12 @@ def price_search_node(state: dict) -> dict:
                     "recoverable": recoverable,
                 })
 
-        # ─── direct_sql_fallback ──────────────────────────────
+        # ─── direct_sql_fallback (안전망) ─────────────────────
+        # B 전환(2026-06-01) 후 catalog 재료는 이미 함수 앞단에서 direct_sql 1차를
+        # 거쳤다. 정상 흐름에선 여기 도달하는 matched 재료가 거의 없다(있어도 1차에서
+        # 못 잡은 것이라 재시도 의미 적음). 다만 1차 direct_sql이 예외로 통째 실패한
+        # 경우(direct_first_error)엔 catalog가 Genie로 갔다가 여기로 떨어지므로,
+        # 그때의 마지막 재시도 안전망으로 남겨둔다.
         direct_sql_recovered: list[str] = []
         unrecoverable_matched = [ing for ing in unavailable if ing in catalog_input_set]
         if unrecoverable_matched:

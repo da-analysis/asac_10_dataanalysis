@@ -18,7 +18,7 @@ from backend.nodes.preprocessor import preprocessor_node
 
 # MLflow Tracing — LangGraph/ChatDatabricks 호출을 자동 캡처.
 # Apps 환경에선 DATABRICKS_HOST/credential이 자동 주입되므로 set_experiment만 지정.
-_MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", "/Shared/babasak-main")
+_MLFLOW_EXPERIMENT = os.getenv("MLFLOW_EXPERIMENT", "/Shared/babasak-traces")
 try:
     mlflow.set_tracking_uri("databricks")
     mlflow.set_experiment(_MLFLOW_EXPERIMENT)
