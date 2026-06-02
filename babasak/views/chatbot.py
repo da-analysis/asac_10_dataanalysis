@@ -1,15 +1,27 @@
 import base64
+import html
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+
+def _esc(v) -> str:
+    """카드에 넣는 모든 외부 문자열(메뉴명·재료명 등)을 HTML 이스케이프한다.
+    LLM/DB에서 온 값에 <, &, " 가 섞여도 레이아웃이 깨지지 않게 한다."""
+    return html.escape(str(v if v is not None else ""))
+
 API_URL = os.getenv("BACKEND_API_URL", "http://localhost:9000")
 
-# 로고 (사이드바 외에 챗봇 헤더에도 표시). 없으면 이모지 폴백.
-_LOGO_PATH = Path(__file__).resolve().parent.parent / "assets" / "logo.png"
+# 챗봇 헤더 로고. 새 로고(logo_new.png)가 있으면 그것, 없으면 기존 logo.png, 둘 다 없으면 이모지.
+# (사이드바 로고는 app.py가 별도로 logo.png 를 사용하므로 여기 변경은 챗봇 헤더에만 적용된다.)
+_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+_LOGO_PATH = _ASSETS_DIR / "logo_new.png"
+if not _LOGO_PATH.exists():
+    _LOGO_PATH = _ASSETS_DIR / "logo.png"
 
 # 우측 '추천 질문' 패널의 칩 (라벨, 보낼 질문). 클릭 시 바로 전송된다.
 _SUGGESTED_QUESTIONS = [
@@ -73,10 +85,6 @@ def _queue_message(text: str):
 def render():
     _inject_card_css()
 
-    if st.button("← 홈으로", key="chatbot_home"):
-        st.session_state.page = "home"
-        st.rerun()
-
     # ── 상단 헤더: 로고 + 타이틀 + 지역/업종 ─────────────────────
     region = st.session_state.get("user_region", "")
     industry = st.session_state.get("user_industry", "")
@@ -86,7 +94,7 @@ def render():
         f"""
     <div class="cb-header">
         <div class="cb-header-left">
-            <div class="cb-logo">{_logo_img_html(38)}</div>
+            <div class="cb-logo">{_logo_img_html(64)}</div>
             <div>
                 <div class="cb-title">바바삭 챗봇 <span class="cb-badge">● 응답중</span></div>
                 <div class="cb-subtitle">메뉴 추천 · 원가 계산 · 대체 재료 · 시세 분석</div>
@@ -105,14 +113,14 @@ def render():
     st.divider()
 
     # ── 본문: 좌(채팅) / 우(추천질문 + Tip) 2단 ──────────────────
-    col_chat, col_side = st.columns([7, 3], gap="large")
+    col_chat, col_side = st.columns([8, 2], gap="large")
 
     with col_chat:
-        for item in st.session_state.chat_history:
+        for turn, item in enumerate(st.session_state.chat_history):
             role, message, chart_html, card = _unpack(item)
             with st.chat_message(role):
                 if role == "assistant" and card and card.get("recipes"):
-                    _render_cards(card, message)
+                    _render_cards(card, message, turn)
                 else:
                     st.write(message)
                 if chart_html:
@@ -130,6 +138,9 @@ def render():
             )
             st.rerun()
 
+        # 채팅 맨 아래 스크롤 기준점(앵커). rerun 직후 여기로 자동 스크롤한다.
+        st.markdown('<div id="chat-bottom-anchor"></div>', unsafe_allow_html=True)
+
     with col_side:
         _render_side_panel()
 
@@ -137,6 +148,30 @@ def render():
     user_input = st.chat_input("")
     if user_input:
         _queue_message(user_input)
+
+    # rerun 후 화면이 맨 위로 튀는 것을 완화: 대화가 있으면 최신 메시지로 자동 스크롤.
+    # iframe에서 부모 문서 스크롤을 시도하되, 막히면(보안정책) 조용히 무시한다.
+    if st.session_state.chat_history:
+        components.html(
+            """
+            <script>
+            (function () {
+                try {
+                    const doc = window.parent.document;
+                    const anchor = doc.getElementById("chat-bottom-anchor");
+                    if (anchor) {
+                        // 렌더 직후 한 번 + 약간 늦게 한 번(레이아웃 안정화 후) 스크롤
+                        anchor.scrollIntoView({behavior: "auto", block: "end"});
+                        setTimeout(function () {
+                            anchor.scrollIntoView({behavior: "smooth", block: "end"});
+                        }, 150);
+                    }
+                } catch (e) { /* cross-origin 등으로 막히면 무시 */ }
+            })();
+            </script>
+            """,
+            height=0,
+        )
 
 
 def _render_side_panel():
@@ -165,8 +200,18 @@ def _render_side_panel():
 def _inject_card_css():
     st.markdown("""
     <style>
+      /* 챗봇 화면에서는 본문 폭 제한을 넓혀 채팅 영역을 더 넓게 쓴다
+         (app.py 전역 max-width:1500px 를 이 페이지에 한해 확장) */
+      .block-container { max-width: 1800px !important; }
+
+      /* 카드 3개를 한 줄에 가로로 나열하는 그리드 컨테이너 */
+      .fc-grid { display:flex; flex-wrap:wrap; gap:14px; margin:6px 0 14px; align-items:flex-start; }
       .fc-card { background:#fff; border:1px solid #dbe3ef; border-radius:16px;
-                 padding:18px 20px; margin:6px 0 14px; box-shadow:0 6px 18px rgba(15,23,42,.06); }
+                 padding:18px 20px; box-shadow:0 6px 18px rgba(15,23,42,.06);
+                 /* 기본: 한 줄에 3개 (gap 14px 2개분 고려). 화면 좁으면 자동 줄바꿈 */
+                 flex:1 1 calc(33.333% - 10px); min-width:200px; box-sizing:border-box; }
+      /* 펼쳐진 카드는 한 줄 전체를 차지해 나머지 카드를 아래로 밀어냄 */
+      .fc-card:has(> details[open]) { flex-basis:100%; }
       .fc-head { display:flex; justify-content:space-between; align-items:center; }
       .fc-pill { background:#dcfce7; color:#15803d; font-size:.72rem; font-weight:800;
                  padding:3px 11px; border-radius:100px; margin-right:9px; }
@@ -174,19 +219,27 @@ def _inject_card_css():
       .fc-menu { font-weight:800; font-size:1.12rem; color:#0f172a; }
       .fc-up { color:#16a34a; font-weight:800; }
       .fc-summary { margin-top:12px; }
-      .fc-srow { display:flex; justify-content:space-between; padding:7px 0;
-                 border-bottom:1px solid #f1f5f9; font-size:.95rem; }
+      .fc-srow { display:flex; justify-content:space-between; gap:8px; padding:7px 0;
+                 border-bottom:1px solid #f1f5f9; font-size:.9rem; }
       .fc-srow .k { color:#64748b; }
       .fc-srow .v { color:#0f172a; font-weight:700; }
       .fc-green { color:#16a34a; font-weight:800; }
       .fc-details { margin-top:6px; }
-      .fc-details > summary { cursor:pointer; color:#4f6cf7; font-weight:700; font-size:.9rem;
-                 list-style:none; padding:10px 0 4px; text-align:center; }
+      .fc-details > summary { cursor:pointer; color:#4f6cf7; font-weight:700; font-size:.88rem;
+                 list-style:none; padding:10px 0 4px; text-align:center; user-select:none; }
       .fc-details > summary::-webkit-details-marker { display:none; }
+      .fc-details > summary:hover { color:#3b53d6; }
+      /* 펼침 상태에 따라 두 라벨 중 하나만 보여준다 (JS 없이 토글) */
+      .fc-details > summary .fc-open-label { display:none; }
+      .fc-details[open] > summary .fc-shut-label { display:none; }
+      .fc-details[open] > summary .fc-open-label { display:inline; }
       .fc-sec { font-weight:800; color:#334155; margin:14px 0 6px; }
       .fc-itable { width:100%; border-collapse:collapse; font-size:.9rem; }
       .fc-itable th { background:#eef2ff; color:#475569; text-align:left; padding:7px 10px; }
       .fc-itable td { border-bottom:1px solid #f1f5f9; padding:7px 10px; }
+      /* 재료명 → 네이버 쇼핑 검색 링크 */
+      .fc-buy { color:#0f172a; text-decoration:none; border-bottom:1px dashed #93c5fd; }
+      .fc-buy:hover { color:#2563eb; border-bottom-color:#2563eb; }
       .fc-sub { background:#fff7ed; border:1px solid #fed7aa; border-radius:12px;
                 padding:13px 15px; margin:12px 0; font-size:.9rem; }
       .fc-chip { background:#f0fdf4; border:1px solid #86efac; border-radius:9px;
@@ -234,12 +287,25 @@ def _won(n):
         return "-"
 
 
+def _ing_name_link(name: str) -> str:
+    """재료명을 네이버 쇼핑 검색 결과 페이지로 가는 링크로 감싼다(새 탭).
+    name 은 이미 _esc 처리된 표시용 문자열이어야 한다.
+    빈 값이면 링크 없이 그대로 반환."""
+    if not name or name == "-":
+        return name
+    # 검색어는 표시용(이스케이프된) 값이 아니라 원문 기준으로 인코딩해야 하므로 unescape
+    raw = html.unescape(name)
+    url = "https://search.shopping.naver.com/search/all?query=" + quote(raw)
+    return (f'<a class="fc-buy" href="{url}" target="_blank" rel="noopener" '
+            f'title="네이버 쇼핑에서 \'{raw}\' 구매처 보기">{name} 🛒</a>')
+
+
 def _ing_rows_html(ings: list, has_cost: bool = True) -> str:
     # 원가 계산이 없는 '레시피만' 질문이면 단가·원가 칸을 아예 빼고 '재료 | 수량'만 보여줌
     if not has_cost:
         rows = "".join(
-            f"<tr><td>{it.get('name','')}</td>"
-            f"<td style='text-align:right'>{it.get('quantity') or '-'}</td></tr>"
+            f"<tr><td>{_ing_name_link(_esc(it.get('name','')))}</td>"
+            f"<td style='text-align:right'>{_esc(it.get('quantity') or '-')}</td></tr>"
             for it in ings
         )
         return ("<table class='fc-itable'><tr><th>재료</th>"
@@ -247,8 +313,8 @@ def _ing_rows_html(ings: list, has_cost: bool = True) -> str:
                 f"{rows}</table>")
     rows = ""
     for it in ings:
-        name = it.get("name", "")
-        qty = it.get("quantity") or "-"
+        name = _esc(it.get("name", ""))
+        qty = _esc(it.get("quantity") or "-")
         ppk = it.get("price_per_kg")
         ppk_txt = f"{int(ppk):,}" if ppk else "—"
         src = it.get("source")
@@ -259,7 +325,7 @@ def _ing_rows_html(ings: list, has_cost: bool = True) -> str:
             cost_txt = f"<b>{int(cost):,}원</b>"
         else:
             cost_txt = '<span style="color:#cbd5e1">시세/사용량 미확인</span>'
-        rows += (f"<tr><td>{name}</td><td style='text-align:right'>{qty}</td>"
+        rows += (f"<tr><td>{_ing_name_link(name)}</td><td style='text-align:right'>{qty}</td>"
                  f"<td style='text-align:right'>{ppk_txt}</td>"
                  f"<td style='text-align:right'>{cost_txt}</td></tr>")
     return ("<table class='fc-itable'><tr><th>재료</th><th style='text-align:right'>수량</th>"
@@ -267,8 +333,8 @@ def _ing_rows_html(ings: list, has_cost: bool = True) -> str:
             f"{rows}</table>")
 
 
-def _recipe_card_html(rc: dict, idx: int, single: bool) -> str:
-    menu = rc.get("menu", "이름없음")
+def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> str:
+    menu = _esc(rc.get("menu", "이름없음"))
     total = rc.get("total_cost")
     price = rc.get("suggested_price")
 
@@ -293,18 +359,22 @@ def _recipe_card_html(rc: dict, idx: int, single: bool) -> str:
 
     sub = rc.get("substitute")
     if sub and sub.get("candidates"):
-        cands = " · ".join(f'🍗 {c}' for c in sub["candidates"])
-        body += (f'<div class="fc-sub">💡 <b>{sub.get("target","주재료")} 비싸면 이렇게 바꿔보세요</b><br>'
+        cands = " · ".join(f'🍗 {_esc(c)}' for c in sub["candidates"])
+        body += (f'<div class="fc-sub">💡 <b>{_esc(sub.get("target","주재료"))} 비싸면 이렇게 바꿔보세요</b><br>'
                  f'<span class="fc-chip">{cands}</span></div>')
 
     steps = rc.get("steps") or []
     if steps:
         body += '<div class="fc-sec">👨‍🍳 조리 순서</div><ol class="fc-steps">'
-        body += "".join(f"<li>{s}</li>" for s in steps)
+        body += "".join(f"<li>{_esc(s)}</li>" for s in steps)
         body += "</ol>"
 
-    details = (f'<details class="fc-details"{" open" if single else ""}>'
-               f'<summary>👆 탭하면 재료·조리법·대체재 보기</summary>{body}</details>')
+    # name 속성을 같은 그룹으로 묶으면 브라우저가 아코디언처럼 동작(하나 열면 나머지 닫힘).
+    # single(단일 추천)일 때는 그냥 펼쳐둔다.
+    name_attr = "" if single else f' name="{group}"'
+    details = (f'<details class="fc-details"{name_attr}{" open" if single else ""}>'
+               f'<summary><span class="fc-shut-label">👆 탭하면 재료·조리법·대체재 보기</span>'
+               f'<span class="fc-open-label">🔼 접기</span></summary>{body}</details>')
 
     return (f'<div class="fc-card"><div class="fc-head">'
             f'<div>{pill}<span class="fc-menu">{menu}</span></div></div>'
@@ -312,23 +382,31 @@ def _recipe_card_html(rc: dict, idx: int, single: bool) -> str:
 
 
 def _new_menu_html(m: dict, i: int) -> str:
-    combo = f'<div class="fc-combo">{m["combo_label"]}</div>' if m.get("combo_label") else ""
+    combo = f'<div class="fc-combo">{_esc(m["combo_label"])}</div>' if m.get("combo_label") else ""
     return (f'<div class="fc-nm"><span class="fc-nm-tag">✨ AI 신메뉴 제안 #{i}</span>'
-            f'<span class="fc-nm-name">{m.get("name","")}</span>{combo}'
+            f'<span class="fc-nm-name">{_esc(m.get("name",""))}</span>{combo}'
             f'<div style="color:#64748b;font-size:.85rem">기존 재료를 활용한 조합 메뉴 제안입니다.</div></div>')
 
 
-def _render_cards(card: dict, fallback_text: str):
+def _render_cards(card: dict, fallback_text: str, turn: int = 0):
     recipes = card.get("recipes") or []
     single = len(recipes) == 1
 
-    html = "".join(_recipe_card_html(rc, i, single) for i, rc in enumerate(recipes, 1))
+    # 카드 묶음마다 고유 그룹명 → 같은 묶음의 details끼리만 아코디언으로 묶인다.
+    # 대화 turn 인덱스를 쓰므로 답변마다 그룹이 달라 서로 간섭하지 않는다.
+    group = f"rcg-{turn}"
+
+    cards_html = "".join(
+        _recipe_card_html(rc, i, single, group) for i, rc in enumerate(recipes, 1)
+    )
+    # 카드들을 가로 그리드로 감싼다(한 줄에 3개, 펼치면 그 카드만 전체 폭 차지)
+    cards_block = f'<div class="fc-grid">{cards_html}</div>'
 
     new_menus = card.get("new_menus") or []
     if new_menus:
-        html += "".join(_new_menu_html(m, i) for i, m in enumerate(new_menus, 1))
+        cards_block += "".join(_new_menu_html(m, i) for i, m in enumerate(new_menus, 1))
 
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(cards_block, unsafe_allow_html=True)
 
 
 # ──────────────────────────────────────────────────────────────
