@@ -47,13 +47,9 @@ with driver.session() as session:
 
 # MAGIC %md
 # MAGIC ## 3. 샘플 데이터 준비
-# MAGIC
-# MAGIC - 레시피: `silver.10000recipe.recipes`
-# MAGIC - 재료: **`silver.10000recipe.ingredients_final`** (51번 최종본)
 
 # COMMAND ----------
 
-# 노드수 20만/관계수 40만 제한 고려 — 레시피 5만개 샘플
 SAMPLE_SIZE = 45000
 
 recipes_df = spark.sql(f"""
@@ -165,13 +161,6 @@ print(f"Ingredient 노드 {len(ing_list)}개 생성")
 
 # MAGIC %md
 # MAGIC ## 7. CONTAINS 관계 생성 (수량/조리상태 메타 포함)
-# MAGIC
-# MAGIC 관계 속성:
-# MAGIC - `quantity` (legacy, 기존 호환용 → quantity_text와 동일)
-# MAGIC - `quantity_text`: 사용자가 본 원본 표시 (예: "1큰술", "1/2개")
-# MAGIC - `quantity_g`: g 환산값 (원가 계산용)
-# MAGIC - `quantity_count`, `quantity_unit`: 개수 단위 (예: 1.0 / "개")
-# MAGIC - `cooking_state`: 다진/구운/채썬 등
 
 # COMMAND ----------
 

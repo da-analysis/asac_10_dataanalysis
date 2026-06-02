@@ -26,5 +26,7 @@ env:
     valueFrom: secret
   - name: NAVER_CLIENT_SECRET
     valueFrom: secret-2
+  - name: MLFLOW_EXPERIMENT
+    value: "/Shared/babasak-traces"
   - name: PYTHONUNBUFFERED
     value: "1"
