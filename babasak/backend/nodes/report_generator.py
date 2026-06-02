@@ -256,6 +256,127 @@ except Exception:
     SYSTEM_PROMPT = _FALLBACK_SYSTEM_PROMPT
 
 
+# ═══════════════════════════════════════════════════════════════
+# 카드형 UI용 구조화 데이터 (프론트가 카드로 렌더 — views/chatbot.py)
+# ═══════════════════════════════════════════════════════════════
+# 마크다운(final_report)은 그대로 두고, 같은 데이터를 dict(card_data)로도 반환.
+# LLM이 JSON을 만드는 게 아니라 이미 계산된 state(recipe_info / cost_info)에서
+# 코드로 결정적으로 조립한다. card_data가 없으면 프론트는 마크다운으로 폴백.
+
+_STEP_NOISE_RE = re.compile(r'^[\s\d.\-)]*$')
+_STEP_NOISE_KEYWORDS = ("손질법 레시피", "레시피 보기", "바로가기", "더보기")
+
+
+def _clean_steps_for_card(steps_text) -> list:
+    """조리단계 문자열 → 노이즈 제거한 리스트 (카드용, 규칙 기반 가벼운 정리)."""
+    if not steps_text:
+        return []
+    out = []
+    for raw in str(steps_text).split("\n"):
+        s = re.sub(r'^\s*\d+\s*[.)]\s*', '', raw.strip()).strip()
+        if not s or _STEP_NOISE_RE.match(s):
+            continue
+        if re.search(r'[가-힣]', s) is None:
+            continue
+        if any(k in s for k in _STEP_NOISE_KEYWORDS) or len(s) <= 2:
+            continue
+        # 괄호 안 개인후기 / 웃음 / 느낌표 남발 정리
+        s = re.sub(r'\(\s*(?:전 |저[는도가]|제가)[^)]{0,40}?\)', '', s)
+        s = re.sub(r'\s*[ㅋㅎ]{2,}', '', s)
+        s = re.sub(r'!{2,}', '!', s).strip()
+        if s:
+            out.append(s)
+    return out
+
+
+# 카드용 수량 추정 (원가가 안 돈 '레시피만' 질문에서도 추정값을 보여주기 위함).
+# cost_calculator의 기본값과 동일한 기준.
+_CARD_SEASONING_HINTS = (
+    "고춧가루", "후춧가루", "후추", "설탕", "소금", "간장", "고추장", "된장", "쌈장",
+    "참기름", "들기름", "식용유", "포도씨유", "올리브유", "마늘", "다진마늘", "생강",
+    "다시다", "미원", "맛술", "미림", "식초", "물엿", "올리고당", "액젓", "굴소스", "깨",
+)
+
+
+def _card_estimate_qty(name: str) -> str:
+    """수량 없는 재료의 카드 표시용 추정값. 양념류는 소량, 그 외 적당량."""
+    if any(h in name for h in _CARD_SEASONING_HINTS):
+        return "약 10g(추정)"
+    return "약 80g(추정)"
+
+
+def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
+    """recipe_info + cost_info에서 카드 렌더용 dict 조립. 정보 없으면 {}."""
+    if not isinstance(recipe_info, dict):
+        return {}
+    recipes_src = recipe_info.get("data") or []
+    if not isinstance(recipes_src, list) or not recipes_src:
+        return {}
+
+    # cost_info.calc_results를 메뉴명으로 인덱싱 (원가/단가/대체재 붙이기용)
+    calc_by_menu = {}
+    if isinstance(cost_info, dict):
+        for c in (cost_info.get("calc_results") or []):
+            if isinstance(c, dict) and c.get("menu"):
+                calc_by_menu[c["menu"]] = c
+
+    card_recipes = []
+    for recipe in recipes_src:
+        if not isinstance(recipe, dict):
+            continue
+        menu = recipe.get("menu") or recipe.get("name") or "이름없음"
+        calc = calc_by_menu.get(menu, {})
+        cost_items = {it["name"]: it for it in (calc.get("items") or [])
+                      if isinstance(it, dict) and it.get("name")}
+
+        has_cost = bool(calc.get("total_cost"))
+        ings_out = []
+        for ing in (recipe.get("ingredients") or []):
+            if isinstance(ing, dict):
+                iname = (ing.get("name") or "").strip()
+                iqty = (ing.get("quantity") or ing.get("amount") or "").strip()
+            else:
+                iname, iqty = str(ing).strip(), ""
+            if not iname:
+                continue
+            ci = cost_items.get(iname, {})
+            # 수량이 비면 추정값 표시 (원가가 돌았으면 cost_calc 추정, 아니면 카드 자체 추정)
+            if not iqty:
+                if (ci.get("qty_reason") or "").startswith("default") and ci.get("grams"):
+                    iqty = f"약 {int(ci['grams'])}g(추정)"
+                else:
+                    iqty = _card_estimate_qty(iname)
+            ings_out.append({
+                "name": iname, "quantity": iqty or None,
+                "price_per_kg": ci.get("price_per_kg"), "cost": ci.get("cost"),
+                "source": ci.get("source"),
+            })
+
+        total = calc.get("total_cost")
+        card_recipes.append({
+            "menu": menu,
+            "servings": recipe.get("servings"),
+            "difficulty": recipe.get("difficulty"),
+            "cooking_time": recipe.get("cooking_time"),
+            "has_cost": has_cost,                       # ★ 프론트가 단가·원가 칸 표시 여부 결정
+            "total_cost": total if total else None,
+            "suggested_price": int(total / 0.7) if total else None,
+            "ingredients": ings_out,
+            "steps": _clean_steps_for_card(recipe.get("steps")),
+            "substitute": calc.get("substitute"),  # cost_calc가 구조화해 둔 것
+        })
+
+    new_menus = []
+    for s in (recipe_info.get("ai_new_menu_suggestions") or []):
+        if isinstance(s, dict) and s.get("name"):
+            new_menus.append({"name": s.get("name"), "combo_label": s.get("combo_label")})
+
+    card = {"recipes": card_recipes}
+    if new_menus:
+        card["new_menus"] = new_menus
+    return card
+
+
 def report_generator_node(state: dict) -> dict:
     """
     수집된 정보(레시피, 가격 등)를 LLM으로 종합하여 자연스러운 최종 답변을 생성합니다.
@@ -337,11 +458,23 @@ def report_generator_node(state: dict) -> dict:
                             + ", ".join(cand_lines)
                         )
 
-                # steps는 LLM이 절대 요약 못 하게 별도 강조 섹션
+                # steps — 핵심 조리정보는 보존하되 블로그 수다는 정리하게 지시.
+                # (기존 '그대로 복사' 지시가 [조리단계] 규칙과 충돌해 수다가 그대로 남던 문제 해결)
                 steps = recipe.get("steps")
                 if steps:
                     recipe_blocks.append(
-                        f"[레시피 {idx} 조리단계 — 아래 텍스트를 절대 요약/통합/일반화하지 말고 그대로 답변에 복사할 것]\n{steps}"
+                        f"[레시피 {idx} 조리단계 — 아래는 DB 원문(블로그 말투 포함).\n"
+                        f"★★ 이 원문을 '레시피 책'처럼 깔끔한 명령형 단계로 **반드시 다시 써라.** "
+                        f"핵심(조리 동작·재료·수량·시간·순서)은 100% 보존하되, 블로그 수다는 **남기지 말고 전부 삭제.**\n"
+                        f"  ▸ 반드시 삭제: \n"
+                        f"     · 괄호 안 개인 후기 — 예: '(전 다 사용했어요!)', '(저는 ~)' → 통째로 삭제\n"
+                        f"     · 개인 경험담 — '저같은 경우는~', '이번에는 ~없어서', '저는 4번에 나눠 부었어요'\n"
+                        f"     · 권유·잡담·말장난 — '~좋지요?', '~맛있죠?', '아시죠?', 'ㅋㅋ', 'ㅎㅎ', '!!', '식탁으로~'\n"
+                        f"     · 인사·사족 — '~답니다', '~거든요', '참고하세요', '예쁘게 담아주세요'\n"
+                        f"     · 의미 없는 짧은 파편 — '불끄기3분전', '한쪽으로 밀어두고' 처럼 동작이 불완전한 조각은 "
+                        f"앞뒤 단계에 합치거나, 정 안 되면 삭제\n"
+                        f"  ▸ 명령형으로: '~해주세요/~합니다' 정도로 통일. 각 단계는 한 동작.\n"
+                        f"  ▸ 절대 새 단계를 지어내거나 외부 지식으로 보완하지 말 것(환각 금지). 원문 동작만 남겨 다듬는다.\n{steps}"
                     )
                 else:
                     recipe_blocks.append(
@@ -423,6 +556,13 @@ def report_generator_node(state: dict) -> dict:
         # 숫자~숫자 패턴은 의미 보존하면서 unicode 물결표(∼)로 치환.
         final_answer = re.sub(r'(\d+)\s*~\s*(\d+)', r'\1∼\2', final_answer)
 
+        # 블로그 수다 후처리 안전망 (LLM이 놓친 것만, 아주 보수적으로)
+        #  - 'ㅋㅋ/ㅎㅎ' 웃음, 느낌표 남발
+        #  - '(전 다 사용했어요!)' 처럼 1인칭 개인후기 괄호. '전 '(전+공백)만 잡아 '전분/전복' 오삭제 방지
+        final_answer = re.sub(r'\(\s*(?:전 |저[는도가]|제가)[^)]{0,40}?\)', '', final_answer)
+        final_answer = re.sub(r'\s*[ㅋㅎ]{2,}', '', final_answer)
+        final_answer = re.sub(r'!{2,}', '!', final_answer)
+
         # Hallucination 검증 — 가격 날조/도메인 이탈 시 차단
         check_result = _check_hallucination(final_answer, context, intent)
         if check_result == "block":
@@ -441,11 +581,20 @@ def report_generator_node(state: dict) -> dict:
             final_answer += f"[가격 정보]\n{_format_price_info(price_info)}\n\n"
         final_answer += f"\n(자연어 요약 생성 중 오류 발생: {e})"
 
+    # 카드형 UI용 구조화 데이터 (프론트가 카드로 렌더, 없으면 마크다운 폴백)
+    try:
+        card_data = _build_card_data(recipe_info, cost_info)
+    except Exception as _card_exc:
+        card_data = {}
+        archive("report_generator.card_error", {"error": str(_card_exc)})
+
     archive("report_generator.output", {
         "answer_preview": final_answer[:400],
         "answer_length": len(final_answer),
+        "has_card": bool(card_data.get("recipes")) if card_data else False,
     })
     return {
         "final_report": final_answer,
+        "card_data": card_data,
         "messages": [AIMessage(content=final_answer)]
     }
