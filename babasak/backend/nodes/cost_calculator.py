@@ -2,15 +2,23 @@ import re
 
 from backend.debug_log import archive
 from backend.price_bounds import MAX_PRICE_PER_KG
-from backend.db import suggest_substitute_ingredient, get_menu_main_ingredient
+from backend.db import (
+    suggest_substitute_ingredient,
+    get_menu_main_ingredient,
+    suggest_menu_protein_alternatives,
+)
 
 
 
 
 
 _MAX_PRICE_PER_KG = MAX_PRICE_PER_KG
-_NON_COST_INGREDIENTS = ("물",)
-_NON_COST_KEYWORDS = ("국물",)
+_NON_COST_INGREDIENTS = (
+    "물", "찬물", "더운물", "뜨거운물", "차가운물", "따뜻한물", "미지근한물",
+    "끓는물", "끓인물", "얼음물", "생수", "정수물", "물리터", "미온수", "온수", "냉수",
+)
+# 주의: '전분물·녹말물·찹쌀풀'은 전분 원가가 있어 제외 대상 아님(가격 계산 유지)
+_NON_COST_KEYWORDS = ("국물", "육수", "다시물", "다시마물", "쌀뜨물", "우린물", "다시팩물")
 
 
 def _is_non_cost_ingredient(name: str) -> bool:
@@ -376,8 +384,41 @@ def _alias_db_name(ingredient_name: str) -> str | None:
         return None
 
 
+# ── 재료명 정규화 (매칭률 향상) ──
+# 레시피 재료명에 붙은 조리상태/수량/의태어/오타를 떼어내 표준명으로.
+# 예: '후추톡'->'후추', '참기름큰술'->'참기름', '다진대파'->'대파', '식용류'->'식용유'
+# ※ 표시용 이름은 안 바꾸고, 가격 매칭 시도용으로만 사용.
+_COOK_PREFIXES = ("다진", "삶은", "송송썬", "채썬", "갈은", "녹인", "불린", "익은",
+                  "찐", "볶은", "데친", "으깬", "잘게썬", "곱게간", "어슷썬", "얇게썬", "송송 썬")
+_QTY_SUFFIXES = ("큰술", "작은술", "컵", "톡", "방울", "솔", "듬뿍", "씩", "번", "리터", "줌", "꼬집")
+_SIZE_SUFFIXES = ("작은것", "작은거", "큰것", "큰거", "흰부분", "흰대", "초록부분",
+                  "흰부분만", "조금", "약간")
+_NAME_SYNONYM = {
+    "식용류": "식용유", "후춧가루": "후추", "후추가루": "후추",
+    "슈거파우더": "설탕", "원당": "설탕", "녹말가루": "전분", "녹말": "전분",
+    "대파흰부분": "대파", "대파흰대": "대파", "대파초록부분": "대파", "대파흰대부분": "대파",
+}
+
+
+def _normalize_ingredient_name(name: str) -> str:
+    """가격 매칭용 표준명. 조리상태·수량·크기 수식 제거 + 동의어/오타 통일."""
+    n = (name or "").strip()
+    if n in _NAME_SYNONYM:
+        return _NAME_SYNONYM[n]
+    for p in _COOK_PREFIXES:
+        if n.startswith(p) and len(n) > len(p) + 1:
+            n = n[len(p):]
+            break
+    for suf in _QTY_SUFFIXES + _SIZE_SUFFIXES:
+        if n.endswith(suf) and len(n) > len(suf) + 1:
+            n = n[:-len(suf)]
+            break
+    n = n.strip()
+    return _NAME_SYNONYM.get(n, n)
+
+
 def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
-    """재료명 → 가격 dict. 정확 매칭 → alias db_name 매칭 → 부분 매칭 순서로 시도."""
+    """재료명 → 가격 dict. 정확 → alias → 정규화 → 부분 매칭 순서로 시도."""
     if ingredient_name in price_map:
         return price_map[ingredient_name]
 
@@ -387,11 +428,61 @@ def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
     if db_name and db_name in price_map:
         return price_map[db_name]
 
+    # 정규화 매칭: '후추톡'->'후추', '참기름큰술'->'참기름' 등 수식 제거 후 재조회
+    norm = _normalize_ingredient_name(ingredient_name)
+    if norm != ingredient_name:
+        if norm in price_map:
+            return price_map[norm]
+        ndb = _alias_db_name(norm)
+        if ndb and ndb in price_map:
+            return price_map[ndb]
+
     # 부분 매칭: 토큰 포함 관계로 보조 매칭 (예: '마늘' ↔ '다진마늘').
     for key, info in price_map.items():
         if key in ingredient_name or ingredient_name in key:
             return info
     return None
+
+
+# ── 마진율 설정 (판매가 = 1인분 원가 / (1 - 마진율)) ──
+# 30% 고정 대신 업종별 기본 마진을 적용. 업종 없으면 기본 30%.
+# (추후 사용자가 직접 마진율 입력하면 그 값으로 교체 가능)
+_DEFAULT_MARGIN_RATE = 0.30
+_MARGIN_BY_INDUSTRY = {
+    "한식": 0.30, "중식": 0.32, "일식": 0.38, "양식": 0.45,
+    "분식": 0.40, "카페/디저트": 0.60, "카페": 0.60,
+    "치킨/패스트푸드": 0.42, "치킨": 0.42, "패스트푸드": 0.42,
+}
+
+
+def _extract_industry(state: dict) -> str:
+    """메시지의 '[업종: X, 지역: Y]'에서 업종 추출. 없으면 ''."""
+    try:
+        for msg in reversed(state.get("messages", []) or []):
+            content = getattr(msg, "content", "") or ""
+            m = re.search(r"\[업종:\s*([^,\]]+)", content)
+            if m:
+                return m.group(1).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _get_margin_rate(industry: str) -> float:
+    """업종 → 마진율. 매칭 없으면 기본값."""
+    return _MARGIN_BY_INDUSTRY.get((industry or "").strip(), _DEFAULT_MARGIN_RATE)
+
+
+def _parse_servings(servings) -> int:
+    """'3인분'->3, '2~3인분'->2, '4인분 이상'->4, 숫자 없으면 1.
+    레시피 재료 수량은 이 인분 기준이므로, 1인분 원가는 (전체÷인분수)."""
+    if not servings:
+        return 1
+    m = re.search(r'\d+', str(servings))
+    if m:
+        n = int(m.group())
+        return n if n > 0 else 1
+    return 1
 
 
 def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
@@ -469,13 +560,16 @@ def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
                 ),
             })
 
+    servings_num = _parse_servings(recipe.get("servings"))
     return {
         "menu": recipe.get("menu") or recipe.get("name") or "이름없음",
         "rank": recipe.get("_rank"),
         "servings": recipe.get("servings"),
+        "servings_num": servings_num,                       # 인분 수 (숫자)
         "difficulty": recipe.get("difficulty"),
         "items": items_out,
-        "total_cost": total,
+        "total_cost": total,                                # 전체(N인분) 재료비
+        "per_serving_cost": int(total / servings_num) if servings_num else total,  # 1인분 원가
         "unconfirmed_count": unconfirmed,
     }
 
@@ -512,15 +606,21 @@ def _format_recipe_section(calc: dict) -> str:
         lines.append(f"| {it['name']} | {qty} | {ppk} | {cost} |")
 
     total = calc["total_cost"]
-    margin_price = int(total / 0.7) if total else 0  # 마진 30%
+    sv = calc.get("servings_num") or 1
+    per = calc.get("per_serving_cost")
+    if per is None:
+        per = int(total / sv) if total else 0
+    mr = calc.get("margin_rate") or _DEFAULT_MARGIN_RATE
+    margin_price = int(per / (1 - mr)) if per else 0  # 1인분 기준, 업종별 마진율
+    mr_pct = int(round(mr * 100))
     lines.append("")
-    lines.append(f"**총 원가:** {total:,}원" + (
+    lines.append(f"**총 원가 ({sv}인분 전체):** {total:,}원" + (
         f"  (시세/사용량 미확인 재료 {calc['unconfirmed_count']}개 제외)"
         if calc["unconfirmed_count"] else ""
     ))
     if total:
-        lines.append(f"**1인분 원가:** {total:,}원")
-        lines.append(f"**권장 판매가 (마진 30%):** {margin_price:,}원")
+        lines.append(f"**1인분 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else ""))
+        lines.append(f"**권장 판매가 (1인분, 마진 {mr_pct}%):** {margin_price:,}원")
     return "\n".join(lines)
 
 
@@ -544,13 +644,29 @@ def _strong_family(target_name: str, cand_name: str) -> bool:
     return common >= 3
 
 
-def _build_substitute_line(calc: dict, price_map: dict) -> str:
-    """비싼 재료를 '같은 계열 + 더 싼' 재료로 1개만 제안하는 라인 생성.
+# 주재료(단백질) 판정용 — 이 재료가 비쌀 때만 대체 제안 대상
+_PROTEIN_HINTS = (
+    "고기", "살", "갈비", "삼겹", "목살", "안심", "등심", "닭", "돼지", "소", "오리",
+    "새우", "오징어", "낙지", "문어", "조개", "꽃게", "전복", "관자", "홍합", "바지락",
+    "연어", "참치", "고등어", "갈치", "명태", "코다리", "꽁치", "광어", "대구", "동태", "아귀", "아구",
+    "햄", "소시지", "베이컨", "스팸", "두부", "유부", "계란", "달걀", "어묵",
+)
 
-    규칙(사용자 요구 반영):
-      - 비싼 재료부터 순서대로 시도 (핵심재료 포함 — 돼지고기앞다리살→돼지고기목살 OK)
-      - 후보는 ① 강한 계열 매칭(_strong_family) ② price_map에서 실제로 더 싼 것만
-      - 조건 만족하는 게 없으면 추천 안 함('' 반환) — 엉뚱한 대체(미역→다시마) 금지
+
+def _is_protein(name: str) -> bool:
+    return any(h in name for h in _PROTEIN_HINTS)
+
+
+def _build_substitute_line(calc: dict, price_map: dict) -> str:
+    """비싼 '주재료(단백질)'를 같은 메뉴에서 통하는 더 싼 재료로 대체 제안.
+
+    규칙(사용자 요구):
+      - 비싼 단백질부터 시도 (돼지고기·소고기·참치 등)
+      - 후보 = '이 메뉴의 다른 레시피들이 실제로 쓰는 단백질' (데이터로 '어울림' 판정)
+        예) 김치찌개 돼지고기(비쌈) → 참치 (참치김치찌개가 실제 있으니 OK)
+            제육볶음 돼지앞다리살 → 더 싼 돼지부위/오징어
+            미역국 소고기 → 미역국에 안 쓰는 참치는 후보에 없음 (괴식 차단)
+      - 그 후보 중 price_map에서 '더 싼' 것을 선택. 없으면 추천 안 함.
     """
     items = [
         it for it in calc.get("items", [])
@@ -561,37 +677,51 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
     items.sort(key=lambda it: it["cost"], reverse=True)
     menu = calc.get("menu") or ""
 
-    for target in items[:6]:  # 비싼 순 최대 6개까지만 시도(성능)
+    for target in items[:6]:  # 비싼 순 최대 6개
         tname = target["name"]
         tppk = target["price_per_kg"]
+        if not _is_protein(tname):      # 단백질(주재료)만 대체 대상
+            continue
         try:
-            cands = suggest_substitute_ingredient(menu, tname, limit=8)
+            cands = suggest_menu_protein_alternatives(menu, tname, limit=10)
         except Exception:
             cands = []
+        # 후보 중 '더 싼' 것 선택 (가장 많이 절감되는 순)
+        best = None
         for c in cands:
             cname = c.get("name", "")
-            if not _strong_family(tname, cname):
+            if not cname or cname == tname:
                 continue
             cinfo = price_map.get(cname) if isinstance(price_map, dict) else None
             cppk = cinfo.get("price_per_kg") if isinstance(cinfo, dict) else None
             if not cppk or cppk >= tppk:
-                continue  # 후보가 더 싸야 의미 있음
-            saving_pct = round((tppk - cppk) / tppk * 100)
-            archive("cost_calculator.substitute", {
-                "menu": menu, "target": tname, "target_ppk": tppk,
-                "candidate": cname, "candidate_ppk": cppk, "saving_pct": saving_pct,
-            })
-            # ★ 카드 UI용 구조화 저장 (calc_results에 실려 report_generator→프론트로 전달)
-            calc["substitute"] = {
-                "target": tname, "candidates": [cname], "saving_pct": saving_pct,
-                "target_ppk": tppk, "candidate_ppk": cppk,
-            }
-            return (
-                f"\n\n💡 **대체 제안:** **{tname}**(단가 {tppk:,}원/kg)이 비싼 편이에요 "
-                f"→ 같은 계열 **{cname}**(단가 {cppk:,}원/kg)(으)로 바꾸면 "
-                f"약 **{saving_pct}%** 저렴해요."
-            )
-    return ""  # 적절한 '같은 계열 + 더 싼' 대체재 없음 → 추천 생략
+                continue  # 더 싸야 의미 있음
+            if best is None or cppk < best[1]:
+                best = (cname, cppk)
+        if not best:
+            continue
+        cname, cppk = best
+        saving_pct = round((tppk - cppk) / tppk * 100)
+        # 접시당 절감액 (target 사용 그램 기준)
+        grams = target.get("grams")
+        saving_won = int((tppk - cppk) * grams / 1000) if grams else None
+        archive("cost_calculator.substitute", {
+            "menu": menu, "target": tname, "target_ppk": tppk,
+            "candidate": cname, "candidate_ppk": cppk,
+            "saving_pct": saving_pct, "saving_won": saving_won,
+        })
+        # ★ 카드 UI용 구조화 저장
+        calc["substitute"] = {
+            "target": tname, "candidates": [cname], "saving_pct": saving_pct,
+            "target_ppk": tppk, "candidate_ppk": cppk, "saving_won": saving_won,
+        }
+        won_txt = f" · 약 -{saving_won:,}원/접시 절감" if saving_won else ""
+        return (
+            f"\n\n💡 **대체 제안:** **{tname}**(단가 {tppk:,}원/kg)이 비싼 편이에요 "
+            f"→ **{cname}**(단가 {cppk:,}원/kg)(으)로 바꾸면 약 **{saving_pct}%** 저렴{won_txt}. "
+            f"('{menu}'에 두루 쓰이는 재료예요)"
+        )
+    return ""  # 더 싼 후보 없음 → 추천 생략
 
 
 def cost_calculator_node(state: dict) -> dict:
@@ -626,12 +756,17 @@ def cost_calculator_node(state: dict) -> dict:
     if not isinstance(recipes, list):
         recipes = [recipes] if recipes else []
 
+    # 업종별 마진율 (판매가 계산용). 업종 없으면 기본 30%.
+    margin_rate = _get_margin_rate(_extract_industry(state))
+
     calc_results = []
     for idx, recipe in enumerate(recipes, start=1):
         if not isinstance(recipe, dict):
             continue
         recipe = {**recipe, "_rank": idx}
-        calc_results.append(_calc_recipe_cost(recipe, price_map))
+        c = _calc_recipe_cost(recipe, price_map)
+        c["margin_rate"] = margin_rate          # 마크다운·카드 판매가 계산에 사용
+        calc_results.append(c)
 
     archive("cost_calculator.calc", {
         "num_recipes": len(calc_results),

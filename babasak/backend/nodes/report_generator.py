@@ -330,17 +330,24 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
             })
 
         total = calc.get("total_cost")
+        # ★ 카드 원가/판매가는 '1인분 기준' + 업종별 마진율 (전체 N인분치/30% 고정이면 비현실적)
+        per = calc.get("per_serving_cost")
+        if per is None:
+            per = total  # cost_calc 구버전 호환
+        mr = calc.get("margin_rate") or 0.30
         card_recipes.append({
             "menu": menu,
             "servings": recipe.get("servings"),
             "difficulty": recipe.get("difficulty"),
             "cooking_time": recipe.get("cooking_time"),
-            "has_cost": has_cost,                   
-            "total_cost": total if total else None,
-            "suggested_price": int(total / 0.7) if total else None,
+            "has_cost": has_cost,
+            "total_cost": per if per else None,                       # 1인분 원가
+            "suggested_price": int(per / (1 - mr)) if per else None,  # 1인분 기준 권장 판매가
+            "margin_pct": int(round(mr * 100)),                       # 카드 마진율 표시용
+            "full_cost": total if total else None,                    # (참고) 전체 N인분
             "ingredients": ings_out,
             "steps": _clean_steps_for_card(recipe.get("steps")),
-            "substitute": calc.get("substitute"), 
+            "substitute": calc.get("substitute"),
         })
 
     new_menus = []
