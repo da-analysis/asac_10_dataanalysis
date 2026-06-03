@@ -495,4 +495,12 @@ def _fetch_response(message: str) -> tuple[str, str | None, dict | None]:
         
         return response_text, chart_html, card
     except Exception as exc:
-        return f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요. ({exc})", None, None
+        # uvicorn 크래시 로그가 있으면 같이 표시 (start.sh에서 /tmp/uvicorn.log로 저장)
+        uvicorn_log = ""
+        try:
+            with open("/tmp/uvicorn.log") as _f:
+                uvicorn_log = _f.read()[-3000:]
+        except Exception:
+            pass
+        detail = f"{exc}\n\n[uvicorn 시작 로그]\n{uvicorn_log}" if uvicorn_log else str(exc)
+        return f"서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.\n\n{detail}", None, None

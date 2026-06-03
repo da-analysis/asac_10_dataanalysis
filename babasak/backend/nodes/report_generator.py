@@ -243,8 +243,6 @@ except Exception:
     SYSTEM_PROMPT = _FALLBACK_SYSTEM_PROMPT
 
 
-async def report_generator_node(state: dict) -> dict:
-
 _STEP_NOISE_RE = re.compile(r'^[\s\d.\-)]*$')
 _STEP_NOISE_KEYWORDS = ("손질법 레시피", "레시피 보기", "바로가기", "더보기")
 
