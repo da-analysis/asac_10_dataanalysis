@@ -77,7 +77,8 @@ _llm_report = None
 def _get_llm_report():
     global _llm_report
     if _llm_report is None:
-        _llm_report = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.7)
+        # streaming=True: astream_events에서 on_chat_model_stream 이벤트 발생에 필요
+        _llm_report = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.7, streaming=True)
     return _llm_report
 
 
@@ -258,9 +259,11 @@ except Exception:
     SYSTEM_PROMPT = _FALLBACK_SYSTEM_PROMPT
 
 
-def report_generator_node(state: dict) -> dict:
+async def report_generator_node(state: dict) -> dict:
     """
     수집된 정보(레시피, 가격 등)를 LLM으로 종합하여 자연스러운 최종 답변을 생성합니다.
+    async def + ainvoke: astream_events에서 on_chat_model_stream 토큰 이벤트가
+    스레드 경계 없이 안정적으로 전파됩니다.
     """
     archive("report_generator.input", {
         "is_valid": state.get("is_valid", False),
@@ -416,7 +419,8 @@ def report_generator_node(state: dict) -> dict:
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=user_prompt)
         ]
-        response = _get_llm_report().invoke(messages)
+        # ainvoke: async 컨텍스트에서 직접 실행되므로 콜백이 스레드 경계 없이 전파됨
+        response = await _get_llm_report().ainvoke(messages)
         final_answer = response.content
 
         # 마크다운 취소선 충돌 방지
