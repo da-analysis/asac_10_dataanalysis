@@ -354,7 +354,7 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
     return card
 
 
-def report_generator_node(state: dict) -> dict:
+async def report_generator_node(state: dict) -> dict:
     """
     수집된 정보(레시피, 가격 등)를 LLM으로 종합하여 자연스러운 최종 답변을 생성합니다.
     async def + ainvoke: astream_events에서 on_chat_model_stream 토큰 이벤트가
