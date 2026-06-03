@@ -1,22 +1,8 @@
-"""
-preprocessor_node: 멀티쿼리 리트리버 기반 사용자 질문 분석
-
-구조:
-  Phase 0: 빠른 경로 — 문자열 매칭으로 menu+intent 확정 시 LLM 스킵
-  Phase 1: LLM 멀티쿼리 — 질문을 3가지로 재해석 + 통합 엔티티 추출 (1회 호출)
-  Phase 2: Grounding — LLM 출력을 알려진 DB 엔티티에 맞춰 정규화
-  Phase 3: 히스토리 carry-over — 위 전부 실패 시 이전 HumanMessage에서 상속
-"""
 import mlflow.genai
 from langchain_core.messages import HumanMessage, SystemMessage
 from databricks_langchain import ChatDatabricks
 
 from backend.debug_log import archive
-
-
-# ═══════════════════════════════════════════════════════════════
-# 알려진 엔티티 리스트 (Grounding + 빠른 경로용)
-# ═══════════════════════════════════════════════════════════════
 
 MENU_NAMES = [
     '김치찌개', '된장찌개', '불고기', '순두부찌개', '비빔밥',
@@ -41,9 +27,6 @@ MENU_ALIASES = {
     '비빔': '비빔밥', '삼겹': '불고기', '순대국': '순두부찌개',
 }
 
-# ═══════════════════════════════════════════════════════════════
-# Phase 0: 빠른 경로 — 키워드 기반 intent + 문자열 매칭
-# ═══════════════════════════════════════════════════════════════
 
 _INTENT_KEYWORDS = {
     'cost_analysis': ['원가', '마진', '판매가', '비용', '수익', '1인분 가격', '단가', '가격 책정'],
@@ -53,7 +36,7 @@ _INTENT_KEYWORDS = {
     'recommendation': ['추천', '뭐 먹', '어떤 게 좋'],
 }
 
-# is_valid 빠른 거부용 (명백히 무관한 질문)
+
 _INVALID_KEYWORDS = ['날씨', '주식', '비트코인', '뉴스', '영화', '여행', '수학', '코드', '번역', '노래', '게임', '택시']
 
 
@@ -88,9 +71,6 @@ def _is_clearly_invalid(query: str) -> bool:
     return any(kw in query for kw in _INVALID_KEYWORDS)
 
 
-# ═══════════════════════════════════════════════════════════════
-# Phase 1: LLM 멀티쿼리 리트리버 — 통합 추출
-# ═══════════════════════════════════════════════════════════════
 
 _llm = None
 
@@ -102,7 +82,6 @@ def _get_llm():
     return _llm
 
 
-# UC 프롬프트 로드 (폴백: 하드코딩)
 _FALLBACK_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입니다.
 사용자의 질문을 분석하여 아래 형식으로 답하세요.
 
@@ -296,9 +275,7 @@ def _parse_conditions(text: str) -> dict | None:
     return conditions if conditions else None
 
 
-# ═══════════════════════════════════════════════════════════════
-# Phase 2: Grounding — LLM 출력을 알려진 DB 엔티티에 정규화
-# ═══════════════════════════════════════════════════════════════
+
 
 def _ground_menu(menu: str | None) -> str | None:
     """LLM이 추출한 메뉴명을 알려진 이름으로 정규화."""
@@ -340,10 +317,6 @@ def _ground_ingredients(ingredients: list[str]) -> list[str]:
     return grounded
 
 
-# ═══════════════════════════════════════════════════════════════
-# Phase 3: 히스토리 carry-over — 최후 수단
-# ═══════════════════════════════════════════════════════════════
-
 def _carry_from_history(messages: list) -> tuple[str | None, list[str]]:
     """이전 HumanMessage에서 메뉴/재료를 상속. AIMessage는 제외."""
     menu = None
@@ -366,20 +339,6 @@ def _carry_from_history(messages: list) -> tuple[str | None, list[str]]:
 
     return menu, ingredients
 
-
-# ═══════════════════════════════════════════════════════════════
-# 메인 노드 함수
-# ═══════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════
-# 결과 조립 헬퍼
-# ═══════════════════════════════════════════════════════════════
-
-# ─────────────────────────────────────────────────────────────
-# 신규 entities 키 — 유사 추천 / 1:1 대체재 의도 키워드 매칭
-# (recipe_search.py 시나리오 8/9가 이 키들을 사용)
-# ─────────────────────────────────────────────────────────────
 
 import re as _re
 
