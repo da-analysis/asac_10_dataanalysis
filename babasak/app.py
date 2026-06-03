@@ -212,6 +212,82 @@ st.markdown(
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
 }
 
+/* hero-marker를 포함한 st.container(border=True)를 hero 박스로 스타일링.
+   Streamlit 1.51의 테두리 컨테이너는 stVerticalBlockBorderWrapper 래퍼를 만든다.
+   그중 .hero-marker를 품은 것만 골라 hero 그라데이션 박스로 꾸민다. */
+.hero-marker {
+    display: none;
+}
+
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker) {
+    background: linear-gradient(120deg, #fff7ed 0%, #fff5f5 45%, #eef2ff 100%);
+    border: 1px solid #fecaca !important;
+    border-radius: 22px;
+    padding: 28px 32px;
+    margin-bottom: 34px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+/* 박스 안 컬럼들을 세로 중앙 정렬 */
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker)
+    [data-testid="stHorizontalBlock"] {
+    align-items: center;
+}
+
+.hero-text {
+    padding-right: 8px;
+}
+
+.hero-text .hero-title {
+    font-size: 26px;
+    margin-bottom: 14px;
+}
+
+.hero-text .hero-desc {
+    font-size: 14px;
+    line-height: 1.65;
+}
+
+/* 박스 안 차트/메뉴 영역의 섹션 제목은 조금 작게 */
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker)
+    .section-title {
+    font-size: 18px;
+    margin-bottom: 10px;
+}
+
+/* 좁은 좌측 컬럼용 hero 변형: 세로 배치 + 폰트/패딩 축소, 우측 패널과 높이 맞춤 */
+.hero-compact {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 28px 28px;
+    height: 100%;
+    margin-bottom: 0;
+}
+
+.hero-compact .hero-title {
+    font-size: 24px;
+    margin-bottom: 14px;
+}
+
+.hero-compact .hero-desc {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.hero-compact .hero-visual {
+    margin-top: 18px;
+    justify-content: flex-start;
+}
+
+.hero-compact .hero-ing {
+    height: 110px;
+}
+
+.hero-compact .hero-ing-emoji {
+    font-size: 56px;
+}
+
 .hero-title {
     font-size: 32px;
     font-weight: 900;
@@ -270,6 +346,38 @@ st.markdown(
     min-height: 230px;
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
     margin-bottom: 10px;
+}
+
+.menu-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.menu-rank {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: #fb923c;
+    color: white;
+    font-weight: 800;
+    font-size: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.menu-name {
+    font-size: 17px;
+    font-weight: 700;
+    color: #0f172a;
 }
 
 .feature-icon {
@@ -533,7 +641,6 @@ with st.sidebar:
             {_logo_icon}
         </div>
     </a>
-    <div class="logo-sub">소상공인을 지원하는 비서</div>
     """,
         unsafe_allow_html=True,
     )

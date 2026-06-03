@@ -124,6 +124,50 @@ def _render_feature_shortcuts() -> None:
             st.rerun()
 
 
+# 추천 메뉴 TOP 3 (하드코딩). 예상 원가는 표기하지 않는다.
+RECOMMENDED_MENUS = [
+    {"rank": 1, "name": "제육볶음"},
+    {"rank": 2, "name": "김치찌개"},
+    {"rank": 3, "name": "우거지 감자탕"},
+]
+
+
+# '전반적 물가 지표: 연-반기별 평균가격 추이' 위젯 하나만 임베드.
+# fullscreenWidget=<page>~<widget> 으로 특정 차트만 전체화면 표시한다.
+# (대시보드 전체가 아니라 위젯 단위. 위젯 ID는 published 링크의 fullscreenWidget 값)
+_DASHBOARD_EMBED_URL = (
+    "https://dbc-b2983598-29d8.cloud.databricks.com/embed/dashboardsv3/"
+    "01f1477ee2361f28a2da2e770290bfd7"
+    "?o=7474645180304154"
+    "&fullscreenWidget=c4ad9d27~53f16a93"
+)
+
+
+def _render_price_trend_chart() -> None:
+    """전반적 물가 지표(연-반기별 평균가격 추이) — Databricks 대시보드 임베드."""
+    import streamlit.components.v1 as components
+
+    st.markdown('<div class="section-title">전반적 물가 지표</div>', unsafe_allow_html=True)
+    st.caption("연-반기별 평균가격 추이")
+    components.iframe(_DASHBOARD_EMBED_URL, height=300, scrolling=True)
+    st.caption("정확한 가격과 추이를 확인하려면 메뉴에서 '가격 추이 알아보기'를 눌러주세요!")
+
+
+def _render_recommended_menus() -> None:
+    """바바삭 추천 메뉴 TOP 3 (메뉴명만, 원가 미표기)."""
+    st.markdown('<div class="section-title">바바삭 추천 메뉴 TOP 3</div>', unsafe_allow_html=True)
+    for m in RECOMMENDED_MENUS:
+        st.markdown(
+            f"""
+        <div class="menu-card">
+            <span class="menu-rank">{m['rank']}</span>
+            <span class="menu-name">{m['name']}</span>
+        </div>
+        """,
+            unsafe_allow_html=True,
+        )
+
+
 def _render_price_summary() -> None:
     """최근 식재료 시세 요약 섹션 (오르는 중 / 내리는 중 카드)."""
     st.markdown(
@@ -169,26 +213,34 @@ def render():
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        f"""
-    <div class="hero">
-        <div>
-            <div class="hero-title">
-                실시간 재료 시세를 분석해<br>
-                <span>최적의 메뉴를 추천</span>해드려요!
+    # 하나의 hero 박스 안에 [텍스트 | 시세 동향 차트 | 추천 메뉴]를 가로로 배치 (목업 레이아웃).
+    # st.line_chart 위젯은 HTML 문자열에 못 넣으므로, 컬럼들을 st.container(border=True)로
+    # 감싸 Streamlit이 만드는 테두리 래퍼(stVerticalBlockBorderWrapper)에 hero 박스 배경을
+    # CSS로 입혀 '한 박스'처럼 보이게 한다. (:has() 방식보다 DOM 구조에 안정적)
+    with st.container(border=True):
+        st.markdown('<span class="hero-marker"></span>', unsafe_allow_html=True)
+        c_text, c_chart, c_menu = st.columns([1.1, 2, 1], gap="medium")
+        with c_text:
+            st.markdown(
+                """
+            <div class="hero-text">
+                <div class="hero-title">
+                    실시간 재료 시세를 분석해<br>
+                    <span>최적의 메뉴를 추천</span>해드려요!
+                </div>
+                <div class="hero-desc">
+                    재료 가격의 추이를 바탕으로 마진을 높이는<br>
+                    스마트한 메뉴 관리의 시작
+                </div>
             </div>
-            <div class="hero-desc">
-                재료 가격의 추이를 바탕으로 마진을 높이는<br>
-                스마트한 메뉴 관리의 시작
-            </div>
-        </div>
-        <div class="hero-visual">{_hero_visual_html()}</div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
+            """,
+                unsafe_allow_html=True,
+            )
+        with c_chart:
+            _render_price_trend_chart()
+        with c_menu:
+            _render_recommended_menus()
 
-    # 오늘의 식재료 시세 요약을 먼저, 그 다음 주요 기능 바로가기 순으로 표시
     _render_price_summary()
     _render_feature_shortcuts()
     # 프로젝트 소개는 사이드바의 'ℹ️ 프로젝트 소개' 메뉴(views/about.py)로 분리됨
