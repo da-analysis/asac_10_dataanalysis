@@ -367,6 +367,10 @@ def recipe_search_node(state: dict) -> dict:
                 last_msg = messages[-1]
                 user_query = getattr(last_msg, "content", "") or ""
 
+            # ★ 라우터가 붙인 '[업종: X, 지역: Y]' 프리픽스 제거.
+            #   안 떼면 modifier로 새서 'AI 신메뉴: 김치찌개 + [업종:한식,지역:서울]말차' 버그.
+            user_query = re.sub(r'\[\s*업종\s*:[^\]]*\]', '', user_query).strip()
+
             clean_query = re.sub(
                 r'(레시피|알려줘|만드는\s*법|조리법|추천|어떻게|만들기|만들고\s*싶어|알고\s*싶어|보여줘|'
                 r'원가|판매가|단가|가격|시세|마진율|마진|얼마|비용|값)',
@@ -466,21 +470,9 @@ def recipe_search_node(state: dict) -> dict:
                         f"base 메뉴('{menu}') + modifier 그래프 정보를 짬뽕해서 답변 권장."
                     )
                     result_payload["original_query"] = graph_query
-
-                    modifier_text = ""
-                    if has_modifier:
-                        mt = clean_query_compact.replace(menu_compact, "", 1).strip()
-                        mt = re.sub(
-                            r'(이?랑|하고|와|과|및|그리고|좀|는|은|을|를|도|의|에|대해서?|대한|요|줘)',
-                            '', mt)
-                        modifier_text = mt
-                    if modifier_text and len(modifier_text) >= 1:
-                        result_payload["ai_new_menu_suggestions"] = [{
-                            "name": graph_query,
-                            "base_menu": menu,
-                            "modifier": modifier_text,
-                            "combo_label": f"{menu} + {modifier_text}",
-                        }]
+                    # 'AI 신메뉴 제안' 박스(ai_new_menu_suggestions)는 제거.
+                    # 없는 메뉴는 별도 박스 대신 graph_context로 '조합 레시피'를 직접 생성해 답한다.
+                    # (예: '말차 김치찌개 레시피' → 김치찌개 베이스 + 말차 짬뽕 레시피)
             return {"recipe_info": result_payload}
 
         # === 최종 폴백: 인기 레시피 ===

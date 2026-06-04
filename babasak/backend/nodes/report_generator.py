@@ -70,7 +70,8 @@ _llm_report = None
 def _get_llm_report():
     global _llm_report
     if _llm_report is None:
-        _llm_report = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.7)
+        # streaming=True: astream_events에서 on_chat_model_stream 이벤트 발생에 필요
+        _llm_report = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.7, streaming=True)
     return _llm_report
 
 
@@ -242,7 +243,6 @@ except Exception:
     SYSTEM_PROMPT = _FALLBACK_SYSTEM_PROMPT
 
 
-
 _STEP_NOISE_RE = re.compile(r'^[\s\d.\-)]*$')
 _STEP_NOISE_KEYWORDS = ("손질법 레시피", "레시피 보기", "바로가기", "더보기")
 
@@ -330,17 +330,24 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
             })
 
         total = calc.get("total_cost")
+        # ★ 카드 원가/판매가는 '1인분 기준' + 업종별 마진율 (전체 N인분치/30% 고정이면 비현실적)
+        per = calc.get("per_serving_cost")
+        if per is None:
+            per = total  # cost_calc 구버전 호환
+        mr = calc.get("margin_rate") or 0.30
         card_recipes.append({
             "menu": menu,
             "servings": recipe.get("servings"),
             "difficulty": recipe.get("difficulty"),
             "cooking_time": recipe.get("cooking_time"),
-            "has_cost": has_cost,                   
-            "total_cost": total if total else None,
-            "suggested_price": int(total / 0.7) if total else None,
+            "has_cost": has_cost,
+            "total_cost": per if per else None,                       # 1인분 원가
+            "suggested_price": int(per / (1 - mr)) if per else None,  # 1인분 기준 권장 판매가
+            "margin_pct": int(round(mr * 100)),                       # 카드 마진율 표시용
+            "full_cost": total if total else None,                    # (참고) 전체 N인분
             "ingredients": ings_out,
             "steps": _clean_steps_for_card(recipe.get("steps")),
-            "substitute": calc.get("substitute"), 
+            "substitute": calc.get("substitute"),
         })
 
     new_menus = []
@@ -354,9 +361,11 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
     return card
 
 
-def report_generator_node(state: dict) -> dict:
+async def report_generator_node(state: dict) -> dict:
     """
     수집된 정보(레시피, 가격 등)를 LLM으로 종합하여 자연스러운 최종 답변을 생성합니다.
+    async def + ainvoke: astream_events에서 on_chat_model_stream 토큰 이벤트가
+    스레드 경계 없이 안정적으로 전파됩니다.
     """
     archive("report_generator.input", {
         "is_valid": state.get("is_valid", False),
@@ -516,7 +525,8 @@ def report_generator_node(state: dict) -> dict:
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=user_prompt)
         ]
-        response = _get_llm_report().invoke(messages)
+        # ainvoke: async 컨텍스트에서 직접 실행되므로 콜백이 스레드 경계 없이 전파됨
+        response = await _get_llm_report().ainvoke(messages)
         final_answer = response.content
 
         final_answer = re.sub(r'(\d+)\s*~\s*(\d+)', r'\1∼\2', final_answer)

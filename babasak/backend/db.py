@@ -173,6 +173,7 @@ def _resolve_ingredient_candidates(text, limit=5):
 
 def _extract_graph_parts(query):
     """없는 메뉴를 조합하기 위한 base menu + modifier 추출 (재료 + 메뉴 둘 다).
+
     동작:
       1) _KNOWN_MENUS 매칭으로 base 메뉴들 추출 (가장 첫 매칭이 base)
       2) 남은 토큰을 modifier로 분류:
@@ -383,6 +384,7 @@ def build_graph_relation_context(query, limit=3):
 # 1. 통합 검색
 def search_recipes_smart(query, limit=3, fallback_popular=False):
     """레시피명/재료명 기반 통합 검색.
+
     기존 코드와 다른 핵심:
     - 재료만 있는 쿼리도 검색함: "두부 들어간 요리" -> 두부 레시피
     - 기본적으로 인기 레시피 fallback을 하지 않음.
@@ -424,6 +426,7 @@ def search_recipes_smart(query, limit=3, fallback_popular=False):
 
 def _search_by_name(keyword, limit):
     """이름 매칭 — 짧은 쿼리는 prefix만, 긴 건 substring.
+
     [한국어 메뉴명 특성]
     띄어쓰기 없는 합성어 많음 → substring 매칭이 우연 매칭 일으킴.
       예) "장어" CONTAINS → "고추장어묵볶음"의 "장+어" 부분 매칭 ❌
@@ -463,6 +466,7 @@ def _search_by_name(keyword, limit):
 
 def _search_by_tokens(menu_tokens, ing_tokens, limit):
     """메뉴 토큰 매칭 + 재료 토큰 일치당 +1000점 가중.
+
     _search_by_name과 같은 길이 분기 룰 적용 (짧은 토큰은 prefix만).
     """
     if not menu_tokens:
@@ -748,6 +752,44 @@ def get_menu_main_ingredient(menu):
             ORDER BY c DESC LIMIT 1
         """, menu=menu).single()
         return (row["mi"] if row else "") or ""
+
+
+# 단백질류 lv1 (주재료 = 대체 가치 있는 재료)
+_PROTEIN_LV1_KEYWORDS = ("육류", "계란", "어패", "수산", "해산", "콩")
+
+
+def suggest_menu_protein_alternatives(menu, target, limit=8):
+    """이 메뉴의 다른 레시피들이 실제로 쓰는 '주재료(단백질)' 후보를 빈도순으로 반환.
+
+    핵심 아이디어: '어울리냐'를 하드코딩 규칙이 아니라 데이터로 판정.
+      - 김치찌개 → 돼지고기·참치·스팸·꽁치 (참치김치찌개가 실제 있으니 참치 OK)
+      - 미역국   → 소고기·홍합 (참치미역국 없으니 참치는 후보에 없음 = 괴식 차단)
+      - 제육볶음 → 돼지 부위·오징어 등
+
+    cost_calculator가 이 후보 중 target보다 '단가가 더 싼 것'을 골라 대체 제안.
+    반환: [{"name", "lv1", "freq"}] (가격은 cost_calculator가 price_map에서 비교)
+    """
+    if not menu or not target:
+        return []
+    with get_session() as session:
+        rows = session.run("""
+            MATCH (r:Recipe)-[:CONTAINS]->(alt:Ingredient)
+            WHERE r.name CONTAINS $menu
+              AND alt.name <> $target
+              AND alt.lv1 IS NOT NULL
+            WITH alt.name AS name, alt.lv1 AS lv1, count(DISTINCT r) AS freq
+            ORDER BY freq DESC
+            LIMIT 60
+            RETURN name, lv1, freq
+        """, menu=menu, target=target).data()
+    out = []
+    for r in rows:
+        lv1 = r.get("lv1") or ""
+        if any(k in lv1 for k in _PROTEIN_LV1_KEYWORDS):
+            out.append({"name": r["name"], "lv1": lv1, "freq": r["freq"]})
+        if len(out) >= limit:
+            break
+    return out
 
 
 # 5. 유사 레시피 추천

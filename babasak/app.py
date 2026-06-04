@@ -2,7 +2,7 @@ import base64
 from pathlib import Path
 
 import streamlit as st
-from views import home, chatbot, dashboard
+from views import home, chatbot, dashboard, about
 
 
 def _img_b64(path: str) -> str:
@@ -11,8 +11,19 @@ def _img_b64(path: str) -> str:
 
 _ASSETS = Path(__file__).parent / "assets"
 
+# 챗봇 말풍선 대신 쓸 새 로고. logo_new.png 우선, 없으면 logo.png 폴백.
+# data URI(없으면 None)를 만들어 플로팅 버튼·홈 카드에서 재사용한다.
+_NEW_LOGO_PATH = _ASSETS / "logo_new.png"
+if not _NEW_LOGO_PATH.exists():
+    _NEW_LOGO_PATH = _ASSETS / "logo.png"
+_NEW_LOGO_URI = (
+    f"data:image/png;base64,{_img_b64(str(_NEW_LOGO_PATH))}"
+    if _NEW_LOGO_PATH.exists()
+    else None
+)
 
-st.set_page_config(page_title="바바삭", page_icon="🍽️", layout="wide", initial_sidebar_state="collapsed")
+
+st.set_page_config(page_title="바바삭", page_icon="🍽️", layout="wide", initial_sidebar_state="expanded")
 
 # databricks workspace import-dir app /Workspace/Users/jyj000818@gmail.com/databricks_apps_jyjtest --profile DEFAULT --overwrite
 # databricks apps deploy jyjtest --source-code-path /Workspace/Users/jyj000818@gmail.com/databricks_apps_jyjtest --profile DEFAULT
@@ -46,30 +57,40 @@ st.markdown(
     display: none;
 }
 
-[data-testid="collapsedControl"] button svg,
-[data-testid="stSidebarCollapseButton"] svg {
-    display: none !important;
-}
-
-[data-testid="collapsedControl"] button,
-[data-testid="stSidebarCollapseButton"] {
-    position: relative !important;
-    overflow: visible !important;
+/* 사이드바 토글 버튼(접기/펴기).
+   Streamlit 기본 화살표 아이콘(svg)을 그대로 살리고, 버튼 박스만 깔끔히 정돈한다.
+   버튼 자체의 testid는 stBaseButton-headerNoPadding 이며, 펼침/접힘 상태는
+   각각 stSidebarCollapseButton / collapsedControl 컨테이너 안에 들어 있다. */
+[data-testid="stSidebarCollapseButton"] [data-testid="stBaseButton-headerNoPadding"],
+[data-testid="collapsedControl"] [data-testid="stBaseButton-headerNoPadding"] {
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px !important;
+    padding: 0 !important;
+    border-radius: 10px !important;
+    background: #ffffff !important;
+    border: 1px solid #e5e7eb !important;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08) !important;
+    color: #374151 !important;
+    cursor: pointer !important;
+    transition: background 0.15s ease, border-color 0.15s ease !important;
 }
 
-[data-testid="collapsedControl"] button::before,
-[data-testid="stSidebarCollapseButton"]::before {
-    content: '' !important;
-    display: block !important;
-    width: 18px !important;
-    height: 2px !important;
-    background-color: #374151 !important;
-    box-shadow: 0 6px 0 #374151, 0 12px 0 #374151 !important;
-    margin-top: -6px !important;
-    flex-shrink: 0 !important;
+[data-testid="stSidebarCollapseButton"] [data-testid="stBaseButton-headerNoPadding"]:hover,
+[data-testid="collapsedControl"] [data-testid="stBaseButton-headerNoPadding"]:hover {
+    background: #fff5f5 !important;
+    border-color: #ef4444 !important;
+    color: #ef4444 !important;
+}
+
+/* 화살표 아이콘 크기·정렬 */
+[data-testid="stSidebarCollapseButton"] [data-testid="stBaseButton-headerNoPadding"] svg,
+[data-testid="collapsedControl"] [data-testid="stBaseButton-headerNoPadding"] svg {
+    width: 22px !important;
+    height: 22px !important;
 }
 
 .stApp {
@@ -84,8 +105,11 @@ st.markdown(
 }
 
 [data-testid="stSidebar"] {
-    background: #ffffff;
-    border-right: 1px solid #e5e7eb;
+    /* 옅은 회색 배경 */
+    background: #f1f5f9;
+    border-right: 1px solid #e2e8f0;
+    /* 좁은 화면에서도 자동으로 접히지 않도록 최소 폭 보장 */
+    min-width: 244px !important;
 }
 
 [data-testid="stSidebar"] .block-container {
@@ -117,18 +141,34 @@ st.markdown(
     border: none;
 }
 
+/* 사이드바 메뉴 버튼만 초록 테마 (본문 버튼은 위 전역 규칙 그대로 유지) */
+[data-testid="stSidebar"] .stButton > button {
+    border: 1px solid #bbf7d0;
+    background: #ffffff;
+    color: #15803d;
+}
+
+[data-testid="stSidebar"] .stButton > button:hover {
+    border-color: #16a34a;
+    color: #15803d;
+    background: #f0fdf4;
+}
+
 .logo-box {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 10px;
     margin-bottom: 4px;
 }
 
+/* 사이드바 로고: Streamlit 기본 이미지 스타일을 이기도록 크기를 강제 지정 */
+[data-testid="stSidebar"] img.logo-icon,
 .logo-icon {
     font-size: 120px;
-    width: 100%;
-    max-width: 200px;
-    height: auto;
+    width: 150px !important;
+    max-width: 150px !important;
+    height: 150px !important;
     object-fit: contain;
     vertical-align: middle;
 }
@@ -142,7 +182,7 @@ st.markdown(
 .logo-sub {
     font-size: 13px;
     color: #64748b;
-    margin-left: 42px;
+    text-align: center;
     margin-bottom: 28px;
 }
 
@@ -172,6 +212,82 @@ st.markdown(
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
 }
 
+/* hero-marker를 포함한 st.container(border=True)를 hero 박스로 스타일링.
+   Streamlit 1.51의 테두리 컨테이너는 stVerticalBlockBorderWrapper 래퍼를 만든다.
+   그중 .hero-marker를 품은 것만 골라 hero 그라데이션 박스로 꾸민다. */
+.hero-marker {
+    display: none;
+}
+
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker) {
+    background: linear-gradient(120deg, #fff7ed 0%, #fff5f5 45%, #eef2ff 100%);
+    border: 1px solid #fecaca !important;
+    border-radius: 22px;
+    padding: 28px 32px;
+    margin-bottom: 34px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+}
+
+/* 박스 안 컬럼들을 세로 중앙 정렬 */
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker)
+    [data-testid="stHorizontalBlock"] {
+    align-items: center;
+}
+
+.hero-text {
+    padding-right: 8px;
+}
+
+.hero-text .hero-title {
+    font-size: 26px;
+    margin-bottom: 14px;
+}
+
+.hero-text .hero-desc {
+    font-size: 14px;
+    line-height: 1.65;
+}
+
+/* 박스 안 차트/메뉴 영역의 섹션 제목은 조금 작게 */
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker)
+    .section-title {
+    font-size: 18px;
+    margin-bottom: 10px;
+}
+
+/* 좁은 좌측 컬럼용 hero 변형: 세로 배치 + 폰트/패딩 축소, 우측 패널과 높이 맞춤 */
+.hero-compact {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 28px 28px;
+    height: 100%;
+    margin-bottom: 0;
+}
+
+.hero-compact .hero-title {
+    font-size: 24px;
+    margin-bottom: 14px;
+}
+
+.hero-compact .hero-desc {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.hero-compact .hero-visual {
+    margin-top: 18px;
+    justify-content: flex-start;
+}
+
+.hero-compact .hero-ing {
+    height: 110px;
+}
+
+.hero-compact .hero-ing-emoji {
+    font-size: 56px;
+}
+
 .hero-title {
     font-size: 32px;
     font-weight: 900;
@@ -194,6 +310,24 @@ st.markdown(
     font-size: 92px;
     text-align: right;
     opacity: 0.95;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* hero 재료 PNG 이미지 (한 장) */
+.hero-ing {
+    height: 160px;
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+}
+
+/* png 없을 때 이모지 폴백 */
+.hero-ing-emoji {
+    font-size: 84px;
+    line-height: 1;
 }
 
 .section-title {
@@ -212,6 +346,38 @@ st.markdown(
     min-height: 230px;
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
     margin-bottom: 10px;
+}
+
+.menu-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+}
+
+.menu-rank {
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: #fb923c;
+    color: white;
+    font-weight: 800;
+    font-size: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.menu-name {
+    font-size: 17px;
+    font-weight: 700;
+    color: #0f172a;
 }
 
 .feature-icon {
@@ -234,20 +400,22 @@ st.markdown(
 }
 
 .price-wrap {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 20px;
-    padding: 22px;
+    /* 주변 박스(흰 배경·테두리·그림자) 제거 — 배경에 그대로 얹히는 형태 */
+    background: transparent;
+    border: none;
+    padding: 0;
     margin-top: 18px;
     margin-bottom: 18px;
-    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+    box-shadow: none;
 }
 
 .price-title {
-    font-size: 18px;
+    font-size: 24px;
     font-weight: 900;
     color: #111827;
+    margin-top: 12px;
     margin-bottom: 16px;
+    padding-left: 8px;
 }
 
 .price-card {
@@ -340,25 +508,35 @@ st.markdown(
     position: fixed;
     bottom: 32px;
     right: 32px;
-    width: 62px;
-    height: 62px;
+    width: 64px;
+    height: 64px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #ef4444, #f97316);
+    background: #ffffff;
     color: white;
     font-size: 28px;
-    border: none;
-    box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.18);
     z-index: 9999;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    overflow: hidden;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* 새 로고 이미지를 동그란 버튼에 꽉 차게 */
+#fab-chatbot img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 7px;
+    box-sizing: border-box;
 }
 
 #fab-chatbot:hover {
     transform: scale(1.1);
-    box-shadow: 0 6px 28px rgba(239, 68, 68, 0.5);
+    box-shadow: 0 6px 28px rgba(15, 23, 42, 0.28);
 }
 
 .about-card {
@@ -435,8 +613,16 @@ st.markdown(
     white-space: nowrap;
 }
 </style>
-<a id="fab-chatbot" href="?goto=chatbot" title="챗봇 바로가기" target="_self">💬</a>
 """,
+    unsafe_allow_html=True,
+)
+
+# 우하단 플로팅 챗봇 버튼 — 새 로고 이미지(없으면 💬 이모지 폴백)
+_fab_inner = (
+    f'<img src="{_NEW_LOGO_URI}" alt="챗봇" />' if _NEW_LOGO_URI else "💬"
+)
+st.markdown(
+    f'<a id="fab-chatbot" href="?goto=chatbot" title="챗봇 바로가기" target="_self">{_fab_inner}</a>',
     unsafe_allow_html=True,
 )
 
@@ -455,17 +641,18 @@ with st.sidebar:
             {_logo_icon}
         </div>
     </a>
-    <div class="logo-sub">소상공인을 지원하는 비서</div>
     """,
         unsafe_allow_html=True,
     )
 
-    if st.button("🏠 홈"):
+    if st.button("홈"):
         go_page("home")
-    if st.button("💬 챗봇에게 물어보기"):
+    if st.button("챗봇에게 물어보기"):
         go_page("chatbot")
-    if st.button("📊 가격 추이 알아보기"):
+    if st.button("가격 추이 알아보기"):
         go_page("dashboard")
+    if st.button("프로젝트 소개"):
+        go_page("about")
 
 
 def margin_page():
@@ -493,5 +680,7 @@ elif st.session_state.page == "chatbot":
     chatbot.render()
 elif st.session_state.page == "dashboard":
     dashboard.render()
+elif st.session_state.page == "about":
+    about.render()
 elif st.session_state.page == "margin":
     margin_page()
