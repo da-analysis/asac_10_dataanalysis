@@ -72,6 +72,14 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     if not has_price and intent == "price_inquiry":
         return "price_search"
 
+    # 규칙 2-1: 분석형 질문 — 재료 추출 없이 원문 그대로 Genie freeform 경로
+    # preprocessor가 analytics로 분류 시 menu=None, ingredients=None을 보장하므로
+    # price_search_node의 freeform path(_ask_genie(user_query))가 자동으로 작동한다.
+    if intent == "analytics":
+        if not has_price:
+            return "price_search"
+        return "report_generator"
+
     # ★ 규칙 3 (C4 핵심 수정): 레시피 있을 때, intent에 따라 분기
     if has_recipe and not has_price:
         if intent in _NEEDS_PRICE_INTENTS:
