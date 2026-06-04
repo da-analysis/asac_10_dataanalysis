@@ -34,6 +34,9 @@ _INTENT_KEYWORDS = {
     'recipe_only': ['만드는 법', '조리법', '레시피', '만들기', '요리법', '조리 순서'],
     'alternative': ['대신', '대체', '바꿀', '대용', '다른 걸로'],
     'recommendation': ['추천', '뭐 먹', '어떤 게 좋'],
+    'analytics': ['가격 변동', '변동폭', '가격 추이', '가장 비싼', '가장 싼', '가격 순위',
+                  '가격 비교', '최고가', '최저가', '가격 상승', '가격 하락',
+                  '얼마나 올랐', '얼마나 내렸', '많이 오른', '많이 내린'],
 }
 
 
@@ -42,7 +45,7 @@ _INVALID_KEYWORDS = ['날씨', '주식', '비트코인', '뉴스', '영화', '�
 
 def _keyword_intent(query: str) -> str | None:
     """키워드 매칭으로 intent 1차 감지. 명확하면 LLM 스킵 가능."""
-    priority = ['alternative', 'cost_analysis', 'price_inquiry', 'recipe_only', 'recommendation']
+    priority = ['analytics', 'alternative', 'cost_analysis', 'price_inquiry', 'recipe_only', 'recommendation']
     for intent_name in priority:
         for kw in _INTENT_KEYWORDS[intent_name]:
             if kw in query:
@@ -96,7 +99,7 @@ _FALLBACK_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입�
 해석3: <재해석 문장>
 선택: <1|2|3>
 유효: <예|아니오>
-의도: <recipe_only|cost_analysis|price_inquiry|alternative|recommendation|general>
+의도: <recipe_only|cost_analysis|price_inquiry|alternative|recommendation|analytics|general>
 메뉴: <음식이름 또는 NONE>
 재료: <재료1, 재료2 또는 NONE>
 제외: <제외할 재료 또는 NONE>
@@ -108,6 +111,7 @@ _FALLBACK_SYSTEM_PROMPT = """당신은 식당/요리 질문 분석 전문가입�
 - price_inquiry: 특정 재료의 시세/도매가만 단순 조회
 - alternative: 대체재, 다른 재료로 바꾸기
 - recommendation: 메뉴 추천, 뭐 먹을까
+- analytics: 가격 변동·추이·순위·비교 등 DB 전체 분석형 질문 (특정 메뉴/재료 지정 없음, 예: '가격이 가장 많이 오른 채소는?')
 - general: 위 어디에도 해당 안 됨
 
 [규칙]
@@ -203,7 +207,7 @@ def _llm_multiquery_extract(query: str) -> dict:
             elif line.startswith("의도:"):
                 val = line.split(":")[1].strip().lower()
                 valid_intents = ['recipe_only', 'cost_analysis', 'price_inquiry',
-                                 'alternative', 'recommendation', 'general']
+                                 'alternative', 'recommendation', 'analytics', 'general']
                 result['intent'] = val if val in valid_intents else 'general'
             elif line.startswith("메뉴:"):
                 val = line.split(":", 1)[1].strip()
@@ -482,17 +486,23 @@ def preprocessor_node(state: dict) -> dict:
     is_alternative = (intent == 'alternative')
     is_popular = any(kw in query for kw in ['인기', 'top', 'best', '추천순', '랭킹'])
 
-    # 문자열 매칭으로 LLM이 놓친 엔티티 보강 (보조 역할)
-    if not menu:
-        menu = _match_menu_from_query(query)
-    if not ingredients:
-        fast_ings = _match_ingredients_from_query(query)
-        if fast_ings:
-            ingredients = fast_ings
-    if not intent or intent == 'general':
-        kw_intent = _keyword_intent(query)
-        if kw_intent:
-            intent = kw_intent
+    # analytics: 메뉴/재료 추출 없이 원문 그대로 Genie freeform 경로로 전달
+    # price_search_node는 ingredients=[] + menu=None 이면 _ask_genie(user_query) freeform path를 탄다
+    if intent == 'analytics':
+        menu = None
+        ingredients = None
+    else:
+        # 문자열 매칭으로 LLM이 놓친 엔티티 보강 (보조 역할)
+        if not menu:
+            menu = _match_menu_from_query(query)
+        if not ingredients:
+            fast_ings = _match_ingredients_from_query(query)
+            if fast_ings:
+                ingredients = fast_ings
+        if not intent or intent == 'general':
+            kw_intent = _keyword_intent(query)
+            if kw_intent:
+                intent = kw_intent
 
     # ═══ Phase 3: 히스토리 carry-over (0ms, 최후 수단) ═══
     # LLM도 메뉴/재료를 못 찾았을 때만 이전 HumanMessage에서 상속
