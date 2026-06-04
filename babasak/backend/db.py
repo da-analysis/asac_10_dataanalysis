@@ -49,7 +49,6 @@ def _merge_results(base, extra, limit):
 
 
 def get_driver():
-    """Neo4j 드라이버 싱글톤."""
     global _driver
     if _driver is None:
         uri = os.environ.get("NEO4J_URI")
@@ -72,12 +71,8 @@ def get_session():
     return get_driver().session()
 
 
-# ============================================================
-# 사전 로딩 / 토크나이저
-# ============================================================
 
 def _load_dictionaries(menu_limit=2000, ing_limit=5000):
-    """빈도 상위 메뉴명/재료명을 Neo4j에서 읽어 메모리에 캐싱."""
     global _KNOWN_MENUS, _KNOWN_INGREDIENTS, _DICT_LOADED
     if _DICT_LOADED:
         return
@@ -131,15 +126,14 @@ def _tokenize(query):
 
 
 def _resolve_ingredient_candidates(text, limit=5):
-    """자연어/롱테일 재료 표현을 DB의 Ingredient.name 후보로 변환.
-
+    """
     안전화 규칙:
     - exact 매칭 우선
     - substring 매칭은 한 방향만:
       * "당근손가락길이만큼"(긴 쿼리) 안에 ing("당근")이 포함 → OK (수다 제거 케이스)
       * cleaned(쿼리)가 ing 안에 포함되는 역방향은 길이 차이가 작을 때만
-        예) "마라"(2글자)가 "고구마라떼"(6글자) 안에 → ❌ 차이 너무 큼
-            "다진마"가 "다진마늘" 안에 → ✅ 차이 1글자
+        예) "마라"(2글자)가 "고구마라떼"(6글자) 안에 → 차이 너무 큼
+            "다진마"가 "다진마늘" 안에 → 차이 1글자
     """
     _load_dictionaries()
     raw = text or ""
@@ -387,10 +381,7 @@ def build_graph_relation_context(query, limit=3):
     }]
 
 
-# ============================================================
 # 1. 통합 검색
-# ============================================================
-
 def search_recipes_smart(query, limit=3, fallback_popular=False):
     """레시피명/재료명 기반 통합 검색.
 
@@ -507,9 +498,29 @@ def _search_by_tokens(menu_tokens, ing_tokens, limit):
         return rows
 
 
-# ============================================================
 # 2. 레시피 상세/재료
-# ============================================================
+
+_DROP_NOISE_INGREDIENTS = True
+_NOISE_TOKENS = ("국그릇", "그릇", "한그릇")  # 수량/그릇이 재료명에 붙은 파편 (예: '신김치국그릇')
+
+
+def _filter_noise_ingredients(rows):
+    """재료 row 리스트에서 명백한 노이즈/중복 제거. 전부 걸러지면 원본 유지(안전)."""
+    if not _DROP_NOISE_INGREDIENTS:
+        return rows
+    cleaned, seen = [], set()
+    for r in rows:
+        name = (r.get("name") or "").strip()
+        if not name:
+            continue
+        if any(tok in name for tok in _NOISE_TOKENS):
+            continue          # '신김치국그릇' 같은 파편 제거
+        if name in seen:
+            continue          # 같은 이름 중복 제거
+        seen.add(name)
+        cleaned.append(r)
+    return cleaned if cleaned else rows   # 전부 걸러지면 원본 유지(빈 재료 사고 방지)
+
 
 def get_recipe_ingredients(rcp_sno):
     """레시피의 재료 + 수량 조회."""
@@ -520,7 +531,7 @@ def get_recipe_ingredients(rcp_sno):
                    i.lv1 AS category, i.lv2 AS subcategory
             ORDER BY i.lv1, i.name
         """, rcp_sno=rcp_sno)
-        return [r.data() for r in result]
+        return _filter_noise_ingredients([r.data() for r in result])
 
 
 def get_recipe_detail(rcp_sno):
@@ -541,9 +552,7 @@ def get_recipe_detail(rcp_sno):
         return record.data() if record else None
 
 
-# ============================================================
 # 3. 재료 기반 검색
-# ============================================================
 
 def get_recipes_by_ingredient(ingredient_name, limit=3):
     """특정 재료가 들어간 레시피. 자연어 표현도 처리."""
@@ -620,9 +629,7 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
         return [r.data() for r in result]
 
 
-# ============================================================
-# 4. 대체재 추천 (그래프 기반 RAG)
-# ============================================================
+# 4. 대체재 추천
 
 def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
     """주어진 메뉴에서 특정 재료를 대체할 만한 재료를 그래프 관계로 추천.
@@ -650,34 +657,143 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
     missing = candidates[0]
 
     with get_session() as session:
-        # missing의 lv1(대분류) 먼저 확인
+        # missing의 lv1(대분류)·lv2(소분류) 확인
         meta = session.run(
-            "MATCH (i:Ingredient {name: $name}) RETURN i.lv1 AS lv1 LIMIT 1",
+            "MATCH (i:Ingredient {name: $name}) RETURN i.lv1 AS lv1, i.lv2 AS lv2 LIMIT 1",
             name=missing,
         ).single()
         if not meta or not meta["lv1"]:
             return []
         missing_lv1 = meta["lv1"]
+        missing_lv2 = meta["lv2"]
 
-        # 같은 카테고리 + 해당 메뉴에 자주 등장하는 재료
-        result = session.run("""
+        # 넓은 풀: 같은 lv1 재료 전체 + 전체 등장빈도(recipe_count) + 해당 메뉴 등장수(menu_count)
+        # (메뉴를 '하드 필터'로 쓰면 같은 계열 재료가 그 메뉴 레시피에 없을 때 누락되므로,
+        #  메뉴는 가산점으로만 쓰고 풀은 lv1 전체에서 가져온다)
+        pool = session.run("""
+            MATCH (r:Recipe)-[:CONTAINS]->(alt:Ingredient)
+            WHERE alt.lv1 = $missing_lv1 AND alt.name <> $missing
+            WITH alt.name AS name, alt.lv1 AS lv1, alt.lv2 AS lv2,
+                 count(DISTINCT r) AS recipe_count,
+                 count(DISTINCT CASE WHEN r.name CONTAINS $menu THEN r END) AS menu_count
+            ORDER BY recipe_count DESC
+            LIMIT 60
+            RETURN name, lv1, lv2, recipe_count, menu_count
+        """, menu=menu, missing=missing, missing_lv1=missing_lv1).data()
+
+        # 이 메뉴의 대표 main_ingredient 조회 (제육볶음 → '돼지고기')
+        # → missing이 이 요리의 핵심 재료인지 판정하는 데 사용
+        mi_row = session.run("""
+            MATCH (r:Recipe)
+            WHERE r.name CONTAINS $menu AND r.main_ingredient IS NOT NULL
+            RETURN r.main_ingredient AS mi, count(*) AS c
+            ORDER BY c DESC LIMIT 1
+        """, menu=menu).single()
+        menu_main = (mi_row["mi"] if mi_row else "") or ""
+
+    # ── 핵심 재료(core) 판정 ──
+    # 제육볶음의 돼지고기처럼, missing이 그 요리의 '정체성' 재료면
+    # 계열 밖(스팸·참치)으로는 절대 대체하지 않는다(없으면 추천 안 함).
+    # 신호: ① 메뉴명이 missing을 포함(돼지고기김치찌개) ② 대표 main_ingredient와 같은 계열
+    def _same_family(a, b):
+        if not a or not b:
+            return False
+        if a in b or b in a:
+            return True
+        return len(a) >= 2 and len(b) >= 2 and a[:2] == b[:2]
+
+    is_core = (bool(menu) and missing in menu) or _same_family(missing, menu_main)
+
+    # ── 요리 정체성 점수로 재정렬 ──
+    # 같은 재료 계열(같은 동물/소분류)이 위로 오게. 스팸·참치처럼 계열 신호 0인 건 뒤로.
+    def _family_score(name, lv2):
+        s = 0
+        if missing in name or name in missing:        # 돼지고기 ↔ 돼지고기목살
+            s += 4
+        if len(missing) >= 2 and len(name) >= 2 and missing[:2] == name[:2]:  # 돼지.. 공유
+            s += 3
+        if missing_lv2 and lv2 and lv2 == missing_lv2:  # 같은 소분류
+            s += 2
+        return s
+
+    ranked = []
+    for row in pool:
+        fs = _family_score(row["name"], row.get("lv2"))
+        ranked.append((fs, row.get("menu_count", 0), row.get("recipe_count", 0), row))
+    # 계열성 > 메뉴 등장수 > 전체 빈도 순
+    ranked.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
+
+    # 계열 신호 있는 것 우선.
+    family = [r for r in ranked if r[0] > 0]
+    if is_core:
+        # 핵심 재료(제육볶음의 돼지고기)는 계열 밖(스팸·참치)으로 대체 금지.
+        # 같은 계열(돼지 부위)만 허용. 없으면 빈 결과 → 엉뚱한 대체 안 함.
+        chosen = family[:limit]
+    else:
+        # 보조 재료는 계열 우선, 없으면 빈도순으로라도 채움.
+        chosen = (family if family else ranked)[:limit]
+    return [{"name": r[3]["name"], "category": r[3]["lv1"],
+             "recipe_count": r[3]["recipe_count"]} for r in chosen]
+
+
+def get_menu_main_ingredient(menu):
+    """메뉴의 대표 main_ingredient(레시피 작성자 표기)를 반환. 핵심재료 판정용.
+
+    예: '제육볶음' → '돼지고기',  '김치찌개' → '김치'(보통)
+    cost_calculator가 '핵심 재료는 대체 대상에서 제외'하는 데 사용.
+    """
+    if not menu:
+        return ""
+    with get_session() as session:
+        row = session.run("""
+            MATCH (r:Recipe)
+            WHERE r.name CONTAINS $menu AND r.main_ingredient IS NOT NULL
+            RETURN r.main_ingredient AS mi, count(*) AS c
+            ORDER BY c DESC LIMIT 1
+        """, menu=menu).single()
+        return (row["mi"] if row else "") or ""
+
+
+# 단백질류 lv1 (주재료 = 대체 가치 있는 재료)
+_PROTEIN_LV1_KEYWORDS = ("육류", "계란", "어패", "수산", "해산", "콩")
+
+
+def suggest_menu_protein_alternatives(menu, target, limit=8):
+    """이 메뉴의 다른 레시피들이 실제로 쓰는 '주재료(단백질)' 후보를 빈도순으로 반환.
+
+    핵심 아이디어: '어울리냐'를 하드코딩 규칙이 아니라 데이터로 판정.
+      - 김치찌개 → 돼지고기·참치·스팸·꽁치 (참치김치찌개가 실제 있으니 참치 OK)
+      - 미역국   → 소고기·홍합 (참치미역국 없으니 참치는 후보에 없음 = 괴식 차단)
+      - 제육볶음 → 돼지 부위·오징어 등
+
+    cost_calculator가 이 후보 중 target보다 '단가가 더 싼 것'을 골라 대체 제안.
+    반환: [{"name", "lv1", "freq"}] (가격은 cost_calculator가 price_map에서 비교)
+    """
+    if not menu or not target:
+        return []
+    with get_session() as session:
+        rows = session.run("""
             MATCH (r:Recipe)-[:CONTAINS]->(alt:Ingredient)
             WHERE r.name CONTAINS $menu
-              AND alt.lv1 = $missing_lv1
-              AND alt.name <> $missing
-            WITH alt.name AS name, alt.lv1 AS category,
-                 count(DISTINCT r) AS recipe_count
-            ORDER BY recipe_count DESC
-            LIMIT $limit
-            RETURN name, category, recipe_count
-        """, menu=menu, missing=missing, missing_lv1=missing_lv1, limit=limit)
+              AND alt.name <> $target
+              AND alt.lv1 IS NOT NULL
+            WITH alt.name AS name, alt.lv1 AS lv1, count(DISTINCT r) AS freq
+            ORDER BY freq DESC
+            LIMIT 60
+            RETURN name, lv1, freq
+        """, menu=menu, target=target).data()
+    out = []
+    for r in rows:
+        lv1 = r.get("lv1") or ""
+        if any(k in lv1 for k in _PROTEIN_LV1_KEYWORDS):
+            out.append({"name": r["name"], "lv1": lv1, "freq": r["freq"]})
+        if len(out) >= limit:
+            break
+    return out
 
-        return [r.data() for r in result]
 
-
-# ============================================================
 # 5. 유사 레시피 추천
-# ============================================================
+
 
 def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
     """주어진 레시피와 재료를 공유하는 유사 레시피 추천."""
@@ -701,9 +817,7 @@ def find_similar_recipes(rcp_sno, limit=3, min_shared=2):
         return [r.data() for r in result]
 
 
-# ============================================================
 # 5. 인기/조건 추천
-# ============================================================
 
 def get_popular_recipes(limit=3):
     """전체 인기 레시피 top N."""
@@ -760,9 +874,7 @@ def recommend_recipes(
         return [r.data() for r in result]
 
 
-# ============================================================
 # 6. 챗봇/기존 import 호환
-# ============================================================
 
 def search_recipes(keyword, limit=5):
     """기존 search_recipes 인터페이스 유지."""

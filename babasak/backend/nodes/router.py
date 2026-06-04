@@ -5,7 +5,6 @@ from backend.debug_log import archive
 
 
 def _get_last_human_query(messages: list) -> str:
-    """메시지 리스트에서 마지막 HumanMessage의 content를 반환"""
     for msg in reversed(messages):
         if isinstance(msg, HumanMessage):
             return msg.content
@@ -23,21 +22,11 @@ def _get_llm_router():
     return _llm_router
 
 
-# ═══════════════════════════════════════════════════════════════
-# C4+C5: preprocessor의 intent를 직접 사용 (기존 _detect_intent 제거)
-# ═══════════════════════════════════════════════════════════════
-
-# intent가 price pipeline을 필요로 하는지 판별
 _NEEDS_PRICE_INTENTS = {"cost_analysis", "price_inquiry"}
 _RECIPE_ONLY_INTENTS = {"recipe_only", "recommendation", "alternative"}
 
 
 def _rule_based_route(state: dict, query: str) -> str | None:
-    """
-    규칙 기반 라우팅. 명확한 경우 LLM 호출 없이 결정.
-    ★ C4: preprocessor가 분류한 intent를 사용하여 불필요한 price_search 스킵.
-    None 반환 시 LLM fallback.
-    """
     recipe_info = state.get("recipe_info", {})
     price_info = state.get("price_info", {})
     cost_info = state.get("cost_info", {})
@@ -48,10 +37,9 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     has_cost = bool(cost_info)
     has_unavailable = bool(price_info.get("unavailable")) if isinstance(price_info, dict) else False
 
-    # ★ C5: preprocessor가 분류한 intent 직접 사용 (기존 _detect_intent 제거)
     intent = entities.get("intent", "general")
 
-    # ★ 신규 규칙: 제외/대체재/조건/인기 의도는 직접 recipe_search로
+    #신규 규칙: 제외/대체재/조건/인기 의도는 직접 recipe_search로
     if not has_recipe:
         if entities.get("exclude") or entities.get("is_alternative"):
             return "recipe_search"
@@ -60,7 +48,7 @@ def _rule_based_route(state: dict, query: str) -> str | None:
         if entities.get("is_popular"):
             return "recipe_search"
 
-    # ★ 규칙 0: fallback — preprocessor가 엔티티 추출 실패 시 바로 report
+    #규칙 0: fallback — preprocessor가 엔티티 추출 실패 시 바로 report
     if intent == "fallback":
         return "report_generator"
 
@@ -107,11 +95,10 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     if has_recipe and intent in ("recipe_only", "recommendation", "alternative"):
         return "report_generator"
 
-    return None  # 판단 불가 → LLM fallback
+    return None
 
 
 def router_node(state: dict) -> dict:
-    """다음 액션을 결정하는 라우터. 규칙 기반 우선, 애매하면 LLM fallback."""
     loop_count = state.get("loop_count", 0) + 1
 
     archive("router.input", {
@@ -135,10 +122,9 @@ def router_node(state: dict) -> dict:
 
     query = _get_last_human_query(state.get("messages", []))
 
-    # === 1단계: 규칙 기반 라우팅 (LLM 호출 없음) ===
+    # 1단계: 규칙 기반 라우팅
     rule_result = _rule_based_route(state, query)
     if rule_result:
-        # 중복 호출 방지
         last_action = state.get("next_action", "")
         if rule_result == last_action and rule_result != "report_generator":
             archive("router.output", {"next_action": "report_generator", "reason": "duplicate_action", "would_repeat": rule_result})
@@ -146,7 +132,7 @@ def router_node(state: dict) -> dict:
         archive("router.output", {"next_action": rule_result, "reason": "rule_based"})
         return {"next_action": rule_result, "loop_count": loop_count}
 
-    # === 2단계: LLM fallback (규칙으로 판단 불가한 경우만) ===
+    # 2단계: LLM fallback
     recipe_info = state.get("recipe_info", {})
     price_info = state.get("price_info", {})
     cost_info = state.get("cost_info", {})

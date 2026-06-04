@@ -52,11 +52,13 @@ async def chat(req: ChatRequest):
         price_info = result.get("price_info")
         if isinstance(price_info, dict):
             chart_html = price_info.get("chart_html")
+        # ★ 추가: 카드형 UI용 구조화 데이터 (없으면 None → 프론트가 마크다운 폴백)
+        card = result.get("card_data") or None
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    resp_body = {"response": response}
+    resp_body = {"response": response, "card": card}
     if chart_html:
         resp_body["chart_html"] = chart_html
     return resp_body

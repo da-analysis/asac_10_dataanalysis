@@ -11,6 +11,7 @@ class AgentState(TypedDict):
     price_info: Dict[str, Any]
     cost_info: Dict[str, Any]
     final_report: str
+    card_data: Dict[str, Any]
     error_log: Annotated[List[str], operator.add]
     next_action: str
     loop_count: int
