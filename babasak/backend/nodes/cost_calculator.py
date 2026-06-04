@@ -89,6 +89,10 @@ _PER_PIECE_GRAMS = {
     "레몬": 100.0,
     "사과": 250.0,
     "어묵": 40.0,  # 1장 기준
+    # 뼈·고기 덩이류 (줄/대/짝 단위로 자주 표기됨)
+    "등뼈": 350.0, "돼지등뼈": 350.0, "목등뼈": 350.0, "사골": 500.0,
+    "갈비": 250.0, "등갈비": 200.0, "돼지갈비": 250.0, "소갈비": 300.0,
+    "닭": 1000.0, "닭다리": 100.0, "닭봉": 50.0, "오리": 1500.0,
 }
 
 _QUALITATIVE_GRAMS = {
@@ -105,6 +109,7 @@ _DEFAULT_SEASONING_HINTS = (
 )
 _DEFAULT_GRAMS_SEASONING = 10.0   # 양념류 기본 ~1작은술 수준
 _DEFAULT_GRAMS_OTHER = 80.0       # 그 외(주/부재료) 기본
+_DEFAULT_GRAMS_PIECE = 100.0      # 개수단위인데 품목별 1개 무게를 모를 때 1개당 추정
 
 # 분수 패턴: "1/2", "1/3", "2/3" 등
 _FRACTION_RE = re.compile(r"^(\d+)\s*/\s*(\d+)$")
@@ -153,6 +158,8 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
             ppg = _PER_PIECE_GRAMS.get(ingredient_name)
             if ppg:
                 return (num * ppg, f"bare_number_piece:{ppg}g/개")
+            # 품목 무게를 몰라도 0으로 버리지 말고 기본 개당무게로 추정
+            return (num * _DEFAULT_GRAMS_PIECE, f"bare_number_default:{int(_DEFAULT_GRAMS_PIECE)}g")
         return (None, f"unparsed:{q}")
 
     num = _parse_number(m.group("num"))
@@ -164,21 +171,23 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
     if unit in _UNIT_TABLE:
         return (num * _UNIT_TABLE[unit], f"unit:{unit}")
 
-    # 개수 단위(개/모/대/장/포기/쪽/캔/조각 등)
-    if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리"):
+    # 개수 단위(개/모/대/장/포기/쪽/캔/조각/줄 등)
+    if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리", "짝", "덩이", "덩어리"):
         ppg = _PER_PIECE_GRAMS.get(ingredient_name)
         if ppg:
             return (num * ppg, f"piece:{ppg}g/{unit}")
-        return (None, f"piece_unit_no_table:{ingredient_name}/{unit}")
+        # 품목별 1개 무게를 몰라도 원가 미확인으로 버리지 말고 기본값으로 추정
+        return (num * _DEFAULT_GRAMS_PIECE, f"piece_default:{unit}:{int(_DEFAULT_GRAMS_PIECE)}g")
 
     # 단위 없음
     if not unit:
         ppg = _PER_PIECE_GRAMS.get(ingredient_name)
         if ppg:
             return (num * ppg, f"no_unit_piece:{ppg}g")
-        return (None, "no_unit_no_table")
+        return (num * _DEFAULT_GRAMS_PIECE, f"no_unit_default:{int(_DEFAULT_GRAMS_PIECE)}g")
 
-    return (None, f"unknown_unit:{unit}")
+    # 알 수 없는 단위 — 그래도 개당 추정으로 원가는 낸다(0 방지)
+    return (num * _DEFAULT_GRAMS_PIECE, f"unknown_unit_default:{unit}:{int(_DEFAULT_GRAMS_PIECE)}g")
 
 
 
@@ -473,6 +482,42 @@ def _get_margin_rate(industry: str) -> float:
     return _MARGIN_BY_INDUSTRY.get((industry or "").strip(), _DEFAULT_MARGIN_RATE)
 
 
+# 사용자가 직접 말한 목표 마진율(예: "마진 35%로", "마진율 40프로", "30퍼 마진") 추출용.
+_USER_MARGIN_RES = (
+    re.compile(r"마진\s*율?\s*(\d{1,2})\s*(?:%|퍼센트|퍼|프로)"),
+    re.compile(r"(\d{1,2})\s*(?:%|퍼센트|퍼|프로)\s*마진"),
+)
+
+
+def _extract_user_margin(state: dict) -> float | None:
+    """사용자 메시지에서 목표 마진율을 찾아 비율(0~1)로 반환. 없으면 None.
+    오인식 방지로 5~90%만 인정. (명시적으로 말할 때만 작동하는 fallback 레이어)"""
+    try:
+        for msg in reversed(state.get("messages", []) or []):
+            content = getattr(msg, "content", "") or ""
+            for rx in _USER_MARGIN_RES:
+                m = rx.search(content)
+                if m:
+                    pct = int(m.group(1))
+                    if 5 <= pct <= 90:
+                        return pct / 100.0
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_margin_rate(state: dict) -> tuple[float, str]:
+    """마진율 우선순위: 사용자 입력 > 업종별 > 기본 30%.
+    반환: (rate, source) — source는 디버그/표시용('user'|'industry'|'default')."""
+    user = _extract_user_margin(state)
+    if user is not None:
+        return user, "user"
+    industry = (_extract_industry(state) or "").strip()
+    if industry in _MARGIN_BY_INDUSTRY:
+        return _MARGIN_BY_INDUSTRY[industry], "industry"
+    return _DEFAULT_MARGIN_RATE, "default"
+
+
 def _parse_servings(servings) -> int:
     """'3인분'->3, '2~3인분'->2, '4인분 이상'->4, 숫자 없으면 1.
     레시피 재료 수량은 이 인분 기준이므로, 1인분 원가는 (전체÷인분수)."""
@@ -756,8 +801,9 @@ def cost_calculator_node(state: dict) -> dict:
     if not isinstance(recipes, list):
         recipes = [recipes] if recipes else []
 
-    # 업종별 마진율 (판매가 계산용). 업종 없으면 기본 30%.
-    margin_rate = _get_margin_rate(_extract_industry(state))
+    # 마진율 (판매가 계산용). 우선순위: 사용자 입력("마진 35%로") > 업종별 > 기본 30%.
+    margin_rate, margin_source = _resolve_margin_rate(state)
+    archive("cost_calculator.margin", {"rate": margin_rate, "source": margin_source})
 
     calc_results = []
     for idx, recipe in enumerate(recipes, start=1):

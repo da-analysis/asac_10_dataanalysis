@@ -344,12 +344,13 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
 
     summary = ""
     if total:
+        mp = rc.get("margin_pct") or 30          # 백엔드(업종/사용자 마진) 값 사용, 없으면 30
         srows = [f'<div class="fc-srow"><span class="k">예상 원가</span><span class="v">{_won(total)}</span></div>']
         if price:
-            srows.append(f'<div class="fc-srow"><span class="k">권장 판매가 (마진 30%)</span>'
+            srows.append(f'<div class="fc-srow"><span class="k">권장 판매가 (마진 {mp}%)</span>'
                          f'<span class="v">{_won(price)}</span></div>')
-        srows.append('<div class="fc-srow"><span class="k">예상 마진율</span>'
-                     '<span class="v fc-green">30% ▲</span></div>')
+        srows.append(f'<div class="fc-srow"><span class="k">예상 마진율</span>'
+                     f'<span class="v fc-green">{mp}% ▲</span></div>')
         summary = '<div class="fc-summary">' + "".join(srows) + '</div>'
 
     meta = " · ".join(str(x) for x in [rc.get("servings"), rc.get("difficulty"),

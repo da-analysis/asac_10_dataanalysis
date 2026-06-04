@@ -231,6 +231,14 @@ class RecipeIngredientInfo:
         return None
 
 
+_RECIPE_WEIGHT_UNIT_TEXTS = ("g", "그램", "kg", "킬로그램", "ml", "밀리리터", "l", "리터")
+
+
+def _recipe_row_convertible(entry: dict) -> bool:
+    """이 B2B 행이 kg당 단가로 환산 가능한지(무게/부피 단위 + 단위_수치 존재)."""
+    return bool(entry.get("unit_numeric")) and (entry.get("unit_text") or "").lower() in _RECIPE_WEIGHT_UNIT_TEXTS
+
+
 def _load_recipe_catalog_from_db() -> dict[str, dict]:
     """ingredient_recipe 전체 로드 → {std_name: info dict}."""
     w = _get_ws_client()
@@ -250,7 +258,7 @@ def _load_recipe_catalog_from_db() -> dict[str, dict]:
     recipe_catalog: dict[str, dict] = {}
     for row in (resp.result.data_array or []):
         std_name = (row[0] or "").strip()
-        if not std_name or std_name in recipe_catalog:
+        if not std_name:
             continue
         try:
             price = int(float(row[2])) if row[2] is not None else None
@@ -267,7 +275,7 @@ def _load_recipe_catalog_from_db() -> dict[str, dict]:
         except (TypeError, ValueError):
             kca_ref = None
 
-        recipe_catalog[std_name] = {
+        entry = {
             "std_name": std_name,
             "product_name": (row[1] or "").strip(),
             "price": price,
@@ -280,6 +288,11 @@ def _load_recipe_catalog_from_db() -> dict[str, dict]:
             "agro_category_ref": (row[9] or "").strip() if row[9] else None,
             "kca_category_ref": kca_ref,
         }
+        # 같은 std_name이 여러 행이면 'kg 환산 가능한 행'을 우선 유지한다.
+        #   (개/봉 단위 행이 먼저 잡혀 가격이 죽는 것 방지 — 시래기 등)
+        existing = recipe_catalog.get(std_name)
+        if existing is None or (_recipe_row_convertible(entry) and not _recipe_row_convertible(existing)):
+            recipe_catalog[std_name] = entry
     return recipe_catalog
 
 
@@ -339,6 +352,26 @@ def _strip_trailing_quantity(name: str) -> str | None:
     if result and result != name and len(result) >= 2:
         return result
     return None
+
+
+_WEIGHT_UNIT_RE = re.compile(r"^\d+(?:\.\d+)?(?:kg|g|ml|l)$", re.IGNORECASE)
+
+
+def _is_weight_unit(unit: str) -> bool:
+    """단위가 무게/부피(kg/g/ml/l)라 kg당 단가로 바로 환산 가능한지."""
+    return bool(_WEIGHT_UNIT_RE.match((unit or "").replace(" ", "")))
+
+
+def _best_unit(units: set[str]) -> str:
+    """KAMIS 단위 후보 중 무게단위(kg/g)를 개수단위(개/장)보다 우선 선택.
+
+    개수단위 도매가는 팩 크기에 따라 단가가 들쭉날쭉(계란 10개 608원/개 vs 30개 205원/개)
+    이라 kg 환산 신뢰도가 낮다. 무게단위가 있으면 그걸 골라 정확히 환산한다.
+    """
+    weights = sorted(u for u in units if _is_weight_unit(u))
+    if weights:
+        return weights[0]
+    return sorted(units)[0]
 
 
 def _lookup_recipe(name: str, recipe_catalog: dict[str, dict]) -> dict | None:
@@ -584,7 +617,7 @@ def resolve_ingredient(name: str) -> ResolveResult:
     if name in catalog:
         units = catalog[name]
         if units:
-            unit = sorted(units)[0]
+            unit = _best_unit(units)
             return ResolveResult(name, "matched", name, unit, "direct_catalog_hit")
 
     # 공백 제거 후 KAMIS 카탈로그 재시도
@@ -592,7 +625,7 @@ def resolve_ingredient(name: str) -> ResolveResult:
     if normalized != name and normalized in catalog:
         units = catalog[normalized]
         if units:
-            unit = sorted(units)[0]
+            unit = _best_unit(units)
             return ResolveResult(name, "matched", normalized, unit, "normalized_catalog_hit")
 
     # 접두사 제거 후 KAMIS 카탈로그 재시도
@@ -600,7 +633,7 @@ def resolve_ingredient(name: str) -> ResolveResult:
     if stripped and stripped in catalog:
         units = catalog[stripped]
         if units:
-            unit = sorted(units)[0]
+            unit = _best_unit(units)
             return ResolveResult(name, "matched", stripped, unit, "prefix_stripped_catalog_hit")
 
     # ── 3. mapping 테이블로 KAMIS 매핑 확인 ──
