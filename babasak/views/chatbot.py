@@ -408,11 +408,6 @@ def _render_cards(card: dict, fallback_text: str, turn: int = 0):
         cards_block += "".join(_new_menu_html(m, i) for i, m in enumerate(new_menus, 1))
 
     st.markdown(cards_block, unsafe_allow_html=True)
-    # 카드 아래에 LLM 분석 텍스트도 표시.
-    # 카드는 재료/원가 구조를 시각화하고, 텍스트는 원가 분석·조리법 설명 등
-    # 카드에 담기지 않는 세부 내용을 보완한다.
-    if fallback_text:
-        st.write(fallback_text)
 
 
 # ──────────────────────────────────────────────────────────────

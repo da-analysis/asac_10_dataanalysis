@@ -503,6 +503,17 @@ def _search_by_tokens(menu_tokens, ing_tokens, limit):
 _DROP_NOISE_INGREDIENTS = True
 _NOISE_TOKENS = ("국그릇", "그릇", "한그릇")  # 수량/그릇이 재료명에 붙은 파편 (예: '신김치국그릇')
 
+# 정확 일치 차단 리스트(방식 B). 레시피 DB에 '재료'로 잘못 저장된 조리지시/파편으로,
+# KAMIS·alias에 없어 매번 Genie(~26초)+네이버(~10초)+LLM(~7초)을 헛돌게 만드는 항목들.
+# MLflow trace 측정(2026-06-04, 우거지감자탕·감자탕)에서 unavailable로 새던 것만 보수적으로 등록.
+# 부분매칭(_NOISE_TOKENS)과 달리 '정확히 이 이름'일 때만 제거하므로 정상 재료(물/물오징어 등)는
+# 절대 건드리지 않는다. 새 노이즈가 관측되면 여기에 '전체 이름'을 추가한다.
+_NOISE_EXACT = frozenset({
+    "물가득", "요리수미림", "소금간맞추기", "대파초록부분", "설탕등뼈물",
+    "대파국물", "돼지등뼈물", "동전육수", "소주병", "월계수잎정도",
+    "쌀뜨물",  # 조리용 물 — KAMIS/네이버에 시세 없어 헛돌고, 원가 기여도 0에 가까움
+})
+
 
 def _filter_noise_ingredients(rows):
     """재료 row 리스트에서 명백한 노이즈/중복 제거. 전부 걸러지면 원본 유지(안전)."""
@@ -513,6 +524,8 @@ def _filter_noise_ingredients(rows):
         name = (r.get("name") or "").strip()
         if not name:
             continue
+        if name in _NOISE_EXACT:
+            continue          # 정확 일치 노이즈 차단(조리지시/파편) — 정상 재료는 안전
         if any(tok in name for tok in _NOISE_TOKENS):
             continue          # '신김치국그릇' 같은 파편 제거
         if name in seen:
