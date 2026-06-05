@@ -184,7 +184,10 @@ def recipe_search_node(state: dict) -> dict:
     else:
         ingredients = []
 
-    if not menu and not ingredients and not is_popular and not conditions:
+    # ★ 방어: 조건(1인분 등)이 같이 잡혀도 메뉴 복구는 해야 한다.
+    #   '김치찌개 1인분'에서 conditions={1인분}만 잡고 메뉴를 놓치면, 아래 시나리오2(조건검색)로
+    #   새서 1인분짜리 랜덤 레시피 5개가 나오던 버그. (not conditions 가드 제거)
+    if not menu and not ingredients and not is_popular:
         query = state["messages"][-1].content if state.get("messages") else ""
 
         # 1차: LLM으로 음식명 추출
@@ -258,8 +261,9 @@ def recipe_search_node(state: dict) -> dict:
                 })
             return {"recipe_info": {"data": recipe_data, "search_type": "popular"}}
 
-        # === 시나리오 2: 조건 기반 추천 ===
-        if conditions:
+        # === 시나리오 2: 조건 기반 추천 (단, 특정 메뉴가 있으면 메뉴 검색을 우선) ===
+        # '김치찌개 1인분'처럼 메뉴+조건이 같이 오면 조건검색으로 새지 않고 메뉴 검색으로 보낸다.
+        if conditions and not menu:
             recipes = recommend_recipes(
                 kind=conditions.get("kind"),
                 difficulty=conditions.get("difficulty"),

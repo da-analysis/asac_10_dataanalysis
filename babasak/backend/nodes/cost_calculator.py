@@ -1,3 +1,4 @@
+import math
 import re
 
 from backend.debug_log import archive
@@ -426,8 +427,36 @@ def _normalize_ingredient_name(name: str) -> str:
     return _NAME_SYNONYM.get(n, n)
 
 
+# ── 핵심 staple 큐레이트 단가 (원/kg, 도매 기준) ──
+# KAMIS엔 없고 B2B(ingredient_recipe)는 std_name 파싱이 깨져(김치→'김치찜' 7,900/kg)
+# 과대·누락이 잦은 주재료는 신뢰 가능한 고정가를 DB보다 우선 적용한다.
+# (배추김치 도매 평균 ~4,000원/kg 기준. 새 staple 관측되면 여기에 추가.)
+_STAPLE_PPK = {"김치": 4000, "묵은지": 4500, "깍두기": 4500, "총각김치": 5000}
+
+
+def _staple_price(name: str) -> dict | None:
+    """김치류 등 큐레이트 staple이면 고정 단가 dict 반환, 아니면 None."""
+    n = (name or "").strip()
+    if not n:
+        return None
+    ppk = None
+    if n == "묵은지" or n.endswith("묵은지"):
+        ppk = _STAPLE_PPK["묵은지"]
+    elif n in _STAPLE_PPK:
+        ppk = _STAPLE_PPK[n]
+    elif n.endswith("김치"):              # 신김치·배추김치·포기김치·김장김치 등
+        ppk = _STAPLE_PPK["김치"]
+    if ppk is None:
+        return None
+    return {"price_per_kg": ppk, "source": "staple_curated", "confidence": "medium"}
+
+
 def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
-    """재료명 → 가격 dict. 정확 → alias → 정규화 → 부분 매칭 순서로 시도."""
+    """재료명 → 가격 dict. (staple 큐레이트 우선) 정확 → alias → 정규화 → 부분 매칭 순서로 시도."""
+    # 핵심 staple(김치류)은 DB가 부정확/누락이라 큐레이트 단가를 DB보다 우선 적용
+    staple = _staple_price(ingredient_name)
+    if staple:
+        return staple
     if ingredient_name in price_map:
         return price_map[ingredient_name]
 
@@ -453,15 +482,30 @@ def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
     return None
 
 
-# ── 마진율 설정 (판매가 = 1인분 원가 / (1 - 마진율)) ──
-# 30% 고정 대신 업종별 기본 마진을 적용. 업종 없으면 기본 30%.
-# (추후 사용자가 직접 마진율 입력하면 그 값으로 교체 가능)
-_DEFAULT_MARGIN_RATE = 0.30
-_MARGIN_BY_INDUSTRY = {
-    "한식": 0.30, "중식": 0.32, "일식": 0.38, "양식": 0.45,
-    "분식": 0.40, "카페/디저트": 0.60, "카페": 0.60,
-    "치킨/패스트푸드": 0.42, "치킨": 0.42, "패스트푸드": 0.42,
-}
+# ── 참고 판매가 = 예상 원가 ÷ 기준 원가율 ──
+# 기준 원가율(BASE_COST_RATE)은 사장님이 입력한 '목표값'이 아니라 서비스가 임시로 쓰는 '기본 기준값'이다.
+#   참고 판매가 = 예상 원가 / 기준 원가율  (원가율 0.30 → 판매가 = 원가/0.3), 100원 단위 올림.
+#   재료 기준 이익 = 참고 판매가 - 예상 원가  (인건비·임대료·가스비·배달수수료 미포함)
+BASE_COST_RATE = 0.30
+
+
+def ceil_to_100(value: float) -> int:
+    """100원 단위 올림."""
+    return int(math.ceil(value / 100) * 100)
+
+
+def reference_price(estimated_cost, cost_rate: float = BASE_COST_RATE):
+    """참고 판매가 = 예상 원가 / 기준 원가율 (100원 올림). 원가 없으면 None."""
+    if estimated_cost is None or cost_rate <= 0:
+        return None
+    return ceil_to_100(estimated_cost / cost_rate)
+
+
+def material_profit(ref_price, estimated_cost):
+    """재료 기준 이익 = 참고 판매가 - 예상 원가."""
+    if ref_price is None or estimated_cost is None:
+        return None
+    return ref_price - estimated_cost
 
 
 def _extract_industry(state: dict) -> str:
@@ -477,45 +521,7 @@ def _extract_industry(state: dict) -> str:
     return ""
 
 
-def _get_margin_rate(industry: str) -> float:
-    """업종 → 마진율. 매칭 없으면 기본값."""
-    return _MARGIN_BY_INDUSTRY.get((industry or "").strip(), _DEFAULT_MARGIN_RATE)
-
-
-# 사용자가 직접 말한 목표 마진율(예: "마진 35%로", "마진율 40프로", "30퍼 마진") 추출용.
-_USER_MARGIN_RES = (
-    re.compile(r"마진\s*율?\s*(\d{1,2})\s*(?:%|퍼센트|퍼|프로)"),
-    re.compile(r"(\d{1,2})\s*(?:%|퍼센트|퍼|프로)\s*마진"),
-)
-
-
-def _extract_user_margin(state: dict) -> float | None:
-    """사용자 메시지에서 목표 마진율을 찾아 비율(0~1)로 반환. 없으면 None.
-    오인식 방지로 5~90%만 인정. (명시적으로 말할 때만 작동하는 fallback 레이어)"""
-    try:
-        for msg in reversed(state.get("messages", []) or []):
-            content = getattr(msg, "content", "") or ""
-            for rx in _USER_MARGIN_RES:
-                m = rx.search(content)
-                if m:
-                    pct = int(m.group(1))
-                    if 5 <= pct <= 90:
-                        return pct / 100.0
-    except Exception:
-        pass
-    return None
-
-
-def _resolve_margin_rate(state: dict) -> tuple[float, str]:
-    """마진율 우선순위: 사용자 입력 > 업종별 > 기본 30%.
-    반환: (rate, source) — source는 디버그/표시용('user'|'industry'|'default')."""
-    user = _extract_user_margin(state)
-    if user is not None:
-        return user, "user"
-    industry = (_extract_industry(state) or "").strip()
-    if industry in _MARGIN_BY_INDUSTRY:
-        return _MARGIN_BY_INDUSTRY[industry], "industry"
-    return _DEFAULT_MARGIN_RATE, "default"
+# (업종별/사용자 원가율 해석 로직 제거 — 카드/판매가는 기준 원가율 BASE_COST_RATE(0.30) 고정 사용)
 
 
 def _parse_servings(servings) -> int:
@@ -655,17 +661,19 @@ def _format_recipe_section(calc: dict) -> str:
     per = calc.get("per_serving_cost")
     if per is None:
         per = int(total / sv) if total else 0
-    mr = calc.get("margin_rate") or _DEFAULT_MARGIN_RATE
-    margin_price = int(per / (1 - mr)) if per else 0  # 1인분 기준, 업종별 마진율
-    mr_pct = int(round(mr * 100))
+    cr = calc.get("cost_ratio") or BASE_COST_RATE
+    sell_price = reference_price(per, cr) or 0   # 1인분 기준, 원가율 역산 + 100원 올림
+    cr_pct = int(round(cr * 100))
+    profit = (sell_price - per) if (sell_price and per) else 0
     lines.append("")
     lines.append(f"**총 원가 ({sv}인분 전체):** {total:,}원" + (
         f"  (시세/사용량 미확인 재료 {calc['unconfirmed_count']}개 제외)"
         if calc["unconfirmed_count"] else ""
     ))
     if total:
-        lines.append(f"**1인분 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else ""))
-        lines.append(f"**권장 판매가 (1인분, 마진 {mr_pct}%):** {margin_price:,}원")
+        lines.append(f"**1인분 예상 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else ""))
+        lines.append(f"**참고 판매가 [원가율 {cr_pct}% 기준]:** {sell_price:,}원")
+        lines.append(f"**재료 기준 이익:** {profit:,}원")
     return "\n".join(lines)
 
 
@@ -737,6 +745,10 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
             cname = c.get("name", "")
             if not cname or cname == tname:
                 continue
+            # 후보도 '진짜 단백질명'이어야 한다. (Neo4j lv1 분류 노이즈로 김치국물·국물류가
+            #  단백질로 새서 돼지고기 대체재로 뜨는 것 차단 — 물/국물류도 제외)
+            if not _is_protein(cname) or _is_non_cost_ingredient(cname):
+                continue
             cinfo = price_map.get(cname) if isinstance(price_map, dict) else None
             cppk = cinfo.get("price_per_kg") if isinstance(cinfo, dict) else None
             if not cppk or cppk >= tppk:
@@ -801,9 +813,8 @@ def cost_calculator_node(state: dict) -> dict:
     if not isinstance(recipes, list):
         recipes = [recipes] if recipes else []
 
-    # 마진율 (판매가 계산용). 우선순위: 사용자 입력("마진 35%로") > 업종별 > 기본 30%.
-    margin_rate, margin_source = _resolve_margin_rate(state)
-    archive("cost_calculator.margin", {"rate": margin_rate, "source": margin_source})
+    # 기준 원가율(서비스 기본값, 사장님 목표값 아님). 참고 판매가/이익 계산 기준.
+    cost_ratio = BASE_COST_RATE
 
     calc_results = []
     for idx, recipe in enumerate(recipes, start=1):
@@ -811,7 +822,23 @@ def cost_calculator_node(state: dict) -> dict:
             continue
         recipe = {**recipe, "_rank": idx}
         c = _calc_recipe_cost(recipe, price_map)
-        c["margin_rate"] = margin_rate          # 마크다운·카드 판매가 계산에 사용
+        c["cost_ratio"] = cost_ratio            # 마크다운·카드 판매가 계산 기준(기준 원가율)
+        # 검증 로그: 레시피명/인분수/전체원가/1인분원가/카드표시원가/참고판매가/재료기준이익/제외재료
+        _per = c.get("per_serving_cost")
+        _ref = reference_price(_per, cost_ratio)
+        _excluded = [it.get("name") for it in (c.get("items") or [])
+                     if it.get("name") and (it.get("cost") is None or it.get("source") == "non_cost")]
+        archive("cost_calculator.card_check", {
+            "menu": c.get("menu"),
+            "servings_num": c.get("servings_num"),
+            "full_cost_total": c.get("total_cost"),       # 전체 재료 원가 합계(= 상세표 합계)
+            "per_serving_cost": _per,                     # 1인분 예상 원가
+            "card_estimated_cost": _per,                  # 카드에 표시되는 원가(1인분)
+            "reference_price": _ref,                      # 참고 판매가
+            "material_profit": material_profit(_ref, _per),
+            "cost_ratio": cost_ratio,
+            "excluded_ingredients": _excluded,            # 원가 계산 제외 재료
+        })
         calc_results.append(c)
 
     archive("cost_calculator.calc", {

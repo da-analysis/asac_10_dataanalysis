@@ -127,25 +127,17 @@ def render():
                 if chart_html:
                     components.html(chart_html, height=420, scrolling=False)
 
-        # 대기 중인 질문이 있으면 채팅 영역 안에서 로딩 → 응답 받기.
-        # 응답을 그 자리에서 바로 그린 뒤 히스토리에만 적재한다. rerun을 하지 않으므로
-        # 화면 전체가 다시 그려지는 깜빡임(아무것도 없다가 챗봇이 다시 뜨는 현상)이 없다.
+        # 대기 중인 질문이 있으면 채팅 영역 안에서 로딩 → 응답 받기
         pending = st.session_state.pop("_pending_answer", None)
         if pending:
             with st.chat_message("assistant"):
                 with st.spinner("챗봇이 답변을 생성 중입니다..."):
                     bot_text, chart_html, bot_card = _fetch_response(pending)
-                turn = len(st.session_state.chat_history)
-                if bot_card and bot_card.get("recipes"):
-                    _render_cards(bot_card, bot_text, turn)
-                else:
-                    st.write(bot_text)
-                if chart_html:
-                    components.html(chart_html, height=420, scrolling=False)
             st.session_state.chat_history.append(
                 {"role": "assistant", "message": bot_text,
                  "chart_html": chart_html, "card": bot_card}
             )
+            st.rerun()
 
         # 채팅 맨 아래 스크롤 기준점(앵커). rerun 직후 여기로 자동 스크롤한다.
         st.markdown('<div id="chat-bottom-anchor"></div>', unsafe_allow_html=True)
@@ -352,12 +344,14 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
 
     summary = ""
     if total:
+        cr = rc.get("cost_ratio_pct") or 32      # 목표 원가율(업종/사용자), 없으면 32
+        mp = rc.get("margin_pct") or (100 - cr)  # 매출총이익률 = 100 - 원가율
         srows = [f'<div class="fc-srow"><span class="k">예상 원가</span><span class="v">{_won(total)}</span></div>']
         if price:
-            srows.append(f'<div class="fc-srow"><span class="k">권장 판매가 (마진 30%)</span>'
+            srows.append(f'<div class="fc-srow"><span class="k">권장 판매가 (원가율 {cr}%)</span>'
                          f'<span class="v">{_won(price)}</span></div>')
-        srows.append('<div class="fc-srow"><span class="k">예상 마진율</span>'
-                     '<span class="v fc-green">30% ▲</span></div>')
+        srows.append(f'<div class="fc-srow"><span class="k">예상 마진율</span>'
+                     f'<span class="v fc-green">{mp}% ▲</span></div>')
         summary = '<div class="fc-summary">' + "".join(srows) + '</div>'
 
     meta = " · ".join(str(x) for x in [rc.get("servings"), rc.get("difficulty"),

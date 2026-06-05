@@ -329,22 +329,33 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
                 "source": ci.get("source"),
             })
 
-        total = calc.get("total_cost")
-        # ★ 카드 원가/판매가는 '1인분 기준' + 업종별 마진율 (전체 N인분치/30% 고정이면 비현실적)
-        per = calc.get("per_serving_cost")
+        from backend.nodes.cost_calculator import (
+            BASE_COST_RATE, reference_price, material_profit,
+        )
+        total = calc.get("total_cost")                      # 전체 레시피 원가(= 상세표 합계)
+        servings_num = calc.get("servings_num") or 1
+        per = calc.get("per_serving_cost")                  # 1인분 예상 원가 = 전체 ÷ 인분수
         if per is None:
-            per = total  # cost_calc 구버전 호환
-        mr = calc.get("margin_rate") or 0.30
+            per = int(total / servings_num) if total else None
+        cr = calc.get("cost_ratio") or BASE_COST_RATE       # 기준 원가율(서비스 기본값 0.30)
+        ref = reference_price(per, cr)                      # 참고 판매가(100원 올림)
+        # 원가 계산 제외 재료(물/국물·시세 미확인)
+        excluded = [it.get("name") for it in (calc.get("items") or [])
+                    if isinstance(it, dict) and it.get("name")
+                    and (it.get("cost") is None or it.get("source") == "non_cost")]
         card_recipes.append({
             "menu": menu,
             "servings": recipe.get("servings"),
+            "servings_num": servings_num,                    # 인분수(라벨/검증용)
             "difficulty": recipe.get("difficulty"),
             "cooking_time": recipe.get("cooking_time"),
             "has_cost": has_cost,
-            "total_cost": per if per else None,                       # 1인분 원가
-            "suggested_price": int(per / (1 - mr)) if per else None,  # 1인분 기준 권장 판매가
-            "margin_pct": int(round(mr * 100)),                       # 카드 마진율 표시용
-            "full_cost": total if total else None,                    # (참고) 전체 N인분
+            "total_cost": per if per else None,              # 카드 표시 원가(1인분 예상 원가)
+            "full_cost": total if total else None,           # 전체 N인분 원가(= 상세표 합계)
+            "suggested_price": ref,                          # 참고 판매가(원가율 기준, 100원 올림)
+            "cost_ratio_pct": int(round(cr * 100)),          # 기준 원가율 %(30)
+            "material_profit": material_profit(ref, per),    # 재료 기준 이익
+            "excluded_ingredients": excluded,                # 원가 계산 제외 재료
             "ingredients": ings_out,
             "steps": _clean_steps_for_card(recipe.get("steps")),
             "substitute": calc.get("substitute"),
