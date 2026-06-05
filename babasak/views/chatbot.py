@@ -342,6 +342,14 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
     pill = ('<span class="fc-pill">오늘의 추천</span>' if single
             else f'<span class="fc-pill rank">{idx}위</span>')
 
+    # 조합(짬뽕) 메뉴: base 레시피 기반으로 만든 제안임을 표시
+    combo_note = ""
+    if rc.get("is_combo"):
+        base = _esc(rc.get("base_menu") or "")
+        base_txt = f" · {base} 기반" if base else ""
+        combo_note = (f'<div class="fc-muted" style="margin-top:4px">'
+                      f'✨ 조합 메뉴 제안{base_txt}</div>')
+
     summary = ""
     if total:
         cr = rc.get("cost_ratio_pct") or 30      # 백엔드 기준 원가율, 없으면 서비스 기본값
@@ -384,7 +392,7 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
 
     return (f'<div class="fc-card"><div class="fc-head">'
             f'<div>{pill}<span class="fc-menu">{menu}</span></div></div>'
-            f'{summary}{details}</div>')
+            f'{combo_note}{summary}{details}</div>')
 
 
 def _new_menu_html(m: dict, i: int) -> str:

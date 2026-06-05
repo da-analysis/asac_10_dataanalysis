@@ -38,6 +38,19 @@ _ALIASES = {
     '돈까쓰': '돈까스', '떡볶히': '떡볶이',
 }
 
+# 라우터(routers/chatbot.py)가 사용자 메시지 앞에 붙이는 프로필 프리픽스.
+#  예: "[업종: 한식, 지역: 서울 강남구]\n제육볶음 레시피 알려줘"
+#  이 프리픽스가 modifier(짬뽕 수식어) 감지에 섞이면 일반 메뉴('제육볶음')도
+#  조합 메뉴로 오인되어 카드가 사라진다 → 엔티티/modifier 계산 전에 제거한다.
+_PROFILE_PREFIX_RE = re.compile(r'\[\s*업종\s*:[^\]]*\]')
+
+
+def _strip_profile_prefix(text: str) -> str:
+    """사용자 질문에서 '[업종: …, 지역: …]' 프로필 프리픽스를 제거한다."""
+    if not text:
+        return text
+    return _PROFILE_PREFIX_RE.sub('', text).strip()
+
 # 양념/조미료/잡재료
 _SEASONING_TOKENS = {
     '소금', '후추', '설탕', '간장', '식용유', '참기름', '들기름', '올리브유',
@@ -215,6 +228,7 @@ def recipe_search_node(state: dict) -> dict:
     #   새서 1인분짜리 랜덤 레시피 5개가 나오던 버그. (not conditions 가드 제거)
     if not menu and not ingredients and not is_popular:
         query = state["messages"][-1].content if state.get("messages") else ""
+        query = _strip_profile_prefix(query)
 
         # 1차: LLM으로 음식명 추출
         llm_keyword = _llm_extract_menu_keyword(query)
@@ -396,6 +410,9 @@ def recipe_search_node(state: dict) -> dict:
             if messages:
                 last_msg = messages[-1]
                 user_query = getattr(last_msg, "content", "") or ""
+
+            # 프로필 프리픽스([업종:…,지역:…])는 modifier로 오인되므로 먼저 제거.
+            user_query = _strip_profile_prefix(user_query)
 
             clean_query = re.sub(
                 r'(레시피|알려줘|만드는\s*법|조리법|추천|어떻게|만들기|만들고\s*싶어|알고\s*싶어|보여줘|'
