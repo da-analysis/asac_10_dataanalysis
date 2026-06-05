@@ -125,32 +125,47 @@ def _render_feature_shortcuts() -> None:
 
 
 # 추천 메뉴 TOP 3 (하드코딩). 예상 원가는 표기하지 않는다.
+# img: assets/ 하위 요리 사진 파일명. 없으면 썸네일 자리를 비우고 이모지/메뉴명만 표시.
 RECOMMENDED_MENUS = [
-    {"rank": 1, "name": "제육볶음"},
-    {"rank": 2, "name": "김치찌개"},
-    {"rank": 3, "name": "우거지 감자탕"},
+    {"rank": 1, "name": "제육볶음 🐽", "img": "menu_1.png"},
+    {"rank": 2, "name": "김치찌개 🍲", "img": "menu_2.png"},
+    {"rank": 3, "name": "우거지 감자탕 🍖", "img": "menu_3.png"},
 ]
 
 
-# '전반적 물가 지표: 연-반기별 평균가격 추이' 위젯 하나만 임베드.
-# fullscreenWidget=<page>~<widget> 으로 특정 차트만 전체화면 표시한다.
-# (대시보드 전체가 아니라 위젯 단위. 위젯 ID는 published 링크의 fullscreenWidget 값)
-_DASHBOARD_EMBED_URL = (
-    "https://dbc-b2983598-29d8.cloud.databricks.com/embed/dashboardsv3/"
-    "01f1477ee2361f28a2da2e770290bfd7"
-    "?o=7474645180304154"
-    "&fullscreenWidget=c4ad9d27~53f16a93"
-)
+def _menu_thumb_html(img: str) -> str:
+    """메뉴 카드 좌측 썸네일. 파일이 있으면 정사각 이미지, 없으면 빈 문자열."""
+    if not img:
+        return ""
+    p = _ASSETS_DIR / img
+    if not p.exists():
+        return ""
+    b64 = base64.b64encode(p.read_bytes()).decode()
+    return (
+        f'<img class="menu-thumb" src="data:image/png;base64,{b64}" alt="" '
+        f'style="flex:0 0 auto;width:44px;height:44px;object-fit:cover;'
+        f'border-radius:10px;" />'
+    )
 
 
 def _render_price_trend_chart() -> None:
-    """전반적 물가 지표(연-반기별 평균가격 추이) — Databricks 대시보드 임베드."""
-    import streamlit.components.v1 as components
-
-    st.markdown('<div class="section-title">전반적 물가 지표</div>', unsafe_allow_html=True)
-    st.caption("연-반기별 평균가격 추이")
-    components.iframe(_DASHBOARD_EMBED_URL, height=300, scrolling=True)
-    st.caption("정확한 가격과 추이를 확인하려면 메뉴에서 '가격 추이 알아보기'를 눌러주세요!")
+    """가격 추이 이미지 — 가운데 정렬로 표시."""
+    p = _ASSETS_DIR / "price_trend.png"
+    if p.exists():
+        b64 = base64.b64encode(p.read_bytes()).decode()
+        st.markdown(
+            f'<div style="text-align:center;">'
+            f'<img src="data:image/png;base64,{b64}" alt="가격 추이" '
+            f'style="width:100%;max-height:240px;height:auto;object-fit:contain;border-radius:8px;" />'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown(
+        '<div style="text-align:center;font-size:13px;color:#94a3b8;margin-top:8px;">'
+        "식재료 가격의 추이를 알고 싶으시면 사이드 바에서 '가격 추이 알아보기'를 눌러주세요!"
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_recommended_menus() -> None:
@@ -161,6 +176,7 @@ def _render_recommended_menus() -> None:
             f"""
         <div class="menu-card">
             <span class="menu-rank">{m['rank']}</span>
+            {_menu_thumb_html(m.get('img', ''))}
             <span class="menu-name">{m['name']}</span>
         </div>
         """,

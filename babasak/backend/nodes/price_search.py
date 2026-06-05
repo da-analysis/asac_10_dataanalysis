@@ -9,9 +9,12 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import StatementState
 
 from backend.debug_log import archive
-from backend.catalog import resolve_many, ResolveResult, get_recipe_prices_for_items, _is_weight_unit
+from backend.catalog import resolve_many, ResolveResult, get_recipe_prices_for_items
 
 from backend.nodes.chart_utils import generate_chart_html
+# 개수 단위(개/포기/마리 등) → kg 환산용 1개당 그램 추정표. cost_calculator와 동일 기준을
+#써야 원가 계산이 일관되므로 그쪽 표를 그대로 재사용한다(단일 출처).
+from backend.nodes.cost_calculator import _PER_PIECE_GRAMS
 
 _TREND_KEYWORDS = re.compile(r"(추이|추세|그래프|트렌드|변동|변화|시세|동향|trend|graph|일별|주별|월별)")
 _PERIOD_MAP = {
@@ -298,7 +301,6 @@ def _direct_sql_assemble(
                 f"{input_name}: 약 ₩{price_per_kg:,}/kg "
                 f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
             )
-            found_inputs.append(input_name)
         elif g_match:
             g_val = float(g_match.group(1))
             price_per_kg = int(avg_price * 1000 / g_val) if g_val > 0 else avg_price
@@ -312,14 +314,34 @@ def _direct_sql_assemble(
                 f"{input_name}: 약 ₩{price_per_kg:,}/kg "
                 f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
             )
-            found_inputs.append(input_name)
         else:
-            # 개수단위(개/장/속 등)는 kg 환산 불가 → found로 찍지 않는다.
-            #   unavailable로 남겨 recipe B2B/네이버 폴백이 잡게 한다(가짜 found 제거).
-            lines.append(
-                f"{input_name}: ₩{avg_price:,}/{db_unit} "
-                f"(KAMIS {db_name}/{db_unit} — kg환산 불가, 폴백 대상)"
-            )
+            # 무게가 아닌 단위(개/포기/마리 등). 1개당 그램 추정치가 있으면 kg당 단가로
+            # 환산해 structured_prices에 넣는다(예: 무/1개 ₩2,020 → 무 1개=1000g 가정 →
+            # ₩2,020/kg). 이게 없으면 무우 같은 '개' 단위 재료가 text에만 남아
+            # cost_calculator의 /kg·/100g 정규식에 안 잡혀 원가에서 누락됐다.
+            piece_match = re.match(r"^(\d+(?:\.\d+)?)\s*(?:개|포기|마리|통|단|모|장|알|봉|손|쪽)$", unit_lower)
+            grams_per_piece = _PER_PIECE_GRAMS.get(db_name) or _PER_PIECE_GRAMS.get(input_name)
+            if piece_match and grams_per_piece:
+                qty_val = float(piece_match.group(1))
+                total_grams = qty_val * grams_per_piece
+                price_per_kg = int(avg_price * 1000 / total_grams) if total_grams > 0 else avg_price
+                prices[input_name] = {
+                    "price_per_kg": price_per_kg,
+                    "confidence": "high",
+                    "unit_hint": f"{db_unit} → kg 환산 (1{db_unit.rstrip('0123456789')}≈{grams_per_piece:g}g, KAMIS direct_sql)",
+                    "note": "KAMIS direct_sql 평균 도매가",
+                }
+                lines.append(
+                    f"{input_name}: 약 ₩{price_per_kg:,}/kg "
+                    f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
+                )
+            else:
+                # 환산 계수 미상 — 종전대로 text에만 (cost_calculator가 사용량 기준 처리)
+                lines.append(
+                    f"{input_name}: 약 ₩{avg_price:,}/{db_unit} "
+                    f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
+                )
+        found_inputs.append(input_name)
 
     return {
         "text": "\n".join(lines),
@@ -630,13 +652,7 @@ def price_search_node(state: dict) -> dict:
     skip_unavailable: list[str] = []
     for r in resolved:
         if r.status == "matched" and r.db_name and r.db_unit:
-            if _is_weight_unit(r.db_unit):
-                catalog_targets.append((r.input_name, r.db_name, r.db_unit))
-            else:
-                # KAMIS에 개수단위(개/장/속)만 있는 재료(계란·김 등): 개수 도매가는 팩
-                # 크기에 따라 단가가 들쭉날쭉이라 KAMIS 확정 대신 recipe B2B/네이버
-                # 폴백으로 보낸다(가짜 found 방지 → 최종 네이버까지 흘러가게).
-                passthrough.append(r.input_name)
+            catalog_targets.append((r.input_name, r.db_name, r.db_unit))
         elif r.status == "recipe_matched":
             recipe_direct.append(r.input_name)
         elif r.status == "unmapped":
@@ -1005,13 +1021,6 @@ def price_search_node(state: dict) -> dict:
             if item not in unavailable:
                 unavailable.append(item)
 
-        # recipe_matched였으나 B2B 환산 실패(개/봉 단위·결측)로 structured 가격을 못 만든
-        # 재료도 unavailable에 넣어 recipe_fallback/네이버까지 흘려보낸다(가짜 found 방지).
-        structured_now = price_data.get("structured_prices", {}) or {}
-        for ing in recipe_direct:
-            if not structured_now.get(ing, {}).get("price_per_kg") and ing not in unavailable:
-                unavailable.append(ing)
-
         # ─── 카탈로그 재질의 ──────────────────────────────────
         catalog_input_set = {t[0] for t in catalog_targets}
         recoverable = [ing for ing in unavailable if ing in catalog_input_set]
@@ -1172,28 +1181,27 @@ def price_search_node(state: dict) -> dict:
         if recipe_fallback_candidates:
             recipe_fallback_result = get_recipe_prices_for_items(recipe_fallback_candidates)
             if recipe_fallback_result:
-                # price_per_kg를 실제로 만든 항목만 '회복'으로 인정한다.
-                #   환산 불가(개/봉 단위 등 ppk=None)는 unavailable에 남겨 네이버가 잡게 한다.
-                recipe_fallback_recovered = [
-                    k for k, v in recipe_fallback_result.items() if v.get("price_per_kg")
-                ]
+                recipe_fallback_recovered = list(recipe_fallback_result.keys())
                 unavailable = [ing for ing in unavailable if ing not in recipe_fallback_recovered]
-                # structured_prices에 추가 (ppk 있는 것만)
+                # structured_prices에 추가
                 structured_prices = price_data.get("structured_prices", {})
                 recipe_fb_lines = []
                 for ing_name, info in recipe_fallback_result.items():
                     ppk = info.get("price_per_kg")
-                    if not ppk:
-                        continue  # 환산 불가분은 structured에 넣지 않음(네이버 폴백 대상으로 유지)
                     structured_prices[ing_name] = {
                         "price_per_kg": ppk,
                         "confidence": "medium",
                         "unit_hint": f"{info.get('unit', '')} (B2B 유통가 폴백, {info.get('product_name', '')})",
                         "note": "Genie/direct_sql 실패 후 recipe B2B 폴백",
                     }
-                    recipe_fb_lines.append(
-                        f"{ing_name}: 약 ₩{ppk:,}/kg (B2B 유통가 폴백, {info.get('product_name', '')} {info.get('unit', '')})"
-                    )
+                    if ppk:
+                        recipe_fb_lines.append(
+                            f"{ing_name}: 약 ₩{ppk:,}/kg (B2B 유통가 폴백, {info.get('product_name', '')} {info.get('unit', '')})"
+                        )
+                    else:
+                        recipe_fb_lines.append(
+                            f"{ing_name}: ₩{info.get('price', 0):,}/{info.get('unit', '')} (B2B 유통가 폴백)"
+                        )
                 if structured_prices:
                     price_data["structured_prices"] = structured_prices
                 if recipe_fb_lines:

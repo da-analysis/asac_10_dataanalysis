@@ -512,6 +512,10 @@ _NOISE_EXACT = frozenset({
     "물가득", "요리수미림", "소금간맞추기", "대파초록부분", "설탕등뼈물",
     "대파국물", "돼지등뼈물", "동전육수", "소주병", "월계수잎정도",
     "쌀뜨물",  # 조리용 물 — KAMIS/네이버에 시세 없어 헛돌고, 원가 기여도 0에 가까움
+    # 2026-06-05 trace 측정에서 passthrough(Genie 61~71초)로 새던 항목. DB 조회로
+    # silver.ingredient.ingredient에 둘 다 없음 확인 → alias 매핑 불가, 차단이 정답.
+    "무싹",   # 무순 파편 — KAMIS/recipe에 없어 Genie 헛돌이
+    "배합초",  # 초밥용 조미식초(가공품) — 시세 없고 원가 기여도 미미
 })
 
 
@@ -795,18 +799,14 @@ def suggest_menu_protein_alternatives(menu, target, limit=8):
             LIMIT 60
             RETURN name, lv1, freq
         """, menu=menu, target=target).data()
-    # 안전망: 한 레시피에만 등장하는(freq==1) 단백질은 노이즈/괴식 가능성이 큼.
-    #   강한 후보(freq>=2)가 있으면 그걸 쓰고, 없을 때(희귀 메뉴)만 약한 후보로 폴백.
-    #   (예: '스팸제육'이 딱 1개 있어도 스팸이 후보 상위로 새지 않게)
-    strong, weak = [], []
+    out = []
     for r in rows:
         lv1 = r.get("lv1") or ""
-        if not any(k in lv1 for k in _PROTEIN_LV1_KEYWORDS):
-            continue
-        item = {"name": r["name"], "lv1": lv1, "freq": r["freq"]}
-        (strong if r["freq"] >= 2 else weak).append(item)
-    out = strong if strong else weak
-    return out[:limit]
+        if any(k in lv1 for k in _PROTEIN_LV1_KEYWORDS):
+            out.append({"name": r["name"], "lv1": lv1, "freq": r["freq"]})
+        if len(out) >= limit:
+            break
+    return out
 
 
 # 5. 유사 레시피 추천
