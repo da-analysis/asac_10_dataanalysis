@@ -236,24 +236,70 @@ st.markdown(
 
 .hero-text {
     padding-right: 8px;
+    text-align: left;   /* 왼쪽 정렬 */
+}
+
+/* hero 텍스트 칸만 세로 중앙 정렬에서 빼서 위쪽(상단)에 붙인다.
+   컬럼 컨테이너는 align-items:center 라 차트·메뉴는 중앙 유지하되,
+   .hero-text를 가진 컬럼만 align-self:flex-start 로 위로 올린다. */
+[data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker)
+    [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:has(.hero-text) {
+    align-self: flex-start;
 }
 
 .hero-text .hero-title {
-    font-size: 26px;
+    font-size: 18px;
     margin-bottom: 14px;
 }
 
 .hero-text .hero-desc {
-    font-size: 14px;
+    font-size: 12px;
     line-height: 1.65;
 }
 
 /* 박스 안 차트/메뉴 영역의 섹션 제목은 조금 작게 */
 [data-testid="stVerticalBlockBorderWrapper"]:has(.hero-marker)
     .section-title {
-    font-size: 18px;
+    font-size: 13px;
     margin-bottom: 10px;
+    white-space: nowrap;   /* '바바삭 추천 메뉴 TOP 3'가 세로로 깨지지 않게 */
 }
+
+/* AI 브리핑: 차트 아래에 두는 시세 요약 박스 */
+.ai-briefing {
+    margin-top: 12px;
+    background: #ffffff;
+    border: 1px solid #fde4d3;
+    border-radius: 12px;
+    padding: 12px 14px;
+    box-shadow: 0 4px 12px rgba(15,23,42,.04);
+}
+.ai-briefing-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: #ea580c;
+    margin-bottom: 6px;
+}
+.ai-briefing-body {
+    font-size: 13px;
+    line-height: 1.6;
+    color: #334155;
+}
+.ai-briefing-body strong {
+    color: #0f172a;
+    font-weight: 800;
+}
+/* 브리핑 안 상승(빨강)/하락(파랑) 퍼센트 강조 */
+.ai-briefing-body .brief-up {
+    color: #dc2626;
+    font-weight: 800;
+}
+.ai-briefing-body .brief-down {
+    color: #2563eb;
+    font-weight: 800;
+}
+
 
 /* 좁은 좌측 컬럼용 hero 변형: 세로 배치 + 폰트/패딩 축소, 우측 패널과 높이 맞춤 */
 .hero-compact {
@@ -375,9 +421,10 @@ st.markdown(
 }
 
 .menu-name {
-    font-size: 17px;
+    font-size: 13px;
     font-weight: 700;
     color: #0f172a;
+    white-space: nowrap;   /* '우거지 감자탕' 등이 두 줄로 깨지지 않게 한 줄 유지 */
 }
 
 .feature-icon {

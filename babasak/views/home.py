@@ -149,21 +149,82 @@ def _menu_thumb_html(img: str) -> str:
 
 
 def _render_price_trend_chart() -> None:
-    """가격 추이 이미지 — 가운데 정렬로 표시."""
+    """가격 추이 이미지 — 위쪽에 작게 표시(AI 브리핑을 아래에 두기 위해 높이 축소)."""
     p = _ASSETS_DIR / "price_trend.png"
     if p.exists():
         b64 = base64.b64encode(p.read_bytes()).decode()
         st.markdown(
             f'<div style="text-align:center;">'
             f'<img src="data:image/png;base64,{b64}" alt="가격 추이" '
-            f'style="width:100%;max-height:240px;height:auto;object-fit:contain;border-radius:8px;" />'
+            # 가로는 컬럼 폭(=AI 브리핑 칸)에 꽉 채우되 세로는 기존 150px 유지.
+            # object-fit:fill 이라 비율을 무시하고 폭은 100%·높이는 150px에 맞춰 채운다.
+            f'style="width:100%;height:150px;object-fit:fill;border-radius:8px;" />'
             f'</div>',
             unsafe_allow_html=True,
         )
+
+
+def _build_ai_briefing(ingredients: list[dict]) -> str:
+    """시세 데이터를 받아 'AI 브리핑' HTML 문장을 규칙 기반으로 조립한다(LLM 미사용).
+
+    상승/하락 폭이 큰 품목을 골라 사장님께 보고하듯 짧게 풀어 쓴다. 품목명은 <strong>,
+    상승%는 빨강·하락%는 파랑으로 강조한다. 데이터가 없으면 안내 문구를 반환한다.
+    """
+    if not ingredients:
+        return "오늘은 시세 데이터를 불러오지 못했어요. 잠시 후 다시 확인해 주세요."
+
+    def _name(it):  # '풋고추 (4kg)' → '풋고추' (괄호 단위 제거)
+        return str(it.get("name", "")).split("(")[0].strip()
+
+    def _b(name):   # 품목명 굵게
+        return f"<strong>{name}</strong>"
+
+    def _up(pct):   # 상승% 빨강
+        return f'<span class="brief-up">{pct:.1f}%</span>'
+
+    def _down(pct):  # 하락% 파랑
+        return f'<span class="brief-down">{pct:.1f}%</span>'
+
+    ups = sorted(
+        [i for i in ingredients if (i.get("change") or 0) > 0],
+        key=lambda i: i.get("change") or 0, reverse=True,
+    )
+    downs = sorted(
+        [i for i in ingredients if (i.get("change") or 0) < 0],
+        key=lambda i: i.get("change") or 0,
+    )
+
+    parts = []
+    if ups:
+        top = ups[0]
+        head = f"{_b(_name(top))}가 {_up(abs(top.get('change') or 0))} 올라 상승세를 이끌고 있어요."
+        if len(ups) >= 2:
+            others = ", ".join(_name(u) for u in ups[1:3])
+            head += f" {others} 등 총 <strong>{len(ups)}개 품목</strong>이 오르는 중이라 매운·채소 메뉴 단가에 부담이 있을 수 있어요."
+        parts.append(head)
+    if downs:
+        top = downs[0]
+        tail = f"반면 {_b(_name(top))}는 {_down(abs(top.get('change') or 0))} 내렸어요."
+        if len(downs) >= 2:
+            others = ", ".join(_name(d) for d in downs[1:3])
+            tail += f" {others} 등 {len(downs)}개 품목이 하락세라, 이 재료를 쓰는 메뉴를 밀면 원가를 아낄 수 있어요."
+        parts.append(tail)
+
+    if not parts:
+        return "오늘 식재료 시세는 큰 변동 없이 안정적이에요."
+    return " ".join(parts)
+
+
+def _render_ai_briefing(ingredients: list[dict]) -> None:
+    """차트 아래 'AI 브리핑' 박스 — 최근 시세를 말로 풀어 요약."""
+    text = _build_ai_briefing(ingredients)
     st.markdown(
-        '<div style="text-align:center;font-size:13px;color:#94a3b8;margin-top:8px;">'
-        "식재료 가격의 추이를 알고 싶으시면 사이드 바에서 '가격 추이 알아보기'를 눌러주세요!"
-        '</div>',
+        f"""
+    <div class="ai-briefing">
+        <div class="ai-briefing-title">🤖 오늘의 브리핑</div>
+        <div class="ai-briefing-body">{text}</div>
+    </div>
+    """,
         unsafe_allow_html=True,
     )
 
@@ -254,6 +315,9 @@ def render():
             )
         with c_chart:
             _render_price_trend_chart()
+            # 차트 아래: 최근 시세를 말로 풀어주는 AI 브리핑(규칙 기반, LLM 미사용)
+            _briefing_ingredients, _ = _load_ingredients()
+            _render_ai_briefing(_briefing_ingredients)
         with c_menu:
             _render_recommended_menus()
 
