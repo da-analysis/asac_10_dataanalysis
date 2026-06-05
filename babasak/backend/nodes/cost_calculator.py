@@ -543,6 +543,7 @@ def _pricing_policy_from_state(state: dict) -> dict:
         source = "default_cost_ratio"
         label = f"기본 원가율 {_pct_text(cost_ratio)}"
 
+    servings_num = _parse_servings(recipe.get("servings"))
     return {
         "cost_ratio": cost_ratio,
         "margin_rate": margin_rate,
