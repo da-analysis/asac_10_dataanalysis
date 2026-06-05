@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import backend.databricks_db as databricks_db
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from backend.routers import chatbot as chatbot_router
 
@@ -45,6 +45,16 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(chatbot_router.router, prefix="/api/chatbot")
 
 DEBUG_LOG_DIR = Path(os.getenv("DEBUG_LOG_DIR", "./debug_archive"))
+# 디버그 로그 열람 API는 운영에서 기본 비활성화한다.
+#   - DEBUG_MODE=true 일 때만 라우트를 등록(아니면 엔드포인트 자체가 없음 → 404)
+#   - DEBUG_TOKEN 이 설정돼 있으면 ?token= 까지 일치해야 통과
+_DEBUG_MODE = os.getenv("DEBUG_MODE", "").lower() in ("1", "true", "yes")
+_DEBUG_TOKEN = os.getenv("DEBUG_TOKEN", "")
+
+
+def _check_debug_token(token: str) -> None:
+    if _DEBUG_TOKEN and token != _DEBUG_TOKEN:
+        raise HTTPException(status_code=404, detail="Not Found")  # 존재 자체를 숨김
 
 
 @app.get("/health")
@@ -63,29 +73,30 @@ def list_ingredients():
         return {"items": [], "source": "none", "error": str(exc)}
 
 
-@app.get("/debug/logs/list")
-def debug_logs_list():
-    """debug_archive 디렉터리에 있는 jsonl 파일 목록."""
-    if not DEBUG_LOG_DIR.exists():
-        return {"files": [], "dir": str(DEBUG_LOG_DIR.absolute()), "exists": False}
-    files = sorted(p.name for p in DEBUG_LOG_DIR.glob("*.jsonl"))
-    return {"files": files, "dir": str(DEBUG_LOG_DIR.absolute()), "exists": True}
+# 디버그 로그 열람 API: 운영 기본 비활성화. DEBUG_MODE=true 일 때만 등록 + 토큰 검증.
+if _DEBUG_MODE:
+    @app.get("/debug/logs/list")
+    def debug_logs_list(token: str = ""):
+        """debug_archive 디렉터리에 있는 jsonl 파일 목록. (DEBUG_MODE 전용)"""
+        _check_debug_token(token)
+        if not DEBUG_LOG_DIR.exists():
+            return {"files": [], "dir": str(DEBUG_LOG_DIR.absolute()), "exists": False}
+        files = sorted(p.name for p in DEBUG_LOG_DIR.glob("*.jsonl"))
+        return {"files": files, "dir": str(DEBUG_LOG_DIR.absolute()), "exists": True}
 
+    @app.get("/debug/logs", response_class=PlainTextResponse)
+    def debug_logs(date: str | None = None, tail: int = 0, token: str = ""):
+        """debug_archive jsonl 파일 내용 반환. (DEBUG_MODE 전용)
 
-@app.get("/debug/logs", response_class=PlainTextResponse)
-def debug_logs(date: str | None = None, tail: int = 0):
-    """debug_archive jsonl 파일 내용 반환.
-
-    Query params:
-      date: YYYYMMDD (기본: 오늘)
-      tail: 마지막 N 라인만 반환 (0이면 전체)
-    """
-    target_date = date or time.strftime("%Y%m%d")
-    log_path = DEBUG_LOG_DIR / f"{target_date}.jsonl"
-    if not log_path.exists():
-        return f"# log file not found: {log_path.absolute()}\n"
-    text = log_path.read_text(encoding="utf-8")
-    if tail > 0:
-        lines = text.splitlines()
-        text = "\n".join(lines[-tail:])
-    return text
+        Query params: date(YYYYMMDD, 기본 오늘) · tail(마지막 N줄, 0=전체) · token
+        """
+        _check_debug_token(token)
+        target_date = date or time.strftime("%Y%m%d")
+        log_path = DEBUG_LOG_DIR / f"{target_date}.jsonl"
+        if not log_path.exists():
+            return f"# log file not found: {log_path.absolute()}\n"
+        text = log_path.read_text(encoding="utf-8")
+        if tail > 0:
+            lines = text.splitlines()
+            text = "\n".join(lines[-tail:])
+        return text

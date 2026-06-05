@@ -1,5 +1,7 @@
 import json
 import asyncio
+import logging
+import uuid
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -8,6 +10,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from backend.graph import get_graph
 
 router = APIRouter(tags=["chatbot"])
+logger = logging.getLogger("babasak.chatbot")
 
 
 class ChatRequest(BaseModel):
@@ -56,7 +59,12 @@ async def chat(req: ChatRequest):
         card = result.get("card_data") or None
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        request_id = uuid.uuid4().hex[:8]
+        logger.exception("chat 실패 [%s]", request_id)  # 전체 스택은 서버 로그에만 남김
+        raise HTTPException(
+            status_code=500,
+            detail=f"처리 중 오류가 발생했습니다. 관리자에게 요청ID를 전달해주세요. (요청ID: {request_id})",
+        )
 
     resp_body = {"response": response, "card": card}
     if chart_html:
@@ -114,7 +122,10 @@ async def chat_stream(req: ChatRequest):
                             chart_html = price_info["chart_html"]
 
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+            request_id = uuid.uuid4().hex[:8]
+            logger.exception("chat_stream 실패 [%s]", request_id)  # 전체 스택은 서버 로그에만
+            msg = f"오류가 발생했습니다. 잠시 후 다시 시도해주세요. (요청ID: {request_id})"
+            yield f"data: {json.dumps({'type': 'error', 'content': msg}, ensure_ascii=False)}\n\n"
 
         # 완료 메시지 (차트 포함)
         done_payload = {"type": "done", "content": final_response}
