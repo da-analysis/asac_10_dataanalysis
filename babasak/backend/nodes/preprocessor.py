@@ -1,6 +1,7 @@
+import re
+
 import mlflow.genai
 from langchain_core.messages import HumanMessage, SystemMessage
-from databricks_langchain import ChatDatabricks
 
 from backend.debug_log import archive
 
@@ -43,6 +44,64 @@ _INTENT_KEYWORDS = {
 _INVALID_KEYWORDS = ['날씨', '주식', '비트코인', '뉴스', '영화', '여행', '수학', '코드', '번역', '노래', '게임', '택시']
 
 
+_RATE_VALUE_RE = r"(?P<value>\d+(?:\.\d+)?)\s*(?:%|퍼센트|프로)"
+_MARGIN_RATE_PATTERNS = [
+    re.compile(r"(?:마진율|마진|수익률|이익률|매출총이익률)\s*(?:은|는|을|를|로|:)?\s*" + _RATE_VALUE_RE, re.IGNORECASE),
+    re.compile(_RATE_VALUE_RE + r"\s*(?:마진율|마진|수익률|이익률|매출총이익률)", re.IGNORECASE),
+]
+_COST_RATIO_PATTERNS = [
+    re.compile(r"(?:원가율|식재료비율|재료비율|푸드코스트|food\s*cost|cost\s*ratio)\s*(?:은|는|을|를|로|:)?\s*" + _RATE_VALUE_RE, re.IGNORECASE),
+    re.compile(_RATE_VALUE_RE + r"\s*(?:원가율|식재료비율|재료비율|푸드코스트|food\s*cost|cost\s*ratio)", re.IGNORECASE),
+]
+
+
+def _rate_to_decimal(raw_value) -> float | None:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if value > 1:
+        value = value / 100
+    if 0 < value < 0.95:
+        return round(value, 4)
+    return None
+
+
+def _detect_pricing_policy(query: str) -> dict:
+    """Extract user pricing intent from text."""
+    matches = []
+    for source, patterns in (("user_margin", _MARGIN_RATE_PATTERNS), ("user_cost_ratio", _COST_RATIO_PATTERNS)):
+        for pattern in patterns:
+            for match in pattern.finditer(query or ""):
+                rate = _rate_to_decimal(match.group("value"))
+                if rate is None:
+                    continue
+                matches.append((match.start(), source, rate, match.group(0).strip()))
+
+    if not matches:
+        return {
+            "target_margin_rate": None,
+            "target_cost_ratio": None,
+            "pricing_source": None,
+            "pricing_text": None,
+        }
+
+    _, source, rate, pricing_text = sorted(matches, key=lambda item: item[0])[-1]
+    if source == "user_margin":
+        margin_rate = rate
+        cost_ratio = round(1 - rate, 4)
+    else:
+        cost_ratio = rate
+        margin_rate = round(1 - rate, 4)
+
+    return {
+        "target_margin_rate": margin_rate,
+        "target_cost_ratio": cost_ratio,
+        "pricing_source": source,
+        "pricing_text": pricing_text,
+    }
+
+
 def _keyword_intent(query: str) -> str | None:
     """키워드 매칭으로 intent 1차 감지. 명확하면 LLM 스킵 가능."""
     priority = ['analytics', 'alternative', 'cost_analysis', 'price_inquiry', 'recipe_only', 'recommendation']
@@ -81,6 +140,8 @@ _llm = None
 def _get_llm():
     global _llm
     if _llm is None:
+        from databricks_langchain import ChatDatabricks
+
         _llm = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0, max_tokens=200)
     return _llm
 
@@ -400,6 +461,7 @@ def _build_result(*, is_valid, menu, ingredients, intent, query,
     # 신규: 유사 추천 / 1:1 대체재 의도 감지 (recipe_search.py 시나리오 8/9용)
     is_similar = _detect_is_similar(query)
     substitute_for = _detect_substitute_for(query, ingredients)
+    pricing_policy = _detect_pricing_policy(query)
 
     entities = {
         'menu': menu,
@@ -413,6 +475,10 @@ def _build_result(*, is_valid, menu, ingredients, intent, query,
         'is_similar': is_similar,
         'reference_menu': menu if is_similar else None,
         'substitute_for': substitute_for,
+        'target_margin_rate': pricing_policy["target_margin_rate"],
+        'target_cost_ratio': pricing_policy["target_cost_ratio"],
+        'pricing_source': pricing_policy["pricing_source"],
+        'pricing_text': pricing_policy["pricing_text"],
     }
 
     # rewritten_query: LLM 자연어 재해석 우선, 없으면 기계적 조합
@@ -456,7 +522,9 @@ def preprocessor_node(state: dict) -> dict:
                          'exclude': None, 'is_alternative': False,
                          'conditions': None, 'is_popular': False,
                          'is_similar': False, 'reference_menu': None,
-                         'substitute_for': None},
+                         'substitute_for': None,
+                         'target_margin_rate': None, 'target_cost_ratio': None,
+                         'pricing_source': None, 'pricing_text': None},
             'rewritten_query': '식당 운영/메뉴/원가 관련 질문이 아닙니다',
         }
 
@@ -472,7 +540,9 @@ def preprocessor_node(state: dict) -> dict:
                          'exclude': None, 'is_alternative': False,
                          'conditions': None, 'is_popular': False,
                          'is_similar': False, 'reference_menu': None,
-                         'substitute_for': None},
+                         'substitute_for': None,
+                         'target_margin_rate': None, 'target_cost_ratio': None,
+                         'pricing_source': None, 'pricing_text': None},
             'rewritten_query': '식당 운영/메뉴/원가 관련 질문이 아닙니다',
         }
 
@@ -531,6 +601,7 @@ def preprocessor_node(state: dict) -> dict:
         "phase": "1_llm",
         "menu": menu, "ingredients": ingredients, "intent": intent,
         "exclude": exclude, "rewritten": llm_result.get('rewritten'),
+        "pricing": _detect_pricing_policy(query),
         "interpretations": llm_result.get('interpretations', []),
     })
 

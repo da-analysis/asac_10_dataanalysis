@@ -3,7 +3,6 @@ import os
 import mlflow
 import mlflow.genai
 from mlflow.entities import SpanType
-from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from backend.search_backends import naver_search_structured
@@ -14,6 +13,8 @@ _llm = None
 def _get_llm():
     global _llm
     if _llm is None:
+        from databricks_langchain import ChatDatabricks
+
         _llm = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.3)
     return _llm
 
