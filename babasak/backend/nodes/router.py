@@ -1,4 +1,3 @@
-from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from backend.debug_log import archive
@@ -18,6 +17,8 @@ _llm_router = None
 def _get_llm_router():
     global _llm_router
     if _llm_router is None:
+        from databricks_langchain import ChatDatabricks
+
         _llm_router = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.1)
     return _llm_router
 
@@ -164,8 +165,15 @@ def router_node(state: dict) -> dict:
         HumanMessage(content=f"사용자 질문: {query}")
     ]
 
-    response = _get_llm_router().invoke(messages)
-    decision = response.content.strip().lower()
+    try:
+        response = _get_llm_router().invoke(messages)
+        decision = response.content.strip().lower()
+    except Exception as e:
+        archive("router.error", {
+            "reason": "llm_fallback_failed",
+            "error": str(e),
+        })
+        return {"next_action": "report_generator", "loop_count": loop_count}
 
     valid = ["recipe_search", "price_search", "missing_price_search", "cost_calculator", "report_generator"]
     matched = "report_generator"

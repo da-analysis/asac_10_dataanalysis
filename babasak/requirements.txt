@@ -10,6 +10,7 @@ langgraph>=1.1.10
 langchain-core
 langchain
 databricks-langchain
+databricks-vectorsearch==0.73
 numpy
 mlflow[databricks]
 python-dotenv

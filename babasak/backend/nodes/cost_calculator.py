@@ -1,3 +1,4 @@
+import math
 import re
 
 from backend.debug_log import archive
@@ -6,6 +7,7 @@ from backend.db import (
     suggest_substitute_ingredient,
     get_menu_main_ingredient,
     suggest_menu_protein_alternatives,
+    is_allowed_substitute_for_menu,
 )
 
 
@@ -89,6 +91,10 @@ _PER_PIECE_GRAMS = {
     "레몬": 100.0,
     "사과": 250.0,
     "어묵": 40.0,  # 1장 기준
+    # 뼈·고기 덩이류 (줄/대/짝 단위로 자주 표기됨)
+    "등뼈": 350.0, "돼지등뼈": 350.0, "목등뼈": 350.0, "사골": 500.0,
+    "갈비": 250.0, "등갈비": 200.0, "돼지갈비": 250.0, "소갈비": 300.0,
+    "닭": 1000.0, "닭다리": 100.0, "닭봉": 50.0, "오리": 1500.0,
 }
 
 _QUALITATIVE_GRAMS = {
@@ -105,6 +111,7 @@ _DEFAULT_SEASONING_HINTS = (
 )
 _DEFAULT_GRAMS_SEASONING = 10.0   # 양념류 기본 ~1작은술 수준
 _DEFAULT_GRAMS_OTHER = 80.0       # 그 외(주/부재료) 기본
+_DEFAULT_GRAMS_PIECE = 100.0      # 개수단위인데 품목별 1개 무게를 모를 때 1개당 추정
 
 # 분수 패턴: "1/2", "1/3", "2/3" 등
 _FRACTION_RE = re.compile(r"^(\d+)\s*/\s*(\d+)$")
@@ -153,6 +160,8 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
             ppg = _PER_PIECE_GRAMS.get(ingredient_name)
             if ppg:
                 return (num * ppg, f"bare_number_piece:{ppg}g/개")
+            # 품목 무게를 몰라도 0으로 버리지 말고 기본 개당무게로 추정
+            return (num * _DEFAULT_GRAMS_PIECE, f"bare_number_default:{int(_DEFAULT_GRAMS_PIECE)}g")
         return (None, f"unparsed:{q}")
 
     num = _parse_number(m.group("num"))
@@ -164,21 +173,23 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
     if unit in _UNIT_TABLE:
         return (num * _UNIT_TABLE[unit], f"unit:{unit}")
 
-    # 개수 단위(개/모/대/장/포기/쪽/캔/조각 등)
-    if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리"):
+    # 개수 단위(개/모/대/장/포기/쪽/캔/조각/줄 등)
+    if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리", "짝", "덩이", "덩어리"):
         ppg = _PER_PIECE_GRAMS.get(ingredient_name)
         if ppg:
             return (num * ppg, f"piece:{ppg}g/{unit}")
-        return (None, f"piece_unit_no_table:{ingredient_name}/{unit}")
+        # 품목별 1개 무게를 몰라도 원가 미확인으로 버리지 말고 기본값으로 추정
+        return (num * _DEFAULT_GRAMS_PIECE, f"piece_default:{unit}:{int(_DEFAULT_GRAMS_PIECE)}g")
 
     # 단위 없음
     if not unit:
         ppg = _PER_PIECE_GRAMS.get(ingredient_name)
         if ppg:
             return (num * ppg, f"no_unit_piece:{ppg}g")
-        return (None, "no_unit_no_table")
+        return (num * _DEFAULT_GRAMS_PIECE, f"no_unit_default:{int(_DEFAULT_GRAMS_PIECE)}g")
 
-    return (None, f"unknown_unit:{unit}")
+    # 알 수 없는 단위 — 그래도 개당 추정으로 원가는 낸다(0 방지)
+    return (num * _DEFAULT_GRAMS_PIECE, f"unknown_unit_default:{unit}:{int(_DEFAULT_GRAMS_PIECE)}g")
 
 
 
@@ -417,8 +428,36 @@ def _normalize_ingredient_name(name: str) -> str:
     return _NAME_SYNONYM.get(n, n)
 
 
+# ── 핵심 staple 큐레이트 단가 (원/kg, 도매 기준) ──
+# KAMIS엔 없고 B2B(ingredient_recipe)는 std_name 파싱이 깨져(김치→'김치찜' 7,900/kg)
+# 과대·누락이 잦은 주재료는 신뢰 가능한 고정가를 DB보다 우선 적용한다.
+# (배추김치 도매 평균 ~4,000원/kg 기준. 새 staple 관측되면 여기에 추가.)
+_STAPLE_PPK = {"김치": 4000, "묵은지": 4500, "깍두기": 4500, "총각김치": 5000}
+
+
+def _staple_price(name: str) -> dict | None:
+    """김치류 등 큐레이트 staple이면 고정 단가 dict 반환, 아니면 None."""
+    n = (name or "").strip()
+    if not n:
+        return None
+    ppk = None
+    if n == "묵은지" or n.endswith("묵은지"):
+        ppk = _STAPLE_PPK["묵은지"]
+    elif n in _STAPLE_PPK:
+        ppk = _STAPLE_PPK[n]
+    elif n.endswith("김치"):              # 신김치·배추김치·포기김치·김장김치 등
+        ppk = _STAPLE_PPK["김치"]
+    if ppk is None:
+        return None
+    return {"price_per_kg": ppk, "source": "staple_curated", "confidence": "medium"}
+
+
 def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
-    """재료명 → 가격 dict. 정확 → alias → 정규화 → 부분 매칭 순서로 시도."""
+    """재료명 → 가격 dict. (staple 큐레이트 우선) 정확 → alias → 정규화 → 부분 매칭 순서로 시도."""
+    # 핵심 staple(김치류)은 DB가 부정확/누락이라 큐레이트 단가를 DB보다 우선 적용
+    staple = _staple_price(ingredient_name)
+    if staple:
+        return staple
     if ingredient_name in price_map:
         return price_map[ingredient_name]
 
@@ -444,15 +483,93 @@ def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
     return None
 
 
-# ── 마진율 설정 (판매가 = 1인분 원가 / (1 - 마진율)) ──
-# 30% 고정 대신 업종별 기본 마진을 적용. 업종 없으면 기본 30%.
-# (추후 사용자가 직접 마진율 입력하면 그 값으로 교체 가능)
-_DEFAULT_MARGIN_RATE = 0.30
-_MARGIN_BY_INDUSTRY = {
-    "한식": 0.30, "중식": 0.32, "일식": 0.38, "양식": 0.45,
-    "분식": 0.40, "카페/디저트": 0.60, "카페": 0.60,
-    "치킨/패스트푸드": 0.42, "치킨": 0.42, "패스트푸드": 0.42,
-}
+# ── 참고 판매가 = 예상 원가 ÷ 기준 원가율 ──
+# 기준 원가율(BASE_COST_RATE)은 사장님이 입력한 '목표값'이 아니라 서비스가 임시로 쓰는 '기본 기준값'이다.
+#   참고 판매가 = 예상 원가 / 기준 원가율  (원가율 0.30 → 판매가 = 원가/0.3), 100원 단위 올림.
+#   재료 기준 이익 = 참고 판매가 - 예상 원가  (인건비·임대료·가스비·배달수수료 미포함)
+BASE_COST_RATE = 0.30
+
+
+def _valid_rate(value) -> float | None:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return None
+    if rate > 1:
+        rate = rate / 100
+    if 0 < rate < 0.95:
+        return round(rate, 4)
+    return None
+
+
+def _pct_text(rate: float | None) -> str:
+    if rate is None:
+        return "-"
+    pct = round(rate * 100, 1)
+    return f"{pct:g}%"
+
+
+def _pricing_policy_from_state(state: dict) -> dict:
+    entities = state.get("entities") if isinstance(state, dict) else {}
+    entities = entities if isinstance(entities, dict) else {}
+
+    user_margin = _valid_rate(entities.get("target_margin_rate"))
+    user_cost_ratio = _valid_rate(entities.get("target_cost_ratio"))
+    pricing_source = entities.get("pricing_source")
+
+    if pricing_source == "user_margin" and user_margin is not None:
+        cost_ratio = round(1 - user_margin, 4)
+        margin_rate = user_margin
+        source = "user_margin"
+        label = f"사용자 마진율 {_pct_text(margin_rate)}"
+    elif pricing_source == "user_cost_ratio" and user_cost_ratio is not None:
+        cost_ratio = user_cost_ratio
+        margin_rate = round(1 - cost_ratio, 4)
+        source = "user_cost_ratio"
+        label = f"사용자 원가율 {_pct_text(cost_ratio)}"
+    elif user_margin is not None:
+        cost_ratio = round(1 - user_margin, 4)
+        margin_rate = user_margin
+        source = "user_margin"
+        label = f"사용자 마진율 {_pct_text(margin_rate)}"
+    elif user_cost_ratio is not None:
+        cost_ratio = user_cost_ratio
+        margin_rate = round(1 - cost_ratio, 4)
+        source = "user_cost_ratio"
+        label = f"사용자 원가율 {_pct_text(cost_ratio)}"
+    else:
+        cost_ratio = BASE_COST_RATE
+        margin_rate = round(1 - cost_ratio, 4)
+        source = "default_cost_ratio"
+        label = f"기본 원가율 {_pct_text(cost_ratio)}"
+
+    servings_num = _parse_servings(recipe.get("servings"))
+    return {
+        "cost_ratio": cost_ratio,
+        "margin_rate": margin_rate,
+        "pricing_source": source,
+        "pricing_label": label,
+        "pricing_text": entities.get("pricing_text"),
+    }
+
+
+def ceil_to_100(value: float) -> int:
+    """100원 단위 올림."""
+    return int(math.ceil(value / 100) * 100)
+
+
+def reference_price(estimated_cost, cost_rate: float = BASE_COST_RATE):
+    """참고 판매가 = 예상 원가 / 기준 원가율 (100원 올림). 원가 없으면 None."""
+    if estimated_cost is None or cost_rate <= 0:
+        return None
+    return ceil_to_100(estimated_cost / cost_rate)
+
+
+def material_profit(ref_price, estimated_cost):
+    """재료 기준 이익 = 참고 판매가 - 예상 원가."""
+    if ref_price is None or estimated_cost is None:
+        return None
+    return ref_price - estimated_cost
 
 
 def _extract_industry(state: dict) -> str:
@@ -468,9 +585,7 @@ def _extract_industry(state: dict) -> str:
     return ""
 
 
-def _get_margin_rate(industry: str) -> float:
-    """업종 → 마진율. 매칭 없으면 기본값."""
-    return _MARGIN_BY_INDUSTRY.get((industry or "").strip(), _DEFAULT_MARGIN_RATE)
+# 사용자 입력이 없을 때만 BASE_COST_RATE를 쓰고, 입력된 마진율/원가율은 _pricing_policy_from_state에서 해석한다.
 
 
 def _parse_servings(servings) -> int:
@@ -610,17 +725,23 @@ def _format_recipe_section(calc: dict) -> str:
     per = calc.get("per_serving_cost")
     if per is None:
         per = int(total / sv) if total else 0
-    mr = calc.get("margin_rate") or _DEFAULT_MARGIN_RATE
-    margin_price = int(per / (1 - mr)) if per else 0  # 1인분 기준, 업종별 마진율
-    mr_pct = int(round(mr * 100))
+    cr = calc.get("cost_ratio") or BASE_COST_RATE
+    margin_rate = calc.get("margin_rate")
+    if margin_rate is None:
+        margin_rate = round(1 - cr, 4)
+    pricing_label = calc.get("pricing_label") or f"기본 원가율 {_pct_text(cr)}"
+    sell_price = reference_price(per, cr) or 0   # 1인분 기준, 원가율 역산 + 100원 올림
+    profit = (sell_price - per) if (sell_price and per) else 0
     lines.append("")
     lines.append(f"**총 원가 ({sv}인분 전체):** {total:,}원" + (
         f"  (시세/사용량 미확인 재료 {calc['unconfirmed_count']}개 제외)"
         if calc["unconfirmed_count"] else ""
     ))
     if total:
-        lines.append(f"**1인분 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else ""))
-        lines.append(f"**권장 판매가 (1인분, 마진 {mr_pct}%):** {margin_price:,}원")
+        lines.append(f"**1인분 예상 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else ""))
+        lines.append(f"**참고 판매가 [{pricing_label} 기준]:** {sell_price:,}원")
+        lines.append(f"**기준 원가율 / 예상 마진율:** {_pct_text(cr)} / {_pct_text(margin_rate)}")
+        lines.append(f"**재료 기준 이익:** {profit:,}원")
     return "\n".join(lines)
 
 
@@ -657,6 +778,43 @@ def _is_protein(name: str) -> bool:
     return any(h in name for h in _PROTEIN_HINTS)
 
 
+# B2B std_name이 요리/가공식품으로 깨진 행(소고기→'장터국밥', 참치→'참치액젓')을 후보 가격에서 배제.
+# 생재료 단가만 후보로 쓰기 위함 — 틀린 대체 제안을 막는다.
+_B2B_DISH_NOISE = (
+    "국밥", "액젓", "액기스", "찜", "만두", "볶음밥", "주먹밥", "스프", "수프",
+    "사발면", "컵라면", "김밥", "떡볶이", "소스", "양념", "육수", "다시", "조미",
+    "젓갈", "장조림", "조림", "전골", "밀키트",
+)
+
+
+def _candidate_ppk(cname: str, price_map: dict) -> int | None:
+    """대체 후보의 원/kg 단가를 구한다.
+
+    후보(참치·목살 등)는 보통 '현재 레시피 재료'가 아니라서 price_map에 없다.
+    그래서 price_map만 보면 대체재가 거의 안 떴다 → staple/이번 가격맵 → B2B 유통가
+    (in-memory recipe_catalog, 빠름) 순으로 후보를 '따로' 가격 조회한다.
+    B2B 상품명이 요리/가공식품(국밥·액젓 등)으로 깨진 행은 배제(틀린 제안 방지).
+    """
+    info = _lookup_price(cname, price_map)   # staple(김치류) + price_map(정확/alias/정규화/부분)
+    if isinstance(info, dict) and info.get("price_per_kg"):
+        return int(info["price_per_kg"])
+    try:
+        from backend.catalog import get_recipe_price
+        ri = get_recipe_price(cname)
+        if ri and ri.price_per_kg and ri.price_per_kg > 0:
+            product = ri.product_name or ""
+            if not any(kw in product for kw in _B2B_DISH_NOISE):
+                return int(ri.price_per_kg)
+    except Exception:
+        pass
+    return None
+
+
+# 대체 제안 임계값: 싼 재료(참치 한 캔 684원 등)나 미미한 절감엔 제안하지 않는다.
+_SUB_MIN_TARGET_COST = 1500   # 이 금액(원) 미만 주재료는 대체 제안 대상 아님
+_SUB_MIN_SAVING_WON = 300     # 접시당 절감이 이 미만이면 제안 생략
+
+
 def _build_substitute_line(calc: dict, price_map: dict) -> str:
     """비싼 '주재료(단백질)'를 같은 메뉴에서 통하는 더 싼 재료로 대체 제안.
 
@@ -680,7 +838,11 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
     for target in items[:6]:  # 비싼 순 최대 6개
         tname = target["name"]
         tppk = target["price_per_kg"]
+        tcost = target.get("cost") or 0
         if not _is_protein(tname):      # 단백질(주재료)만 대체 대상
+            continue
+        # 충분히 비싼 주재료에만 제안. 참치 한 캔(684원)처럼 싼 재료는 바꿔도 의미 없음.
+        if tcost < _SUB_MIN_TARGET_COST:
             continue
         try:
             cands = suggest_menu_protein_alternatives(menu, tname, limit=10)
@@ -692,10 +854,16 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
             cname = c.get("name", "")
             if not cname or cname == tname:
                 continue
-            cinfo = price_map.get(cname) if isinstance(price_map, dict) else None
-            cppk = cinfo.get("price_per_kg") if isinstance(cinfo, dict) else None
+            if not is_allowed_substitute_for_menu(menu, tname, cname):
+                continue
+            # 후보도 '진짜 단백질명'이어야 한다. (Neo4j lv1 분류 노이즈로 김치국물·국물류가
+            #  단백질로 새서 돼지고기 대체재로 뜨는 것 차단 — 물/국물류도 제외)
+            if not _is_protein(cname) or _is_non_cost_ingredient(cname):
+                continue
+            # 후보 가격은 price_map에 없을 수 있어 따로 조회(B2B 등) — 이게 핵심 수정
+            cppk = _candidate_ppk(cname, price_map)
             if not cppk or cppk >= tppk:
-                continue  # 더 싸야 의미 있음
+                continue  # 후보가 더 싸야 의미 있음
             if best is None or cppk < best[1]:
                 best = (cname, cppk)
         if not best:
@@ -705,6 +873,9 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
         # 접시당 절감액 (target 사용 그램 기준)
         grams = target.get("grams")
         saving_won = int((tppk - cppk) * grams / 1000) if grams else None
+        # 절감이 미미하면(접시당 기준) 제안 생략 — 다음 비싼 재료로
+        if saving_won is not None and saving_won < _SUB_MIN_SAVING_WON:
+            continue
         archive("cost_calculator.substitute", {
             "menu": menu, "target": tname, "target_ppk": tppk,
             "candidate": cname, "candidate_ppk": cppk,
@@ -756,8 +927,10 @@ def cost_calculator_node(state: dict) -> dict:
     if not isinstance(recipes, list):
         recipes = [recipes] if recipes else []
 
-    # 업종별 마진율 (판매가 계산용). 업종 없으면 기본 30%.
-    margin_rate = _get_margin_rate(_extract_industry(state))
+    # 사용자 마진율/원가율 입력이 있으면 우선하고, 없으면 서비스 기본 원가율을 쓴다.
+    pricing_policy = _pricing_policy_from_state(state)
+    cost_ratio = pricing_policy["cost_ratio"]
+    margin_rate = pricing_policy["margin_rate"]
 
     calc_results = []
     for idx, recipe in enumerate(recipes, start=1):
@@ -765,13 +938,36 @@ def cost_calculator_node(state: dict) -> dict:
             continue
         recipe = {**recipe, "_rank": idx}
         c = _calc_recipe_cost(recipe, price_map)
-        c["margin_rate"] = margin_rate          # 마크다운·카드 판매가 계산에 사용
+        c["cost_ratio"] = cost_ratio            # 마크다운·카드 판매가 계산 기준
+        c["margin_rate"] = margin_rate
+        c["pricing_source"] = pricing_policy["pricing_source"]
+        c["pricing_label"] = pricing_policy["pricing_label"]
+        c["pricing_text"] = pricing_policy.get("pricing_text")
+        # 검증 로그: 레시피명/인분수/전체원가/1인분원가/카드표시원가/참고판매가/재료기준이익/제외재료
+        _per = c.get("per_serving_cost")
+        _ref = reference_price(_per, cost_ratio)
+        _excluded = [it.get("name") for it in (c.get("items") or [])
+                     if it.get("name") and (it.get("cost") is None or it.get("source") == "non_cost")]
+        archive("cost_calculator.card_check", {
+            "menu": c.get("menu"),
+            "servings_num": c.get("servings_num"),
+            "full_cost_total": c.get("total_cost"),       # 전체 재료 원가 합계(= 상세표 합계)
+            "per_serving_cost": _per,                     # 1인분 예상 원가
+            "card_estimated_cost": _per,                  # 카드에 표시되는 원가(1인분)
+            "reference_price": _ref,                      # 참고 판매가
+            "material_profit": material_profit(_ref, _per),
+            "cost_ratio": cost_ratio,
+            "margin_rate": margin_rate,
+            "pricing_source": pricing_policy["pricing_source"],
+            "excluded_ingredients": _excluded,            # 원가 계산 제외 재료
+        })
         calc_results.append(c)
 
     archive("cost_calculator.calc", {
         "num_recipes": len(calc_results),
         "totals": [c["total_cost"] for c in calc_results],
         "unconfirmed_counts": [c["unconfirmed_count"] for c in calc_results],
+        "pricing": pricing_policy,
     })
 
     # 마크다운 조합 (+ 비싼 보조재료 대체 제안 라인 부착)

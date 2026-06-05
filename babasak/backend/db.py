@@ -501,7 +501,24 @@ def _search_by_tokens(menu_tokens, ing_tokens, limit):
 # 2. 레시피 상세/재료
 
 _DROP_NOISE_INGREDIENTS = True
-_NOISE_TOKENS = ("국그릇", "그릇", "한그릇")  # 수량/그릇이 재료명에 붙은 파편 (예: '신김치국그릇')
+_NOISE_TOKENS = ("국그릇", "그릇", "한그릇", "소주")  # 수량/그릇이 재료명에 붙은 파편 (예: '신김치국그릇')
+# '소주': 잡내 제거용 첨가물로 재료란·원가에서 제외 요청(2026-06-05). 부분일치라 '소주'·'청주소주'·
+# '참이슬소주'·'소주1/2컵' 등 변형까지 모두 숨긴다. KAMIS에 시세 없어 Genie 헛돌이도 같이 제거됨.
+
+# 정확 일치 차단 리스트(방식 B). 레시피 DB에 '재료'로 잘못 저장된 조리지시/파편으로,
+# KAMIS·alias에 없어 매번 Genie(~26초)+네이버(~10초)+LLM(~7초)을 헛돌게 만드는 항목들.
+# MLflow trace 측정(2026-06-04, 우거지감자탕·감자탕)에서 unavailable로 새던 것만 보수적으로 등록.
+# 부분매칭(_NOISE_TOKENS)과 달리 '정확히 이 이름'일 때만 제거하므로 정상 재료(물/물오징어 등)는
+# 절대 건드리지 않는다. 새 노이즈가 관측되면 여기에 '전체 이름'을 추가한다.
+_NOISE_EXACT = frozenset({
+    "물가득", "요리수미림", "소금간맞추기", "대파초록부분", "설탕등뼈물",
+    "대파국물", "돼지등뼈물", "동전육수", "소주병", "월계수잎정도",
+    "쌀뜨물",  # 조리용 물 — KAMIS/네이버에 시세 없어 헛돌고, 원가 기여도 0에 가까움
+    # 2026-06-05 trace 측정에서 passthrough(Genie 61~71초)로 새던 항목. DB 조회로
+    # silver.ingredient.ingredient에 둘 다 없음 확인 → alias 매핑 불가, 차단이 정답.
+    "무싹",   # 무순 파편 — KAMIS/recipe에 없어 Genie 헛돌이
+    "배합초",  # 초밥용 조미식초(가공품) — 시세 없고 원가 기여도 미미
+})
 
 
 def _filter_noise_ingredients(rows):
@@ -513,6 +530,8 @@ def _filter_noise_ingredients(rows):
         name = (r.get("name") or "").strip()
         if not name:
             continue
+        if name in _NOISE_EXACT:
+            continue          # 정확 일치 노이즈 차단(조리지시/파편) — 정상 재료는 안전
         if any(tok in name for tok in _NOISE_TOKENS):
             continue          # '신김치국그릇' 같은 파편 제거
         if name in seen:
@@ -631,6 +650,68 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
 
 # 4. 대체재 추천
 
+_INGREDIENT_FAMILY_KEYWORDS = {
+    "pork": (
+        "돼지", "돼지고기", "돈육", "제육", "삼겹", "목살", "앞다리", "뒷다리",
+        "오겹", "항정", "갈매기살", "돼지갈비", "등갈비",
+    ),
+    "beef": (
+        "소고기", "쇠고기", "우육", "한우", "차돌", "양지", "사태", "등심",
+        "안심", "업진", "토시살", "부채살", "소갈비",
+    ),
+    "chicken": ("닭", "닭고기", "치킨", "닭다리", "닭가슴", "닭날개"),
+    "seafood": (
+        "참치", "고등어", "꽁치", "연어", "명태", "대구", "동태", "갈치",
+        "오징어", "낙지", "문어", "새우", "게", "조개", "홍합", "전복",
+        "해산물", "수산물",
+    ),
+    "processed_meat": ("스팸", "햄", "소시지", "소세지", "베이컨", "런천미트"),
+    "tofu": ("두부", "순두부", "연두부", "유부", "콩고기"),
+    "egg": ("계란", "달걀", "메추리알"),
+}
+
+_MENU_CORE_FAMILY_KEYWORDS = {
+    "pork": ("제육", "돼지", "돈육", "돼지불고기", "돈까스", "돈가스", "삼겹", "돼지갈비"),
+    "beef": ("소고기", "쇠고기", "한우", "불고기", "갈비탕", "소갈비", "육회", "차돌", "설렁탕"),
+    "chicken": ("닭", "치킨", "닭갈비", "삼계탕", "찜닭", "닭볶음탕"),
+    "seafood": ("참치", "고등어", "꽁치", "연어", "오징어", "낙지", "새우", "해물", "해산물", "조개"),
+    "tofu": ("두부", "순두부", "유부"),
+    "egg": ("계란", "달걀", "메추리알"),
+}
+
+
+def ingredient_family(name: str) -> str | None:
+    text = str(name or "").lower()
+    for family, keywords in _INGREDIENT_FAMILY_KEYWORDS.items():
+        if any(keyword.lower() in text for keyword in keywords):
+            return family
+    return None
+
+
+def menu_core_family(menu: str) -> str | None:
+    text = str(menu or "").lower()
+    for family, keywords in _MENU_CORE_FAMILY_KEYWORDS.items():
+        if any(keyword.lower() in text for keyword in keywords):
+            return family
+    return None
+
+
+def is_menu_core_ingredient(menu: str, ingredient: str) -> bool:
+    core_family = menu_core_family(menu)
+    return bool(core_family and ingredient_family(ingredient) == core_family)
+
+
+def is_allowed_substitute_for_menu(menu: str, target: str, candidate: str) -> bool:
+    """Keep core menu identity stable when suggesting substitutes."""
+    target_family = ingredient_family(target)
+    candidate_family = ingredient_family(candidate)
+    core_family = menu_core_family(menu)
+
+    if core_family and target_family == core_family:
+        return candidate_family == target_family
+    return True
+
+
 def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
     """주어진 메뉴에서 특정 재료를 대체할 만한 재료를 그래프 관계로 추천.
 
@@ -708,6 +789,8 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
     # 같은 재료 계열(같은 동물/소분류)이 위로 오게. 스팸·참치처럼 계열 신호 0인 건 뒤로.
     def _family_score(name, lv2):
         s = 0
+        if ingredient_family(name) and ingredient_family(name) == ingredient_family(missing):
+            s += 4
         if missing in name or name in missing:        # 돼지고기 ↔ 돼지고기목살
             s += 4
         if len(missing) >= 2 and len(name) >= 2 and missing[:2] == name[:2]:  # 돼지.. 공유
@@ -718,6 +801,8 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
 
     ranked = []
     for row in pool:
+        if not is_allowed_substitute_for_menu(menu, missing, row.get("name")):
+            continue
         fs = _family_score(row["name"], row.get("lv2"))
         ranked.append((fs, row.get("menu_count", 0), row.get("recipe_count", 0), row))
     # 계열성 > 메뉴 등장수 > 전체 빈도 순
@@ -764,7 +849,7 @@ def suggest_menu_protein_alternatives(menu, target, limit=8):
     핵심 아이디어: '어울리냐'를 하드코딩 규칙이 아니라 데이터로 판정.
       - 김치찌개 → 돼지고기·참치·스팸·꽁치 (참치김치찌개가 실제 있으니 참치 OK)
       - 미역국   → 소고기·홍합 (참치미역국 없으니 참치는 후보에 없음 = 괴식 차단)
-      - 제육볶음 → 돼지 부위·오징어 등
+      - 제육볶음 → 메뉴 핵심인 돼지고기 계열만 허용
 
     cost_calculator가 이 후보 중 target보다 '단가가 더 싼 것'을 골라 대체 제안.
     반환: [{"name", "lv1", "freq"}] (가격은 cost_calculator가 price_map에서 비교)
@@ -785,8 +870,11 @@ def suggest_menu_protein_alternatives(menu, target, limit=8):
     out = []
     for r in rows:
         lv1 = r.get("lv1") or ""
+        name = r.get("name") or ""
         if any(k in lv1 for k in _PROTEIN_LV1_KEYWORDS):
-            out.append({"name": r["name"], "lv1": lv1, "freq": r["freq"]})
+            if not is_allowed_substitute_for_menu(menu, target, name):
+                continue
+            out.append({"name": name, "lv1": lv1, "freq": r["freq"], "family": ingredient_family(name)})
         if len(out) >= limit:
             break
     return out

@@ -12,6 +12,9 @@ from backend.debug_log import archive
 from backend.catalog import resolve_many, ResolveResult, get_recipe_prices_for_items
 
 from backend.nodes.chart_utils import generate_chart_html
+# 개수 단위(개/포기/마리 등) → kg 환산용 1개당 그램 추정표. cost_calculator와 동일 기준을
+#써야 원가 계산이 일관되므로 그쪽 표를 그대로 재사용한다(단일 출처).
+from backend.nodes.cost_calculator import _PER_PIECE_GRAMS
 
 _TREND_KEYWORDS = re.compile(r"(추이|추세|그래프|트렌드|변동|변화|시세|동향|trend|graph|일별|주별|월별)")
 _PERIOD_MAP = {
@@ -312,10 +315,32 @@ def _direct_sql_assemble(
                 f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
             )
         else:
-            lines.append(
-                f"{input_name}: 약 ₩{avg_price:,}/{db_unit} "
-                f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
-            )
+            # 무게가 아닌 단위(개/포기/마리 등). 1개당 그램 추정치가 있으면 kg당 단가로
+            # 환산해 structured_prices에 넣는다(예: 무/1개 ₩2,020 → 무 1개=1000g 가정 →
+            # ₩2,020/kg). 이게 없으면 무우 같은 '개' 단위 재료가 text에만 남아
+            # cost_calculator의 /kg·/100g 정규식에 안 잡혀 원가에서 누락됐다.
+            piece_match = re.match(r"^(\d+(?:\.\d+)?)\s*(?:개|포기|마리|통|단|모|장|알|봉|손|쪽)$", unit_lower)
+            grams_per_piece = _PER_PIECE_GRAMS.get(db_name) or _PER_PIECE_GRAMS.get(input_name)
+            if piece_match and grams_per_piece:
+                qty_val = float(piece_match.group(1))
+                total_grams = qty_val * grams_per_piece
+                price_per_kg = int(avg_price * 1000 / total_grams) if total_grams > 0 else avg_price
+                prices[input_name] = {
+                    "price_per_kg": price_per_kg,
+                    "confidence": "high",
+                    "unit_hint": f"{db_unit} → kg 환산 (1{db_unit.rstrip('0123456789')}≈{grams_per_piece:g}g, KAMIS direct_sql)",
+                    "note": "KAMIS direct_sql 평균 도매가",
+                }
+                lines.append(
+                    f"{input_name}: 약 ₩{price_per_kg:,}/kg "
+                    f"(KAMIS direct_sql, {db_name}/{db_unit} → kg 환산)"
+                )
+            else:
+                # 환산 계수 미상 — 종전대로 text에만 (cost_calculator가 사용량 기준 처리)
+                lines.append(
+                    f"{input_name}: 약 ₩{avg_price:,}/{db_unit} "
+                    f"(KAMIS direct_sql, {db_name}/{db_unit} 평균)"
+                )
         found_inputs.append(input_name)
 
     return {

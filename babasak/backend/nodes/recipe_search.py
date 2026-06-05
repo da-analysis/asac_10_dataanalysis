@@ -13,7 +13,6 @@ from backend.db import (
     find_similar_recipes,           
     suggest_substitute_ingredient, 
 )
-from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
 # 폴백용 키워드 리스트
@@ -100,6 +99,8 @@ def _get_llm_keyword():
     """키워드 추출용 경량 LLM (lazy init)"""
     global _llm_keyword
     if _llm_keyword is None:
+        from databricks_langchain import ChatDatabricks
+
         _llm_keyword = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0, max_tokens=20)
     return _llm_keyword
 
@@ -158,6 +159,31 @@ def _extract_keywords_from_query(query: str) -> dict:
     return {'menu': found_menu, 'ingredients': found_ingredients}
 
 
+# 메뉴명이 핵심재료를 내포하는데 레시피에 빠진 경우(크롤 누락) 보강.
+#  예: '참치김치찌개' 레시피에 김치가 없으면 원가가 과소집계됨 → 김치 주입(present-김치 레시피와
+#  동일 수량 '1/2포기'=1,250g 기준이라 같은 메뉴끼리 원가가 일관됨).
+_MENU_CORE_INGREDIENTS = (
+    ("김치", "김치", "1/2포기"),
+)
+
+
+def _ensure_core_ingredients(recipe_data: list) -> None:
+    """메뉴명이 내포하는 핵심재료가 레시피에 없으면 추정 수량으로 주입(원가 과소 방지)."""
+    for r in recipe_data:
+        menu = r.get("menu") or ""
+        ings = r.get("ingredients")
+        if not isinstance(ings, list):
+            continue
+        names = [(i.get("name") or "") if isinstance(i, dict) else str(i) for i in ings]
+        for token, core, qty in _MENU_CORE_INGREDIENTS:
+            if token not in menu:
+                continue
+            # '김치국물'(국물=원가제외)은 핵심재료로 안 침 → endswith로 진짜 김치만 인정
+            if any(nm == core or nm.endswith(core) for nm in names):
+                continue
+            ings.append({"name": core, "quantity": qty})
+
+
 def recipe_search_node(state: dict) -> dict:
     """
     Neo4j에서 레시피/재료 정보를 조회하는 노드.
@@ -184,7 +210,10 @@ def recipe_search_node(state: dict) -> dict:
     else:
         ingredients = []
 
-    if not menu and not ingredients and not is_popular and not conditions:
+    # ★ 방어: 조건(1인분 등)이 같이 잡혀도 메뉴 복구는 해야 한다.
+    #   '김치찌개 1인분'에서 conditions={1인분}만 잡고 메뉴를 놓치면, 아래 시나리오2(조건검색)로
+    #   새서 1인분짜리 랜덤 레시피 5개가 나오던 버그. (not conditions 가드 제거)
+    if not menu and not ingredients and not is_popular:
         query = state["messages"][-1].content if state.get("messages") else ""
 
         # 1차: LLM으로 음식명 추출
@@ -258,8 +287,9 @@ def recipe_search_node(state: dict) -> dict:
                 })
             return {"recipe_info": {"data": recipe_data, "search_type": "popular"}}
 
-        # === 시나리오 2: 조건 기반 추천 ===
-        if conditions:
+        # === 시나리오 2: 조건 기반 추천 (단, 특정 메뉴가 있으면 메뉴 검색을 우선) ===
+        # '김치찌개 1인분'처럼 메뉴+조건이 같이 오면 조건검색으로 새지 않고 메뉴 검색으로 보낸다.
+        if conditions and not menu:
             recipes = recommend_recipes(
                 kind=conditions.get("kind"),
                 difficulty=conditions.get("difficulty"),
@@ -367,10 +397,6 @@ def recipe_search_node(state: dict) -> dict:
                 last_msg = messages[-1]
                 user_query = getattr(last_msg, "content", "") or ""
 
-            # ★ 라우터가 붙인 '[업종: X, 지역: Y]' 프리픽스 제거.
-            #   안 떼면 modifier로 새서 'AI 신메뉴: 김치찌개 + [업종:한식,지역:서울]말차' 버그.
-            user_query = re.sub(r'\[\s*업종\s*:[^\]]*\]', '', user_query).strip()
-
             clean_query = re.sub(
                 r'(레시피|알려줘|만드는\s*법|조리법|추천|어떻게|만들기|만들고\s*싶어|알고\s*싶어|보여줘|'
                 r'원가|판매가|단가|가격|시세|마진율|마진|얼마|비용|값)',
@@ -455,6 +481,9 @@ def recipe_search_node(state: dict) -> dict:
                     "ingredients": ings,
                 })
 
+            # 누락된 핵심재료(김치 등) 보강 — 같은 메뉴끼리 원가 일관화
+            _ensure_core_ingredients(recipe_data)
+
             result_payload = {
                 "data": recipe_data,
                 "search_type": "keyword",
@@ -470,9 +499,9 @@ def recipe_search_node(state: dict) -> dict:
                         f"base 메뉴('{menu}') + modifier 그래프 정보를 짬뽕해서 답변 권장."
                     )
                     result_payload["original_query"] = graph_query
-                    # 'AI 신메뉴 제안' 박스(ai_new_menu_suggestions)는 제거.
+                    # 'AI 신메뉴 제안' 박스(ai_new_menu_suggestions)는 제거한다.
+                    # modifier 추출이 '1인분계산해' 같은 잔여 토큰을 잡아 엉뚱한 신메뉴를 만들었음.
                     # 없는 메뉴는 별도 박스 대신 graph_context로 '조합 레시피'를 직접 생성해 답한다.
-                    # (예: '말차 김치찌개 레시피' → 김치찌개 베이스 + 말차 짬뽕 레시피)
             return {"recipe_info": result_payload}
 
         # === 최종 폴백: 인기 레시피 ===

@@ -19,7 +19,7 @@ aliases:
   건포도: {db_name: '건포도', db_unit: '100g'}
   계란: {db_name: '계란', db_unit: '30개'}
   고구마: {db_name: '고구마', db_unit: '1kg'}
-  고등어: {db_name: '고등어', db_unit: '1손'}
+  고등어: {db_name: '고등어', db_unit: '1마리'}
   고등어필렛: {db_name: '고등어필렛', db_unit: '1kg'}
   고춧가루: {db_name: '고춧가루', db_unit: '1kg'}
   굴: {db_name: '굴', db_unit: '1kg'}
