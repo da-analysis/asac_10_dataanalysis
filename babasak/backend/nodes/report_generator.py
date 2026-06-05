@@ -1,7 +1,6 @@
 import re
 import mlflow.genai
 
-from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from backend.debug_log import archive
@@ -70,6 +69,8 @@ _llm_report = None
 def _get_llm_report():
     global _llm_report
     if _llm_report is None:
+        from databricks_langchain import ChatDatabricks
+
         # streaming=True: astream_events에서 on_chat_model_stream 이벤트 발생에 필요
         _llm_report = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0.7, streaming=True)
     return _llm_report
@@ -338,6 +339,10 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
         if per is None:
             per = int(total / servings_num) if total else None
         cr = calc.get("cost_ratio") or BASE_COST_RATE       # 기준 원가율(서비스 기본값 0.30)
+        mr = calc.get("margin_rate")
+        if mr is None:
+            mr = round(1 - cr, 4)
+        pricing_label = calc.get("pricing_label") or f"기본 원가율 {round(cr * 100):g}%"
         ref = reference_price(per, cr)                      # 참고 판매가(100원 올림)
         # 원가 계산 제외 재료(물/국물·시세 미확인)
         excluded = [it.get("name") for it in (calc.get("items") or [])
@@ -354,6 +359,10 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
             "full_cost": total if total else None,           # 전체 N인분 원가(= 상세표 합계)
             "suggested_price": ref,                          # 참고 판매가(원가율 기준, 100원 올림)
             "cost_ratio_pct": int(round(cr * 100)),          # 기준 원가율 %(30)
+            "margin_pct": int(round(mr * 100)),              # 예상 마진율 %(원가율의 보수값)
+            "pricing_source": calc.get("pricing_source") or "default_cost_ratio",
+            "pricing_label": pricing_label,
+            "pricing_text": calc.get("pricing_text"),
             "material_profit": material_profit(ref, per),    # 재료 기준 이익
             "excluded_ingredients": excluded,                # 원가 계산 제외 재료
             "ingredients": ings_out,

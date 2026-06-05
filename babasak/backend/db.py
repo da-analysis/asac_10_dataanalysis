@@ -650,6 +650,68 @@ def get_recipes_excluding_ingredient(keyword, exclude, limit=3):
 
 # 4. 대체재 추천
 
+_INGREDIENT_FAMILY_KEYWORDS = {
+    "pork": (
+        "돼지", "돼지고기", "돈육", "제육", "삼겹", "목살", "앞다리", "뒷다리",
+        "오겹", "항정", "갈매기살", "돼지갈비", "등갈비",
+    ),
+    "beef": (
+        "소고기", "쇠고기", "우육", "한우", "차돌", "양지", "사태", "등심",
+        "안심", "업진", "토시살", "부채살", "소갈비",
+    ),
+    "chicken": ("닭", "닭고기", "치킨", "닭다리", "닭가슴", "닭날개"),
+    "seafood": (
+        "참치", "고등어", "꽁치", "연어", "명태", "대구", "동태", "갈치",
+        "오징어", "낙지", "문어", "새우", "게", "조개", "홍합", "전복",
+        "해산물", "수산물",
+    ),
+    "processed_meat": ("스팸", "햄", "소시지", "소세지", "베이컨", "런천미트"),
+    "tofu": ("두부", "순두부", "연두부", "유부", "콩고기"),
+    "egg": ("계란", "달걀", "메추리알"),
+}
+
+_MENU_CORE_FAMILY_KEYWORDS = {
+    "pork": ("제육", "돼지", "돈육", "돼지불고기", "돈까스", "돈가스", "삼겹", "돼지갈비"),
+    "beef": ("소고기", "쇠고기", "한우", "불고기", "갈비탕", "소갈비", "육회", "차돌", "설렁탕"),
+    "chicken": ("닭", "치킨", "닭갈비", "삼계탕", "찜닭", "닭볶음탕"),
+    "seafood": ("참치", "고등어", "꽁치", "연어", "오징어", "낙지", "새우", "해물", "해산물", "조개"),
+    "tofu": ("두부", "순두부", "유부"),
+    "egg": ("계란", "달걀", "메추리알"),
+}
+
+
+def ingredient_family(name: str) -> str | None:
+    text = str(name or "").lower()
+    for family, keywords in _INGREDIENT_FAMILY_KEYWORDS.items():
+        if any(keyword.lower() in text for keyword in keywords):
+            return family
+    return None
+
+
+def menu_core_family(menu: str) -> str | None:
+    text = str(menu or "").lower()
+    for family, keywords in _MENU_CORE_FAMILY_KEYWORDS.items():
+        if any(keyword.lower() in text for keyword in keywords):
+            return family
+    return None
+
+
+def is_menu_core_ingredient(menu: str, ingredient: str) -> bool:
+    core_family = menu_core_family(menu)
+    return bool(core_family and ingredient_family(ingredient) == core_family)
+
+
+def is_allowed_substitute_for_menu(menu: str, target: str, candidate: str) -> bool:
+    """Keep core menu identity stable when suggesting substitutes."""
+    target_family = ingredient_family(target)
+    candidate_family = ingredient_family(candidate)
+    core_family = menu_core_family(menu)
+
+    if core_family and target_family == core_family:
+        return candidate_family == target_family
+    return True
+
+
 def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
     """주어진 메뉴에서 특정 재료를 대체할 만한 재료를 그래프 관계로 추천.
 
@@ -727,6 +789,8 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
     # 같은 재료 계열(같은 동물/소분류)이 위로 오게. 스팸·참치처럼 계열 신호 0인 건 뒤로.
     def _family_score(name, lv2):
         s = 0
+        if ingredient_family(name) and ingredient_family(name) == ingredient_family(missing):
+            s += 4
         if missing in name or name in missing:        # 돼지고기 ↔ 돼지고기목살
             s += 4
         if len(missing) >= 2 and len(name) >= 2 and missing[:2] == name[:2]:  # 돼지.. 공유
@@ -737,6 +801,8 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
 
     ranked = []
     for row in pool:
+        if not is_allowed_substitute_for_menu(menu, missing, row.get("name")):
+            continue
         fs = _family_score(row["name"], row.get("lv2"))
         ranked.append((fs, row.get("menu_count", 0), row.get("recipe_count", 0), row))
     # 계열성 > 메뉴 등장수 > 전체 빈도 순
@@ -783,7 +849,7 @@ def suggest_menu_protein_alternatives(menu, target, limit=8):
     핵심 아이디어: '어울리냐'를 하드코딩 규칙이 아니라 데이터로 판정.
       - 김치찌개 → 돼지고기·참치·스팸·꽁치 (참치김치찌개가 실제 있으니 참치 OK)
       - 미역국   → 소고기·홍합 (참치미역국 없으니 참치는 후보에 없음 = 괴식 차단)
-      - 제육볶음 → 돼지 부위·오징어 등
+      - 제육볶음 → 메뉴 핵심인 돼지고기 계열만 허용
 
     cost_calculator가 이 후보 중 target보다 '단가가 더 싼 것'을 골라 대체 제안.
     반환: [{"name", "lv1", "freq"}] (가격은 cost_calculator가 price_map에서 비교)
@@ -804,8 +870,11 @@ def suggest_menu_protein_alternatives(menu, target, limit=8):
     out = []
     for r in rows:
         lv1 = r.get("lv1") or ""
+        name = r.get("name") or ""
         if any(k in lv1 for k in _PROTEIN_LV1_KEYWORDS):
-            out.append({"name": r["name"], "lv1": lv1, "freq": r["freq"]})
+            if not is_allowed_substitute_for_menu(menu, target, name):
+                continue
+            out.append({"name": name, "lv1": lv1, "freq": r["freq"], "family": ingredient_family(name)})
         if len(out) >= limit:
             break
     return out

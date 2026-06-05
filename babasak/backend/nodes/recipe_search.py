@@ -13,7 +13,6 @@ from backend.db import (
     find_similar_recipes,           
     suggest_substitute_ingredient, 
 )
-from databricks_langchain import ChatDatabricks
 from langchain_core.messages import SystemMessage, HumanMessage
 
 # 폴백용 키워드 리스트
@@ -100,6 +99,8 @@ def _get_llm_keyword():
     """키워드 추출용 경량 LLM (lazy init)"""
     global _llm_keyword
     if _llm_keyword is None:
+        from databricks_langchain import ChatDatabricks
+
         _llm_keyword = ChatDatabricks(endpoint="databricks-gpt-5-4-mini", temperature=0, max_tokens=20)
     return _llm_keyword
 

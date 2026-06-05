@@ -7,6 +7,7 @@ from backend.db import (
     suggest_substitute_ingredient,
     get_menu_main_ingredient,
     suggest_menu_protein_alternatives,
+    is_allowed_substitute_for_menu,
 )
 
 
@@ -489,6 +490,68 @@ def _lookup_price(ingredient_name: str, price_map: dict) -> dict | None:
 BASE_COST_RATE = 0.30
 
 
+def _valid_rate(value) -> float | None:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return None
+    if rate > 1:
+        rate = rate / 100
+    if 0 < rate < 0.95:
+        return round(rate, 4)
+    return None
+
+
+def _pct_text(rate: float | None) -> str:
+    if rate is None:
+        return "-"
+    pct = round(rate * 100, 1)
+    return f"{pct:g}%"
+
+
+def _pricing_policy_from_state(state: dict) -> dict:
+    entities = state.get("entities") if isinstance(state, dict) else {}
+    entities = entities if isinstance(entities, dict) else {}
+
+    user_margin = _valid_rate(entities.get("target_margin_rate"))
+    user_cost_ratio = _valid_rate(entities.get("target_cost_ratio"))
+    pricing_source = entities.get("pricing_source")
+
+    if pricing_source == "user_margin" and user_margin is not None:
+        cost_ratio = round(1 - user_margin, 4)
+        margin_rate = user_margin
+        source = "user_margin"
+        label = f"사용자 마진율 {_pct_text(margin_rate)}"
+    elif pricing_source == "user_cost_ratio" and user_cost_ratio is not None:
+        cost_ratio = user_cost_ratio
+        margin_rate = round(1 - cost_ratio, 4)
+        source = "user_cost_ratio"
+        label = f"사용자 원가율 {_pct_text(cost_ratio)}"
+    elif user_margin is not None:
+        cost_ratio = round(1 - user_margin, 4)
+        margin_rate = user_margin
+        source = "user_margin"
+        label = f"사용자 마진율 {_pct_text(margin_rate)}"
+    elif user_cost_ratio is not None:
+        cost_ratio = user_cost_ratio
+        margin_rate = round(1 - cost_ratio, 4)
+        source = "user_cost_ratio"
+        label = f"사용자 원가율 {_pct_text(cost_ratio)}"
+    else:
+        cost_ratio = BASE_COST_RATE
+        margin_rate = round(1 - cost_ratio, 4)
+        source = "default_cost_ratio"
+        label = f"기본 원가율 {_pct_text(cost_ratio)}"
+
+    return {
+        "cost_ratio": cost_ratio,
+        "margin_rate": margin_rate,
+        "pricing_source": source,
+        "pricing_label": label,
+        "pricing_text": entities.get("pricing_text"),
+    }
+
+
 def ceil_to_100(value: float) -> int:
     """100원 단위 올림."""
     return int(math.ceil(value / 100) * 100)
@@ -521,7 +584,7 @@ def _extract_industry(state: dict) -> str:
     return ""
 
 
-# (업종별/사용자 원가율 해석 로직 제거 — 카드/판매가는 기준 원가율 BASE_COST_RATE(0.30) 고정 사용)
+# 사용자 입력이 없을 때만 BASE_COST_RATE를 쓰고, 입력된 마진율/원가율은 _pricing_policy_from_state에서 해석한다.
 
 
 def _parse_servings(servings) -> int:
@@ -662,8 +725,11 @@ def _format_recipe_section(calc: dict) -> str:
     if per is None:
         per = int(total / sv) if total else 0
     cr = calc.get("cost_ratio") or BASE_COST_RATE
+    margin_rate = calc.get("margin_rate")
+    if margin_rate is None:
+        margin_rate = round(1 - cr, 4)
+    pricing_label = calc.get("pricing_label") or f"기본 원가율 {_pct_text(cr)}"
     sell_price = reference_price(per, cr) or 0   # 1인분 기준, 원가율 역산 + 100원 올림
-    cr_pct = int(round(cr * 100))
     profit = (sell_price - per) if (sell_price and per) else 0
     lines.append("")
     lines.append(f"**총 원가 ({sv}인분 전체):** {total:,}원" + (
@@ -672,7 +738,8 @@ def _format_recipe_section(calc: dict) -> str:
     ))
     if total:
         lines.append(f"**1인분 예상 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else ""))
-        lines.append(f"**참고 판매가 [원가율 {cr_pct}% 기준]:** {sell_price:,}원")
+        lines.append(f"**참고 판매가 [{pricing_label} 기준]:** {sell_price:,}원")
+        lines.append(f"**기준 원가율 / 예상 마진율:** {_pct_text(cr)} / {_pct_text(margin_rate)}")
         lines.append(f"**재료 기준 이익:** {profit:,}원")
     return "\n".join(lines)
 
@@ -786,6 +853,8 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
             cname = c.get("name", "")
             if not cname or cname == tname:
                 continue
+            if not is_allowed_substitute_for_menu(menu, tname, cname):
+                continue
             # 후보도 '진짜 단백질명'이어야 한다. (Neo4j lv1 분류 노이즈로 김치국물·국물류가
             #  단백질로 새서 돼지고기 대체재로 뜨는 것 차단 — 물/국물류도 제외)
             if not _is_protein(cname) or _is_non_cost_ingredient(cname):
@@ -857,8 +926,10 @@ def cost_calculator_node(state: dict) -> dict:
     if not isinstance(recipes, list):
         recipes = [recipes] if recipes else []
 
-    # 기준 원가율(서비스 기본값, 사장님 목표값 아님). 참고 판매가/이익 계산 기준.
-    cost_ratio = BASE_COST_RATE
+    # 사용자 마진율/원가율 입력이 있으면 우선하고, 없으면 서비스 기본 원가율을 쓴다.
+    pricing_policy = _pricing_policy_from_state(state)
+    cost_ratio = pricing_policy["cost_ratio"]
+    margin_rate = pricing_policy["margin_rate"]
 
     calc_results = []
     for idx, recipe in enumerate(recipes, start=1):
@@ -866,7 +937,11 @@ def cost_calculator_node(state: dict) -> dict:
             continue
         recipe = {**recipe, "_rank": idx}
         c = _calc_recipe_cost(recipe, price_map)
-        c["cost_ratio"] = cost_ratio            # 마크다운·카드 판매가 계산 기준(기준 원가율)
+        c["cost_ratio"] = cost_ratio            # 마크다운·카드 판매가 계산 기준
+        c["margin_rate"] = margin_rate
+        c["pricing_source"] = pricing_policy["pricing_source"]
+        c["pricing_label"] = pricing_policy["pricing_label"]
+        c["pricing_text"] = pricing_policy.get("pricing_text")
         # 검증 로그: 레시피명/인분수/전체원가/1인분원가/카드표시원가/참고판매가/재료기준이익/제외재료
         _per = c.get("per_serving_cost")
         _ref = reference_price(_per, cost_ratio)
@@ -881,6 +956,8 @@ def cost_calculator_node(state: dict) -> dict:
             "reference_price": _ref,                      # 참고 판매가
             "material_profit": material_profit(_ref, _per),
             "cost_ratio": cost_ratio,
+            "margin_rate": margin_rate,
+            "pricing_source": pricing_policy["pricing_source"],
             "excluded_ingredients": _excluded,            # 원가 계산 제외 재료
         })
         calc_results.append(c)
@@ -889,6 +966,7 @@ def cost_calculator_node(state: dict) -> dict:
         "num_recipes": len(calc_results),
         "totals": [c["total_cost"] for c in calc_results],
         "unconfirmed_counts": [c["unconfirmed_count"] for c in calc_results],
+        "pricing": pricing_policy,
     })
 
     # 마크다운 조합 (+ 비싼 보조재료 대체 제안 라인 부착)

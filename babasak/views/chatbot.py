@@ -244,6 +244,7 @@ def _inject_card_css():
                 padding:13px 15px; margin:12px 0; font-size:.9rem; }
       .fc-chip { background:#f0fdf4; border:1px solid #86efac; border-radius:9px;
                  padding:4px 11px; font-weight:800; color:#15803d; display:inline-block; }
+      .fc-muted { color:#64748b; font-size:.82rem; }
       .fc-steps { margin:4px 0 0; padding-left:20px; }
       .fc-steps li { margin:5px 0; color:#334155; }
       .fc-nm { background:#faf5ff; border:1px solid #e9d5ff; border-radius:14px;
@@ -343,14 +344,15 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
 
     summary = ""
     if total:
-        cr = rc.get("cost_ratio_pct") or 32      # 목표 원가율(업종/사용자), 없으면 32
+        cr = rc.get("cost_ratio_pct") or 30      # 백엔드 기준 원가율, 없으면 서비스 기본값
         mp = rc.get("margin_pct") or (100 - cr)  # 매출총이익률 = 100 - 원가율
+        pricing_label = _esc(rc.get("pricing_label") or f"원가율 {cr}%")
         srows = [f'<div class="fc-srow"><span class="k">예상 원가</span><span class="v">{_won(total)}</span></div>']
         if price:
-            srows.append(f'<div class="fc-srow"><span class="k">권장 판매가 (원가율 {cr}%)</span>'
+            srows.append(f'<div class="fc-srow"><span class="k">권장 판매가 ({pricing_label})</span>'
                          f'<span class="v">{_won(price)}</span></div>')
         srows.append(f'<div class="fc-srow"><span class="k">예상 마진율</span>'
-                     f'<span class="v fc-green">{mp}% ▲</span></div>')
+                     f'<span class="v fc-green">{mp}%</span></div>')
         summary = '<div class="fc-summary">' + "".join(srows) + '</div>'
 
     meta = " · ".join(str(x) for x in [rc.get("servings"), rc.get("difficulty"),
@@ -362,8 +364,10 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
     sub = rc.get("substitute")
     if sub and sub.get("candidates"):
         cands = " · ".join(f'🍗 {_esc(c)}' for c in sub["candidates"])
+        saving = sub.get("saving_pct")
+        saving_txt = f'<br><span class="fc-muted">예상 절감률 {saving}%</span>' if saving is not None else ""
         body += (f'<div class="fc-sub">💡 <b>{_esc(sub.get("target","주재료"))} 비싸면 이렇게 바꿔보세요</b><br>'
-                 f'<span class="fc-chip">{cands}</span></div>')
+                 f'<span class="fc-chip">{cands}</span>{saving_txt}</div>')
 
     steps = rc.get("steps") or []
     if steps:
