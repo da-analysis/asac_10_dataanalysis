@@ -556,11 +556,16 @@ def preprocessor_node(state: dict) -> dict:
     is_alternative = (intent == 'alternative')
     is_popular = any(kw in query for kw in ['인기', 'top', 'best', '추천순', '랭킹'])
 
-    # analytics: 메뉴/재료 추출 없이 원문 그대로 Genie freeform 경로로 전달
-    # price_search_node는 ingredients=[] + menu=None 이면 _ask_genie(user_query) freeform path를 탄다
+    # analytics: 특정 재료/메뉴가 없는 DB 전체 분석형 질문만 freeform 경로로 전달
+    # 특정 재료가 지정된 추이/시세 질문은 price_inquiry로 재분류하여 timeseries 차트 경로를 탐
     if intent == 'analytics':
-        menu = None
-        ingredients = None
+        if ingredients or menu:
+            # 특정 재료/메뉴 + 추이/분석 = price_inquiry (timeseries 차트 경로)
+            intent = 'price_inquiry'
+        else:
+            # 재료 미지정 분석형 질문 → Genie freeform
+            menu = None
+            ingredients = None
     else:
         # 문자열 매칭으로 LLM이 놓친 엔티티 보강 (보조 역할)
         if not menu:
