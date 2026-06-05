@@ -710,6 +710,43 @@ def _is_protein(name: str) -> bool:
     return any(h in name for h in _PROTEIN_HINTS)
 
 
+# B2B std_name이 요리/가공식품으로 깨진 행(소고기→'장터국밥', 참치→'참치액젓')을 후보 가격에서 배제.
+# 생재료 단가만 후보로 쓰기 위함 — 틀린 대체 제안을 막는다.
+_B2B_DISH_NOISE = (
+    "국밥", "액젓", "액기스", "찜", "만두", "볶음밥", "주먹밥", "스프", "수프",
+    "사발면", "컵라면", "김밥", "떡볶이", "소스", "양념", "육수", "다시", "조미",
+    "젓갈", "장조림", "조림", "전골", "밀키트",
+)
+
+
+def _candidate_ppk(cname: str, price_map: dict) -> int | None:
+    """대체 후보의 원/kg 단가를 구한다.
+
+    후보(참치·목살 등)는 보통 '현재 레시피 재료'가 아니라서 price_map에 없다.
+    그래서 price_map만 보면 대체재가 거의 안 떴다 → staple/이번 가격맵 → B2B 유통가
+    (in-memory recipe_catalog, 빠름) 순으로 후보를 '따로' 가격 조회한다.
+    B2B 상품명이 요리/가공식품(국밥·액젓 등)으로 깨진 행은 배제(틀린 제안 방지).
+    """
+    info = _lookup_price(cname, price_map)   # staple(김치류) + price_map(정확/alias/정규화/부분)
+    if isinstance(info, dict) and info.get("price_per_kg"):
+        return int(info["price_per_kg"])
+    try:
+        from backend.catalog import get_recipe_price
+        ri = get_recipe_price(cname)
+        if ri and ri.price_per_kg and ri.price_per_kg > 0:
+            product = ri.product_name or ""
+            if not any(kw in product for kw in _B2B_DISH_NOISE):
+                return int(ri.price_per_kg)
+    except Exception:
+        pass
+    return None
+
+
+# 대체 제안 임계값: 싼 재료(참치 한 캔 684원 등)나 미미한 절감엔 제안하지 않는다.
+_SUB_MIN_TARGET_COST = 1500   # 이 금액(원) 미만 주재료는 대체 제안 대상 아님
+_SUB_MIN_SAVING_WON = 300     # 접시당 절감이 이 미만이면 제안 생략
+
+
 def _build_substitute_line(calc: dict, price_map: dict) -> str:
     """비싼 '주재료(단백질)'를 같은 메뉴에서 통하는 더 싼 재료로 대체 제안.
 
@@ -733,7 +770,11 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
     for target in items[:6]:  # 비싼 순 최대 6개
         tname = target["name"]
         tppk = target["price_per_kg"]
+        tcost = target.get("cost") or 0
         if not _is_protein(tname):      # 단백질(주재료)만 대체 대상
+            continue
+        # 충분히 비싼 주재료에만 제안. 참치 한 캔(684원)처럼 싼 재료는 바꿔도 의미 없음.
+        if tcost < _SUB_MIN_TARGET_COST:
             continue
         try:
             cands = suggest_menu_protein_alternatives(menu, tname, limit=10)
@@ -749,10 +790,10 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
             #  단백질로 새서 돼지고기 대체재로 뜨는 것 차단 — 물/국물류도 제외)
             if not _is_protein(cname) or _is_non_cost_ingredient(cname):
                 continue
-            cinfo = price_map.get(cname) if isinstance(price_map, dict) else None
-            cppk = cinfo.get("price_per_kg") if isinstance(cinfo, dict) else None
+            # 후보 가격은 price_map에 없을 수 있어 따로 조회(B2B 등) — 이게 핵심 수정
+            cppk = _candidate_ppk(cname, price_map)
             if not cppk or cppk >= tppk:
-                continue  # 더 싸야 의미 있음
+                continue  # 후보가 더 싸야 의미 있음
             if best is None or cppk < best[1]:
                 best = (cname, cppk)
         if not best:
@@ -762,6 +803,9 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
         # 접시당 절감액 (target 사용 그램 기준)
         grams = target.get("grams")
         saving_won = int((tppk - cppk) * grams / 1000) if grams else None
+        # 절감이 미미하면(접시당 기준) 제안 생략 — 다음 비싼 재료로
+        if saving_won is not None and saving_won < _SUB_MIN_SAVING_WON:
+            continue
         archive("cost_calculator.substitute", {
             "menu": menu, "target": tname, "target_ppk": tppk,
             "candidate": cname, "candidate_ppk": cppk,

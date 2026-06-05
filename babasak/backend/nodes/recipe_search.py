@@ -158,6 +158,31 @@ def _extract_keywords_from_query(query: str) -> dict:
     return {'menu': found_menu, 'ingredients': found_ingredients}
 
 
+# 메뉴명이 핵심재료를 내포하는데 레시피에 빠진 경우(크롤 누락) 보강.
+#  예: '참치김치찌개' 레시피에 김치가 없으면 원가가 과소집계됨 → 김치 주입(present-김치 레시피와
+#  동일 수량 '1/2포기'=1,250g 기준이라 같은 메뉴끼리 원가가 일관됨).
+_MENU_CORE_INGREDIENTS = (
+    ("김치", "김치", "1/2포기"),
+)
+
+
+def _ensure_core_ingredients(recipe_data: list) -> None:
+    """메뉴명이 내포하는 핵심재료가 레시피에 없으면 추정 수량으로 주입(원가 과소 방지)."""
+    for r in recipe_data:
+        menu = r.get("menu") or ""
+        ings = r.get("ingredients")
+        if not isinstance(ings, list):
+            continue
+        names = [(i.get("name") or "") if isinstance(i, dict) else str(i) for i in ings]
+        for token, core, qty in _MENU_CORE_INGREDIENTS:
+            if token not in menu:
+                continue
+            # '김치국물'(국물=원가제외)은 핵심재료로 안 침 → endswith로 진짜 김치만 인정
+            if any(nm == core or nm.endswith(core) for nm in names):
+                continue
+            ings.append({"name": core, "quantity": qty})
+
+
 def recipe_search_node(state: dict) -> dict:
     """
     Neo4j에서 레시피/재료 정보를 조회하는 노드.
@@ -455,6 +480,9 @@ def recipe_search_node(state: dict) -> dict:
                     "ingredients": ings,
                 })
 
+            # 누락된 핵심재료(김치 등) 보강 — 같은 메뉴끼리 원가 일관화
+            _ensure_core_ingredients(recipe_data)
+
             result_payload = {
                 "data": recipe_data,
                 "search_type": "keyword",
@@ -470,21 +498,9 @@ def recipe_search_node(state: dict) -> dict:
                         f"base 메뉴('{menu}') + modifier 그래프 정보를 짬뽕해서 답변 권장."
                     )
                     result_payload["original_query"] = graph_query
-
-                    modifier_text = ""
-                    if has_modifier:
-                        mt = clean_query_compact.replace(menu_compact, "", 1).strip()
-                        mt = re.sub(
-                            r'(이?랑|하고|와|과|및|그리고|좀|는|은|을|를|도|의|에|대해서?|대한|요|줘)',
-                            '', mt)
-                        modifier_text = mt
-                    if modifier_text and len(modifier_text) >= 1:
-                        result_payload["ai_new_menu_suggestions"] = [{
-                            "name": graph_query,
-                            "base_menu": menu,
-                            "modifier": modifier_text,
-                            "combo_label": f"{menu} + {modifier_text}",
-                        }]
+                    # 'AI 신메뉴 제안' 박스(ai_new_menu_suggestions)는 제거한다.
+                    # modifier 추출이 '1인분계산해' 같은 잔여 토큰을 잡아 엉뚱한 신메뉴를 만들었음.
+                    # 없는 메뉴는 별도 박스 대신 graph_context로 '조합 레시피'를 직접 생성해 답한다.
             return {"recipe_info": result_payload}
 
         # === 최종 폴백: 인기 레시피 ===
