@@ -288,6 +288,11 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
     """recipe_info + cost_info에서 카드 렌더용 dict 조립. 정보 없으면 {}."""
     if not isinstance(recipe_info, dict):
         return {}
+    # 조합 메뉴(없는 메뉴를 graph_context로 합성: '말차 제육볶음' 등)는
+    # base 레시피('제육볶음') 카드가 오히려 오해를 준다. 카드를 만들지 않고
+    # LLM이 생성한 '조합 레시피' 텍스트 답변을 그대로 보여준다(views가 message로 폴백).
+    if recipe_info.get("search_type") == "keyword_with_graph_context":
+        return {}
     recipes_src = recipe_info.get("data") or []
     if not isinstance(recipes_src, list) or not recipes_src:
         return {}

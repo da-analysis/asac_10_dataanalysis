@@ -463,7 +463,12 @@ def recipe_search_node(state: dict) -> dict:
                     primary.append(r)
                 else:
                     fillers.append(r)
-            recipes = (primary + fillers)[:TARGET_COUNT]
+            # 원가 신뢰성: 분량(servings) 있는 레시피만 카드로. 분량 없으면 1인분 원가가
+            # 전체 원가로 부풀려져(÷1) 같은 메뉴인데 1개만 비싸게 나옴. 분량 있는 걸 우선,
+            # 하나도 없으면 폴백(빈 결과 방지).
+            _pool = primary + fillers
+            _with_sv = [r for r in _pool if r.get("servings")]
+            recipes = (_with_sv if _with_sv else _pool)[:TARGET_COUNT]
 
             for recipe in recipes:
                 ings = get_recipe_ingredients(recipe["id"])
