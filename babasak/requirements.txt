@@ -1,4 +1,4 @@
-streamlit
+streamlit>=1.37  # st.fragment(부분 재실행) 사용 → 1.37 이상 필요
 databricks-sdk
 pandas
 plotly

@@ -68,10 +68,33 @@ def _unpack(item):
     return "assistant", str(item), None, None
 
 
+def _render_turn(role: str, message, chart_html, card, turn: int):
+    """한 대화 턴의 본문을 현재 열린 컨테이너 안에 그린다.
+    히스토리 재생(루프)과 방금 받은 응답을 그 자리에서 그릴 때 같은 로직을 쓰도록
+    분리한 함수. (호출부에서 with st.chat_message(role): 안에 둘 것)"""
+    if role == "assistant" and card and card.get("recipes"):
+        _render_cards(card, message, turn)
+    else:
+        st.write(message)
+    if chart_html:
+        components.html(chart_html, height=420, scrolling=False)
+
+
 def _queue_message(text: str):
-    """사용자 메시지를 히스토리에 넣고 '답변 대기' 플래그만 세운 뒤 rerun.
-    실제 백엔드 호출은 화면(헤더·채팅·패널)이 그려진 뒤 채팅 영역 안에서 수행한다.
-    입력창과 추천 질문 칩이 공유하는 진입점."""
+    """사용자 메시지를 히스토리에 넣고 '답변 대기' 플래그를 세운 뒤 즉시 rerun.
+    실제 백엔드 호출은 채팅 영역(_chat_fragment)이 그려진 뒤 그 안에서 수행한다.
+    입력창과 추천 질문 칩이 공유하는 진입점.
+
+    여기서 st.rerun()이 꼭 필요한 이유: pending(_pending_answer) 처리 지점은
+    _chat_fragment 위쪽(채팅 영역)에 있고, 이 함수를 호출하는 입력 위젯은 아래쪽에
+    있다. rerun 없이 위젯의 자동 rerun에만 맡기면, user 메시지를 append하기 전에 이미
+    위쪽 pending 처리를 지나친 뒤라 한 박자 늦게 반영되는 off-by-one이 생긴다.
+    즉시 rerun하면 처음부터 다시 그려져 user 메시지·응답이 같은 사이클에 처리된다.
+
+    이 함수는 항상 _chat_fragment(@st.fragment) 안에서 호출되므로, 이 st.rerun()은
+    전체 페이지가 아니라 fragment 범위만 부분 재실행한다 → 헤더·프로필은 그대로 두고
+    채팅 영역만 갱신되어 '페이지 리로드' 느낌이 없다.
+    (응답 후 2차 rerun도 제거한 상태 → 응답 시점의 재렌더 깜빡임은 없음.)"""
     text = (text or "").strip()
     if not text:
         return
@@ -79,7 +102,82 @@ def _queue_message(text: str):
         {"role": "user", "message": text, "chart_html": None, "card": None}
     )
     st.session_state["_pending_answer"] = text
-    st.rerun()
+    st.rerun(scope="fragment")
+
+
+@st.fragment
+def _chat_fragment():
+    """채팅 본문(좌: 대화/응답, 우: 추천칩·Tip)과 입력창을 묶은 부분 재실행 단위.
+    입력·칩 클릭으로 발생하는 rerun이 이 fragment 범위로 한정되어 전체 페이지가
+    다시 그려지지 않는다."""
+    # ── 본문: 좌(채팅) / 우(추천질문 + Tip) 2단 ──────────────────
+    # 우측 추천질문 패널을 넉넉히(2) 두어 칩 라벨이 한 줄에 들어가게 한다.
+    col_chat, col_side = st.columns([8, 2], gap="large")
+
+    with col_chat:
+        # 채팅 히스토리를 고정 높이 컨테이너로 감싼다 → 페이지 대신 이 박스만 스크롤된다.
+        # rerun마다 페이지 높이가 줄었다 늘며 스크롤이 위로 클램핑됐다 돌아오는
+        # '올라갔다 내려오는' 흔들림을, 페이지를 아예 안 움직이게 해서 원천 차단한다.
+        # (입력창·사이드패널·스크롤 스크립트는 이 박스 밖에 둔다.)
+        chat_box = st.container(height=460)
+        with chat_box:
+            for turn, item in enumerate(st.session_state.chat_history):
+                role, message, chart_html, card = _unpack(item)
+                with st.chat_message(role):
+                    _render_turn(role, message, chart_html, card, turn)
+
+            # 대기 중인 질문이 있으면 채팅 영역 안에서 로딩 스피너만 띄우고 응답을 받는다.
+            # 응답은 '그 자리'에서 그리지 않는다: 그 자리 렌더 + 위쪽 히스토리 루프가 같은
+            # 답변을 이중으로 그려, fragment 부분 재실행 때 옛 요소가 안 지워지고 흐릿한
+            # 잔상(ghosting)으로 남는 문제가 있었다. 대신 히스토리에 append만 하고
+            # fragment를 부분 재실행하면, 답변은 오직 위쪽 루프 한 곳에서만 그려진다.
+            # scope="fragment"라 전체 페이지 리로드/깜빡임은 없다.
+            pending = st.session_state.pop("_pending_answer", None)
+            if pending:
+                with st.chat_message("assistant"):
+                    with st.spinner("챗봇이 답변을 생성 중입니다..."):
+                        bot_text, chart_html, bot_card = _fetch_response(pending)
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "message": bot_text,
+                     "chart_html": chart_html, "card": bot_card}
+                )
+                st.rerun(scope="fragment")
+
+            # 채팅 맨 아래 스크롤 기준점(앵커). rerun 직후 여기로 자동 스크롤한다.
+            st.markdown('<div id="chat-bottom-anchor"></div>', unsafe_allow_html=True)
+
+    with col_side:
+        _render_side_panel()
+
+    # 입력창 (placeholder 제거)
+    user_input = st.chat_input("")
+    if user_input:
+        _queue_message(user_input)
+
+    # 채팅 갱신 직후 최신 메시지로 자동 스크롤. fragment 안에 둬서 부분 재실행 때도
+    # 동작한다. scrollIntoView는 가장 가까운 스크롤 부모(=위 고정 높이 박스)를 스크롤하므로
+    # 페이지는 안 움직이고 박스 안에서만 내려간다. 2단 모션(auto 즉시점프 + 150ms smooth)을
+    # 빼고 requestAnimationFrame으로 렌더 완료 직후 한 번만 부드럽게 스크롤해 튕김을 없앤다.
+    # iframe에서 부모 문서 스크롤을 시도하되 막히면(보안정책) 조용히 무시.
+    if st.session_state.chat_history:
+        components.html(
+            """
+            <script>
+            (function () {
+                try {
+                    const doc = window.parent.document;
+                    const anchor = doc.getElementById("chat-bottom-anchor");
+                    if (anchor) {
+                        requestAnimationFrame(function () {
+                            anchor.scrollIntoView({behavior: "smooth", block: "end"});
+                        });
+                    }
+                } catch (e) { /* cross-origin 등으로 막히면 무시 */ }
+            })();
+            </script>
+            """,
+            height=0,
+        )
 
 
 def render():
@@ -112,72 +210,21 @@ def render():
     _render_profile()
     st.divider()
 
-    # ── 본문: 좌(채팅) / 우(추천질문 + Tip) 2단 ──────────────────
-    col_chat, col_side = st.columns([8, 2], gap="large")
-
-    with col_chat:
-        for turn, item in enumerate(st.session_state.chat_history):
-            role, message, chart_html, card = _unpack(item)
-            with st.chat_message(role):
-                if role == "assistant" and card and card.get("recipes"):
-                    _render_cards(card, message, turn)
-                else:
-                    st.write(message)
-                if chart_html:
-                    components.html(chart_html, height=420, scrolling=False)
-
-        # 대기 중인 질문이 있으면 채팅 영역 안에서 로딩 → 응답 받기
-        pending = st.session_state.pop("_pending_answer", None)
-        if pending:
-            with st.chat_message("assistant"):
-                with st.spinner("챗봇이 답변을 생성 중입니다..."):
-                    bot_text, chart_html, bot_card = _fetch_response(pending)
-            st.session_state.chat_history.append(
-                {"role": "assistant", "message": bot_text,
-                 "chart_html": chart_html, "card": bot_card}
-            )
-            st.rerun()
-
-        # 채팅 맨 아래 스크롤 기준점(앵커). rerun 직후 여기로 자동 스크롤한다.
-        st.markdown('<div id="chat-bottom-anchor"></div>', unsafe_allow_html=True)
-
-    with col_side:
-        _render_side_panel()
-
-    # 입력창 (placeholder 제거)
-    user_input = st.chat_input("")
-    if user_input:
-        _queue_message(user_input)
-
-    # rerun 후 화면이 맨 위로 튀는 것을 완화: 대화가 있으면 최신 메시지로 자동 스크롤.
-    # iframe에서 부모 문서 스크롤을 시도하되, 막히면(보안정책) 조용히 무시한다.
-    if st.session_state.chat_history:
-        components.html(
-            """
-            <script>
-            (function () {
-                try {
-                    const doc = window.parent.document;
-                    const anchor = doc.getElementById("chat-bottom-anchor");
-                    if (anchor) {
-                        // 렌더 직후 한 번 + 약간 늦게 한 번(레이아웃 안정화 후) 스크롤
-                        anchor.scrollIntoView({behavior: "auto", block: "end"});
-                        setTimeout(function () {
-                            anchor.scrollIntoView({behavior: "smooth", block: "end"});
-                        }, 150);
-                    }
-                } catch (e) { /* cross-origin 등으로 막히면 무시 */ }
-            })();
-            </script>
-            """,
-            height=0,
-        )
+    # ── 본문(채팅+입력+추천칩)을 fragment로 감싼다 ───────────────
+    # st.fragment 안에서 일어나는 st.rerun()은 '전체 페이지'가 아니라 이 함수 범위만
+    # 부분 재실행한다. 따라서 질문을 보낼 때(_queue_message의 rerun)도 헤더·프로필은
+    # 그대로 두고 채팅 영역만 다시 그려져 '페이지 리로드' 느낌이 사라진다.
+    # 추천칩(col_side)도 클릭 시 같은 부분 재실행이 되도록 컬럼 전체를 fragment에 넣는다.
+    # 채팅·입력·추천칩·스크롤 보정은 모두 _chat_fragment 안에서 처리한다.
+    _chat_fragment()
 
 
 def _render_side_panel():
     """우측 패널: 추천 질문 칩 + 챗봇 답변 활용 Tip."""
     st.markdown('<div class="cb-panel-title">✦ 추천 질문</div>', unsafe_allow_html=True)
     st.markdown('<div class="cb-panel-sub">이런 걸 물어보세요</div>', unsafe_allow_html=True)
+    # 칩 버튼만 겨냥하는 CSS(.cb-suggest + div ...)가 잡도록 직전에 마커를 둔다.
+    st.markdown('<div class="cb-suggest"></div>', unsafe_allow_html=True)
     for i, (label, question) in enumerate(_SUGGESTED_QUESTIONS):
         if st.button(f"[{label}]  {question}", key=f"suggest_{i}", use_container_width=True):
             _queue_message(question)
@@ -200,9 +247,20 @@ def _render_side_panel():
 def _inject_card_css():
     st.markdown("""
     <style>
-      /* 챗봇 화면에서는 본문 폭 제한을 넓혀 채팅 영역을 더 넓게 쓴다
-         (app.py 전역 max-width:1500px 를 이 페이지에 한해 확장) */
-      .block-container { max-width: 1800px !important; }
+      /* 챗봇 화면 전체를 '줌아웃'한 느낌으로 압축해 한 화면에 더 많은 내용이 담기게 한다.
+         루트 폰트(rem 기준)를 줄이면 rem 기반 요소들이 일괄로 작아진다. */
+      html { font-size: 14px; }              /* 기본 16px → 14px (약 87.5% 축소) */
+
+      /* 본문 폭은 넓게 유지(카드 3개 가로 배치). 상하 여백은 줄여 밀도를 높인다. */
+      .block-container {
+          max-width: 1800px !important;
+          padding-top: 1.2rem !important;
+          padding-bottom: 1.2rem !important;
+      }
+      /* 요소 사이 기본 간격(Streamlit 수직 갭) 약간만 축소. 너무 줄이면 입력 라벨이
+         위 박스에 붙어 답답하므로 숨 쉴 공간은 남긴다. */
+      div[data-testid="stVerticalBlock"] { gap: .85rem !important; }
+      hr { margin: .8rem 0 !important; }     /* st.divider 여백 축소 */
 
       /* 카드 3개를 한 줄에 가로로 나열하는 그리드 컨테이너 */
       .fc-grid { display:flex; flex-wrap:wrap; gap:14px; margin:6px 0 14px; align-items:flex-start; }
@@ -270,13 +328,21 @@ def _inject_card_css():
                       padding:8px 14px; font-size:.85rem; font-weight:700; color:#334155;
                       box-shadow:0 2px 8px rgba(15,23,42,.04); }
 
-      /* ── 우측 패널 ── */
-      .cb-panel-title { font-size:1rem; font-weight:900; color:#0f172a; margin-bottom:2px; }
-      .cb-panel-sub { font-size:.8rem; color:#94a3b8; margin-bottom:12px; }
-      .cb-tip { background:#fffbeb; border:1px solid #fde68a; border-radius:16px;
-                padding:16px 18px; }
-      .cb-tip-title { font-size:.9rem; font-weight:800; color:#92400e; margin-bottom:8px; }
-      .cb-tip-item { font-size:.85rem; color:#78350f; line-height:1.6; }
+      /* ── 우측 패널 ── (좁은 폭에 맞춰 제목·부제목·칩 전반 축소) */
+      .cb-panel-title { font-size:.9rem; font-weight:900; color:#0f172a; margin-bottom:2px; }
+      .cb-panel-sub { font-size:.72rem; color:#94a3b8; margin-bottom:10px; }
+      /* 추천 질문 칩(st.button): cb-suggest 래퍼 다음에 오는 Streamlit 버튼만 스타일.
+         라벨이 2줄로 접혀도 답답하지 않도록 세로 패딩·줄간격을 넉넉히 준다. */
+      .cb-suggest + div [data-testid="stButton"] > button {
+          font-size:.76rem; font-weight:700; line-height:1.4;
+          padding:10px 12px; min-height:0; text-align:left;
+          white-space:nowrap; border-radius:12px; }
+      /* 칩 사이 간격 약간 확보 */
+      .cb-suggest + div [data-testid="stButton"] { margin-bottom:7px; }
+      .cb-tip { background:#fffbeb; border:1px solid #fde68a; border-radius:14px;
+                padding:12px 13px; }
+      .cb-tip-title { font-size:.8rem; font-weight:800; color:#92400e; margin-bottom:6px; }
+      .cb-tip-item { font-size:.74rem; color:#78350f; line-height:1.55; }
     </style>
     """, unsafe_allow_html=True)
 
