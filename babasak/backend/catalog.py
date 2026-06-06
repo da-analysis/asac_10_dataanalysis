@@ -362,15 +362,26 @@ def _is_weight_unit(unit: str) -> bool:
     return bool(_WEIGHT_UNIT_RE.match((unit or "").replace(" ", "")))
 
 
+def _unit_to_grams(unit: str) -> float:
+    """무게/부피 단위 문자열을 g(또는 ml)로 환산. 환산 불가하면 0."""
+    m = _WEIGHT_UNIT_RE.match((unit or "").replace(" ", ""))
+    if not m:
+        return 0.0
+    s = (unit or "").replace(" ", "").lower()
+    num = float(re.match(r"\d+(?:\.\d+)?", s).group())
+    return num * 1000 if (s.endswith("kg") or s.endswith("l")) else num
+
+
 def _best_unit(units: set[str]) -> str:
     """KAMIS 단위 후보 중 무게단위(kg/g)를 개수단위(개/장)보다 우선 선택.
 
     개수단위 도매가는 팩 크기에 따라 단가가 들쭉날쭉(계란 10개 608원/개 vs 30개 205원/개)
-    이라 kg 환산 신뢰도가 낮다. 무게단위가 있으면 그걸 골라 정확히 환산한다.
+    이라 kg 환산 신뢰도가 낮다. 무게단위가 있으면 그걸 고르되, 소포장(100g)은 도매가가
+    부풀려지므로 실제 중량이 가장 큰 단위(2kg > 100g)를 우선해 정확도를 높인다.
     """
-    weights = sorted(u for u in units if _is_weight_unit(u))
+    weights = [u for u in units if _is_weight_unit(u)]
     if weights:
-        return weights[0]
+        return max(weights, key=_unit_to_grams)
     return sorted(units)[0]
 
 
