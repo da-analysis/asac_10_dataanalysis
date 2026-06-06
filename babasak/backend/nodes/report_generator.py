@@ -371,6 +371,7 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
             "menu": menu,
             "servings": recipe.get("servings"),
             "servings_num": servings_num,                    # 인분수(라벨/검증용)
+            "servings_estimated": calc.get("servings_estimated", False),  # 분량 미상 추정 여부
             "difficulty": recipe.get("difficulty"),
             "cooking_time": recipe.get("cooking_time"),
             "has_cost": has_cost,

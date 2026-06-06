@@ -599,48 +599,68 @@ def price_search_node(state: dict) -> dict:
     if ingredients and _detect_trend_request(user_query):
         from backend.catalog import resolve_ingredient
         trend_days = _extract_trend_days(user_query)
-        target_name = ingredients[0]
-        resolved = resolve_ingredient(target_name)
-        if resolved.status == "matched" and resolved.db_name and resolved.db_unit:
+        _TREND_MAX_INGREDIENTS = 5
+        trend_targets = ingredients[:_TREND_MAX_INGREDIENTS]
+        trend_dropped = ingredients[_TREND_MAX_INGREDIENTS:]
+        frames = []      # 차트용 (재료명 태그된 df)
+        summaries = []   # 재료별 요약 한 줄
+        names = []       # 차트에 실린 재료명
+        sqls = []
+        no_data = []     # 매칭 실패 또는 데이터 없음
+        for target_name in trend_targets:
+            resolved = resolve_ingredient(target_name)
+            if not (resolved.status == "matched" and resolved.db_name and resolved.db_unit):
+                no_data.append(target_name)
+                continue
             ts_result = _timeseries_sql_query(
                 target_name, resolved.db_name, resolved.db_unit, trend_days
             )
-            price_data = {
-                "source": "timeseries_direct",
-                "data": [target_name],
-            }
-            if ts_result["text"]:
-                price_data["text"] = ts_result["text"]
             if ts_result["sql"]:
-                price_data["sql"] = ts_result["sql"]
-            if ts_result["dataframe"] is not None and not ts_result["dataframe"].empty:
-                df = ts_result["dataframe"]
-                chart_html = generate_chart_html(df, user_query=user_query)
-                if chart_html:
-                    price_data["chart_html"] = chart_html
-                    # 차트가 있으면 전체 테이블 대신 간단 요약만 전달 (가독성 향상)
-                    avg_price = int(df["평균가격"].mean())
-                    max_price = int(df["평균가격"].max())
-                    min_price = int(df["평균가격"].min())
-                    start_date = df["날짜"].min().strftime("%Y-%m-%d")
-                    end_date = df["날짜"].max().strftime("%Y-%m-%d")
-                    price_data["text"] = (
-                        f"{target_name} 최근 {trend_days}일 가격 추이를 조회했습니다. "
-                        f"(기간: {start_date} ~ {end_date}, "
-                        f"평균 \u20a9{avg_price:,}, 최고 \u20a9{max_price:,}, 최저 \u20a9{min_price:,}) "
-                        f"인터랙티브 차트가 아래에 표시됩니다. "
-                        f"[주의: 날짜별 가격 목록, 텍스트 그래프, ASCII 차트를 절대 작성하지 마세요. "
-                        f"위 요약 한 줄만 전달하세요.]"
-                    )
-                else:
-                    # 차트 생성 실패 시에만 테이블 표시 (최대 7행)
-                    price_data["table"] = df.to_string(index=False, max_rows=7)
+                sqls.append(ts_result["sql"])
+            df = ts_result["dataframe"]
+            if df is not None and not df.empty:
+                tagged = df.copy()
+                tagged["재료명"] = target_name
+                frames.append(tagged)
+                names.append(target_name)
+                summaries.append(
+                    f"{target_name}: 평균 \u20a9{int(df['평균가격'].mean()):,}, "
+                    f"최고 \u20a9{int(df['평균가격'].max()):,}, 최저 \u20a9{int(df['평균가격'].min()):,}"
+                )
+            else:
+                no_data.append(target_name)
+
+        if frames:
+            combined = pd.concat(frames, ignore_index=True)
+            price_data = {"source": "timeseries_direct", "data": names}
+            if sqls:
+                price_data["sql"] = "\n\n".join(sqls)
+            chart_html = generate_chart_html(combined, user_query=user_query)
+            start_date = combined["날짜"].min().strftime("%Y-%m-%d")
+            end_date = combined["날짜"].max().strftime("%Y-%m-%d")
+            note = ""
+            if trend_dropped:
+                note += f" (재료가 많아 {len(trend_dropped)}개 제외: {', '.join(trend_dropped)})"
+            if no_data:
+                note += f" [데이터 없음: {', '.join(no_data)}]"
+            if chart_html:
+                price_data["chart_html"] = chart_html
+                price_data["text"] = (
+                    f"최근 {trend_days}일 가격 추이를 조회했습니다 "
+                    f"(기간: {start_date} ~ {end_date}). " + " / ".join(summaries) + note
+                    + " 인터랙티브 차트가 아래에 표시됩니다. "
+                    f"[주의: 날짜별 가격 목록, 텍스트 그래프, ASCII 차트를 절대 작성하지 마세요. "
+                    f"위 요약만 전달하세요.]"
+                )
+            else:
+                price_data["table"] = combined.to_string(index=False, max_rows=7)
             archive("price_search.timeseries_direct", {
-                "ingredient": target_name,
+                "ingredients": names,
+                "dropped": trend_dropped,
+                "no_data": no_data,
                 "days": trend_days,
                 "has_chart": bool(price_data.get("chart_html")),
-                "num_rows": len(ts_result["dataframe"]) if ts_result["dataframe"] is not None else 0,
-                "error": ts_result.get("error"),
+                "num_rows": len(combined),
             })
             return {"price_info": price_data}
 
