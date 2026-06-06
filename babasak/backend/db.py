@@ -763,23 +763,28 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
         """, menu=menu, missing=missing, missing_lv1=missing_lv1).data()
 
         # 이 메뉴의 대표 main_ingredient 조회 (제육볶음 → '돼지고기')
-        # → missing이 이 요리의 핵심 재료인지 판정하는 데 사용
-        mi_row = session.run("""
-            MATCH (r:Recipe)
-            WHERE r.name CONTAINS $menu AND r.main_ingredient IS NOT NULL
-            RETURN r.main_ingredient AS mi, count(*) AS c
-            ORDER BY c DESC LIMIT 1
-        """, menu=menu).single()
-        menu_main = (mi_row["mi"] if mi_row else "") or ""
+        # ★ menu 없는 일반 대체(standalone)면 r.name CONTAINS "" 가 전체 레시피에 매칭돼
+        #   menu_main이 '전체 최빈재료(=돼지고기)'로 잡혀 엉뚱하게 is_core=True가 되므로 건너뛴다.
+        menu_main = ""
+        recipe_ing_names = []
+        if menu:
+            mi_row = session.run("""
+                MATCH (r:Recipe)
+                WHERE r.name CONTAINS $menu AND r.main_ingredient IS NOT NULL
+                RETURN r.main_ingredient AS mi, count(*) AS c
+                ORDER BY c DESC LIMIT 1
+            """, menu=menu).single()
+            menu_main = (mi_row["mi"] if mi_row else "") or ""
 
-        # 이 메뉴 레시피에 이미 들어가는 재료 — 대체재에서 제외(겹치면 대체 의미 없음)
-        recipe_ing_names = [
-            x["name"] for x in session.run("""
-                MATCH (r:Recipe)-[:CONTAINS]->(ing:Ingredient)
-                WHERE r.name CONTAINS $menu
-                RETURN DISTINCT ing.name AS name
-            """, menu=menu).data() if x.get("name")
-        ]
+            # 이 메뉴 레시피에 이미 들어가는 재료 — 대체재에서 제외(겹치면 대체 의미 없음)
+            recipe_ing_names = [
+                x["name"] for x in session.run("""
+                    MATCH (r:Recipe)-[:CONTAINS]->(ing:Ingredient)
+                    WHERE r.name CONTAINS $menu
+                    RETURN DISTINCT ing.name AS name
+                """, menu=menu).data() if x.get("name")
+            ]
+
 
     # ── 핵심 재료(core) 판정 ──
     # 제육볶음의 돼지고기처럼, missing이 그 요리의 '정체성' 재료면
@@ -809,7 +814,7 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
         return s
 
     # 제외 집합: 레시피에 이미 있는 재료 + missing 자신
-    _exclude = {_compact(n) for n in recipe_ing_names} | {_compact(missing)}
+    _exclude = {_compact(missing)}
     # 동의어 제외: alias 테이블로 같은 품목으로 정규화되면 제외(파=대파, 달걀=계란, 오징어=물오징어 등 데이터 기반)
     from backend.catalog import get_alias_table
     _alias_tbl = get_alias_table()
@@ -825,8 +830,12 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
             continue
         if _canon(name) == _missing_canon:   # 동의어 제외(파↔대파 등)
             continue
+        _mc, _nc = _compact(missing), _compact(name)
+        if len(_mc) >= 2 and (_mc in _nc or _nc in _mc):
+            continue
         if not is_allowed_substitute_for_menu(menu, missing, name):
             continue
+
         fs = _family_score(name, row.get("lv2"))
         ranked.append((fs, row.get("menu_count", 0), row.get("recipe_count", 0), row))
     # 계열성 > 메뉴 등장수 > 전체 빈도 순
