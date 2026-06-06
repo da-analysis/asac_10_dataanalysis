@@ -182,7 +182,44 @@ def _get_warehouse_id(w: WorkspaceClient) -> str | None:
     return warehouses[0].id if warehouses else None
 
 
-def _direct_sql_query(targets: list[tuple[str, str, str]]) -> dict:
+# ─── 지역(시도) 매핑 ─────────────────────────────────────────────
+# 프로필 '[업종: X, 지역: Y]'의 지역은 자유 입력("서울 강남구")이라 silver.ingredient.ingredient의
+# `시도`(서울/부산/경기...) 값으로 매핑해 그 지역 도매가로 원가를 낸다. 지역 데이터가 없는
+# 재료는 전국 평균으로 폴백(COALESCE). B2B/네이버 가격엔 지역이 없어 그대로 둔다.
+_SIDO_LIST = ("서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
+              "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주")
+_SIDO_ALIASES = {"충청북도": "충북", "충청남도": "충남", "전라북도": "전북",
+                 "전라남도": "전남", "경상북도": "경북", "경상남도": "경남"}
+
+
+def _sido_from_region(region: str) -> str | None:
+    """자유 입력 지역('서울 강남구', '경기도 수원') → silver `시도` 값. 못 찾으면 None."""
+    t = (region or "").strip()
+    if not t:
+        return None
+    for long_name, short in _SIDO_ALIASES.items():
+        if t.startswith(long_name):
+            return short
+    for s in _SIDO_LIST:
+        if t.startswith(s) or s in t:
+            return s
+    return None
+
+
+def _extract_region(state: dict) -> str:
+    """메시지의 '[업종: X, 지역: Y]'에서 지역 추출. 없으면 ''."""
+    try:
+        for msg in reversed(state.get("messages", []) or []):
+            content = getattr(msg, "content", "") or ""
+            m = re.search(r"지역:\s*([^,\]\n]+)", content)
+            if m:
+                return m.group(1).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _direct_sql_query(targets: list[tuple[str, str, str]], region: str | None = None) -> dict:
     """카탈로그 (재료명, 단위) 조합으로 statement_execution을 직접 호출.
 
     Genie 우회 — LLM SQL 생성을 건너뛰고 결정적인 WHERE 절로 최근 30일 평균 도매가 조회.
@@ -204,11 +241,12 @@ def _direct_sql_query(targets: list[tuple[str, str, str]]) -> dict:
     # input_name 입히기(text/found/prices 구성)는 캐시 hit/miss 공통으로 마지막에 1회만
     # 수행한다. → 같은 db재료를 다른 input_name으로 조회해도(예: '마늘'/'다진마늘'→'깐마늘')
     # 캐시가 input_name에 오염되지 않는다.
-    cache_key = tuple(sorted((t[1], t[2]) for t in targets))
+    sido = _sido_from_region(region)   # 지역 설정 시 그 시도 도매가, 없으면 None(전국)
+    cache_key = tuple(sorted((t[1], t[2]) for t in targets)) + (sido or "",)
     cached = _direct_sql_cache.get(cache_key)
     if cached and (time.time() - cached[0] < _CACHE_TTL_SECONDS):
         rows_by_db, sql = cached[1], cached[2]
-        return _direct_sql_assemble(targets, rows_by_db, sql, cached_hit=True)
+        return _direct_sql_assemble(targets, rows_by_db, sql, cached_hit=True, sido=sido)
 
     # WHERE 절 동적 생성: (재료명='X' AND 단위='Y') OR ...
     where_clauses = []
@@ -218,8 +256,15 @@ def _direct_sql_query(targets: list[tuple[str, str, str]]) -> dict:
         safe_unit = (db_unit or "").replace("'", "''")
         where_clauses.append(f"(`재료명` = '{safe_name}' AND `단위` = '{safe_unit}')")
 
+    # 지역(시도) 설정 시: 그 지역 평균을 우선, 그 지역에 데이터 없으면 전국 평균으로 폴백(COALESCE).
+    if sido:
+        safe_sido = sido.replace("'", "''")
+        price_expr = ("ROUND(COALESCE("
+                      f"AVG(CASE WHEN `시도` = '{safe_sido}' THEN `가격` END), AVG(`가격`)))")
+    else:
+        price_expr = "ROUND(AVG(`가격`))"
     sql = f"""
-SELECT `재료명`, `단위`, ROUND(AVG(`가격`)) AS `평균가격`, COUNT(*) AS `행수`
+SELECT `재료명`, `단위`, {price_expr} AS `평균가격`, COUNT(*) AS `행수`
 FROM silver.ingredient.ingredient
 WHERE ({" OR ".join(where_clauses)})
   AND `날짜` >= DATE_SUB(CURRENT_DATE(), 30)
@@ -261,7 +306,7 @@ GROUP BY `재료명`, `단위`
             del _direct_sql_cache[next(iter(_direct_sql_cache))]
         _direct_sql_cache[cache_key] = (time.time(), rows_by_db, sql)
 
-        return _direct_sql_assemble(targets, rows_by_db, sql, cached_hit=False)
+        return _direct_sql_assemble(targets, rows_by_db, sql, cached_hit=False, sido=sido)
     except Exception as e:
         return {"text": "", "found": [], "prices": {}, "error": f"exception: {str(e)}"}
 
@@ -271,6 +316,7 @@ def _direct_sql_assemble(
     rows_by_db: dict[tuple[str, str], int],
     sql: str,
     cached_hit: bool,
+    sido: str | None = None,
 ) -> dict:
     """db단위 행 데이터(rows_by_db)에 호출자 targets의 input_name을 입혀 결과 구성.
 
@@ -281,6 +327,7 @@ def _direct_sql_assemble(
     lines: list[str] = []
     found_inputs: list[str] = []
     prices: dict[str, dict] = {}
+    _note = "KAMIS direct_sql 평균 도매가" + (f" ({sido} 기준)" if sido else "")
     for input_name, db_name, db_unit in targets:
         avg_price = rows_by_db.get((db_name, db_unit))
         if avg_price is None or avg_price <= 0:
@@ -295,7 +342,7 @@ def _direct_sql_assemble(
                 "price_per_kg": price_per_kg,
                 "confidence": "high",
                 "unit_hint": f"{db_unit} (KAMIS direct_sql)",
-                "note": "KAMIS direct_sql 평균 도매가",
+                "note": _note,
             }
             lines.append(
                 f"{input_name}: 약 ₩{price_per_kg:,}/kg "
@@ -308,7 +355,7 @@ def _direct_sql_assemble(
                 "price_per_kg": price_per_kg,
                 "confidence": "high",
                 "unit_hint": f"{db_unit} → kg 환산 (KAMIS direct_sql)",
-                "note": "KAMIS direct_sql 평균 도매가",
+                "note": _note,
             }
             lines.append(
                 f"{input_name}: 약 ₩{price_per_kg:,}/kg "
@@ -329,7 +376,7 @@ def _direct_sql_assemble(
                     "price_per_kg": price_per_kg,
                     "confidence": "high",
                     "unit_hint": f"{db_unit} → kg 환산 (1{db_unit.rstrip('0123456789')}≈{grams_per_piece:g}g, KAMIS direct_sql)",
-                    "note": "KAMIS direct_sql 평균 도매가",
+                    "note": _note,
                 }
                 lines.append(
                     f"{input_name}: 약 ₩{price_per_kg:,}/kg "
@@ -529,6 +576,7 @@ def price_search_node(state: dict) -> dict:
     entities = state.get("entities", {})
     recipe_info = state.get("recipe_info", {})
     loop_count = state.get("loop_count", 0)
+    region = _extract_region(state)   # 지역 설정 시 그 시도(서울/부산..) 도매가로 원가 산정
 
     ingredients = []
     if recipe_info and recipe_info.get("data"):
@@ -664,6 +712,8 @@ def price_search_node(state: dict) -> dict:
     archive("price_search.input", {
         "ingredients": ingredients,
         "num_ingredients": len(ingredients),
+        "region": region,                          # 사용자 설정 지역(자유 입력)
+        "sido": _sido_from_region(region),         # 매핑된 시도(가격 필터 적용값) — None이면 전국
         "batch_size": _GENIE_BATCH_SIZE,
         "trace_ids": trace_ids,
         "groups": {
@@ -703,8 +753,8 @@ def price_search_node(state: dict) -> dict:
                     name=f"direct_sql_first_[{','.join(t[0] for t in catalog_targets)[:60]}]",
                     span_type=SpanType.RETRIEVER,
                 ) as span:
-                    span.set_inputs({"targets": catalog_targets})
-                    df_result = _direct_sql_query(catalog_targets)
+                    span.set_inputs({"targets": catalog_targets, "region": region})
+                    df_result = _direct_sql_query(catalog_targets, region=region)
                     span.set_outputs({
                         "found": df_result.get("found"),
                         "error": df_result.get("error"),

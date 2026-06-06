@@ -588,15 +588,17 @@ def _extract_industry(state: dict) -> str:
 
 
 def _parse_servings(servings) -> int:
-    """'3인분'->3, '2~3인분'->2, '4인분 이상'->4, 숫자 없으면 1.
-    레시피 재료 수량은 이 인분 기준이므로, 1인분 원가는 (전체÷인분수)."""
+    """'3인분'->3, '2~3인분'->2, '4인분 이상'->4, 숫자 없으면 2(안전 기본값).
+    레시피 재료 수량은 이 인분 기준이므로, 1인분 원가는 (전체÷인분수).
+    분량 미상을 1로 두면 전체 원가가 1인분으로 잡혀 과대표시되므로 2로 둔다.
+    (recipe_search에서 분량 있는 레시피를 우선 거르므로 이 기본값은 폴백용.)"""
     if not servings:
-        return 1
+        return 2
     m = re.search(r'\d+', str(servings))
     if m:
         n = int(m.group())
-        return n if n > 0 else 1
-    return 1
+        return n if n > 0 else 2
+    return 2
 
 
 def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
@@ -809,9 +811,13 @@ def _candidate_ppk(cname: str, price_map: dict) -> int | None:
     return None
 
 
-# 대체 제안 임계값: 싼 재료(참치 한 캔 684원 등)나 미미한 절감엔 제안하지 않는다.
-_SUB_MIN_TARGET_COST = 1500   # 이 금액(원) 미만 주재료는 대체 제안 대상 아님
-_SUB_MIN_SAVING_WON = 300     # 접시당 절감이 이 미만이면 제안 생략
+# 대체 제안 임계값: 싼 재료나 미미한 절감엔 제안하지 않는다. (너무 빡세면 0개라 완화)
+_SUB_MIN_TARGET_COST = 1000   # 이 금액(원) 미만 주재료는 대체 제안 대상 아님
+_SUB_MIN_SAVING_WON = 200     # 접시당 절감이 이 미만이면 제안 생략
+
+# 계란·달걀 등 '고명/가벼운 단백질'은 주재료(돼지고기·참치 등)의 대체 후보로 부적합.
+# (참치→계란 같은 엉뚱한 제안 차단. 참치→스팸·고기 같은 '진짜 주재료' 교차는 허용.)
+_SUBSTITUTE_GARNISH = ("계란", "달걀", "메추리알", "어묵", "맛살", "게맛살")
 
 
 def _build_substitute_line(calc: dict, price_map: dict) -> str:
@@ -858,6 +864,9 @@ def _build_substitute_line(calc: dict, price_map: dict) -> str:
             # 후보도 '진짜 단백질명'이어야 한다. (Neo4j lv1 분류 노이즈로 김치국물·국물류가
             #  단백질로 새서 돼지고기 대체재로 뜨는 것 차단 — 물/국물류도 제외)
             if not _is_protein(cname) or _is_non_cost_ingredient(cname):
+                continue
+            # 계란 같은 고명/가벼운 단백질은 주재료 대체로 부적합 → 제외 (참치→계란 차단)
+            if any(g in cname for g in _SUBSTITUTE_GARNISH):
                 continue
             # 후보 가격은 price_map에 없을 수 있어 따로 조회(B2B 등) — 이게 핵심 수정
             cppk = _candidate_ppk(cname, price_map)

@@ -284,10 +284,29 @@ def _card_estimate_qty(name: str) -> str:
     return "약 80g(추정)"
 
 
+def _combo_modifier_ingredients(recipe_info: dict) -> list[str]:
+    """조합 메뉴의 graph_context에서 base 레시피에 끼워넣을 modifier 재료를 모은다.
+    예: '김치 된장찌개' → ['김치']. 미지의 modifier('말차' 등)는 후보가 없으면 빈 list."""
+    out = []
+    for blk in (recipe_info.get("graph_context") or []):
+        if not isinstance(blk, dict):
+            continue
+        for key in ("modifier_ingredients", "modifier_menus"):
+            for x in (blk.get(key) or []):
+                name = x if isinstance(x, str) else (x.get("name") if isinstance(x, dict) else None)
+                if name and name not in out:
+                    out.append(name)
+    return out
+
+
 def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
     """recipe_info + cost_info에서 카드 렌더용 dict 조립. 정보 없으면 {}."""
     if not isinstance(recipe_info, dict):
         return {}
+    # 조합 메뉴(없는 메뉴를 graph_context로 합성: '말차 제육볶음' 등)도 카드로 보여준다.
+    # base 레시피('제육볶음')를 기반으로 1장의 카드를 만들되, 카드 제목은 사용자가
+    # 요청한 조합명('말차 제육볶음')으로 바꾸고 modifier 재료를 끼워넣어 오해를 줄인다.
+    is_combo = recipe_info.get("search_type") == "keyword_with_graph_context"
     recipes_src = recipe_info.get("data") or []
     if not isinstance(recipes_src, list) or not recipes_src:
         return {}
@@ -369,6 +388,25 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
             "steps": _clean_steps_for_card(recipe.get("steps")),
             "substitute": calc.get("substitute"),
         })
+
+    # 조합 메뉴: base 카드 1장만 남겨 조합명으로 relabel + modifier 재료 주입.
+    # (base 변형 3장이 같은 조합명으로 중복 표시되는 것을 막는다)
+    if is_combo and card_recipes:
+        combo_name = (recipe_info.get("original_query") or "").strip()
+        first = card_recipes[0]
+        first["is_combo"] = True
+        first["base_menu"] = first.get("menu")   # relabel 전 base 메뉴명 보존
+        if combo_name:
+            first["menu"] = combo_name
+        existing = {ing.get("name") for ing in (first.get("ingredients") or [])}
+        for mi in _combo_modifier_ingredients(recipe_info):
+            if mi and mi not in existing:
+                first.setdefault("ingredients", []).append({
+                    "name": mi, "quantity": "적당량(조합 추가)",
+                    "price_per_kg": None, "cost": None, "source": "non_cost",
+                })
+                existing.add(mi)
+        card_recipes = [first]
 
     new_menus = []
     for s in (recipe_info.get("ai_new_menu_suggestions") or []):
