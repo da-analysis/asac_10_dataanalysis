@@ -10,7 +10,7 @@ def _get_last_human_query(messages: list) -> str:
     return ""
 
 
-MAX_LOOP_COUNT = 5
+MAX_LOOP_COUNT = 8
 
 _llm_router = None
 
@@ -96,6 +96,10 @@ def _rule_based_route(state: dict, query: str) -> str | None:
     if has_recipe and intent in ("recipe_only", "recommendation", "alternative"):
         return "report_generator"
 
+    # 규칙 9 (안전망): general/미분류 — 더 수집할 게 없으면 LLM fallback 대신 바로 report
+    if intent == "general" or has_recipe or has_price:
+        return "report_generator"
+
     return None
 
 
@@ -152,12 +156,14 @@ def router_node(state: dict) -> dict:
 - 누락 재료 존재: {"있음" if has_unavailable else "없음/미확인"}
 - 원가 계산 완료: {"완료" if has_cost else "미완료"}
 
-[라우팅 규칙]
+[현재 사용자 의도(intent): {state.get("entities", {}).get("intent", "general")}]
+
+[라우팅 규칙 — 위에서부터 먼저 매칭되는 것 하나만]
 1. 레시피/재료가 필요한데 없으면 → recipe_search
 2. 가격/시세가 필요한데 없으면 → price_search
-3. 가격 조회 후 누락 재료가 있으면 → missing_price_search
-4. 레시피+가격 있고 원가 계산이 안 되었으면 → cost_calculator
-5. 모든 정보가 충분하면 → report_generator
+3. 가격이 수집됐고 누락 재료가 있으면 → missing_price_search
+4. 레시피와 가격이 모두 있고, 원가 계산이 안 됐으며, 의도가 cost_analysis(원가/마진)이면 → cost_calculator
+5. 그 외 정보가 충분하면 → report_generator
 """
 
     messages = [
