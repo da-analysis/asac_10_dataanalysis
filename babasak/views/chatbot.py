@@ -355,7 +355,8 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
         cr = rc.get("cost_ratio_pct") or 30      # 백엔드 기준 원가율, 없으면 서비스 기본값
         mp = rc.get("margin_pct") or (100 - cr)  # 매출총이익률 = 100 - 원가율
         pricing_label = _esc(rc.get("pricing_label") or f"원가율 {cr}%")
-        srows = [f'<div class="fc-srow"><span class="k">예상 원가</span><span class="v">{_won(total)}</span></div>']
+        _est_label = '예상 원가 <span class="fc-muted">(분량 미상·2인분 추정)</span>' if rc.get("servings_estimated") else '예상 원가'
+        srows = [f'<div class="fc-srow"><span class="k">{_est_label}</span><span class="v">{_won(total)}</span></div>']
         if price:
             srows.append(f'<div class="fc-srow"><span class="k">권장 판매가 ({pricing_label})</span>'
                          f'<span class="v">{_won(price)}</span></div>')

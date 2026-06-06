@@ -113,6 +113,19 @@ _DEFAULT_GRAMS_SEASONING = 10.0   # 양념류 기본 ~1작은술 수준
 _DEFAULT_GRAMS_OTHER = 80.0       # 그 외(주/부재료) 기본
 _DEFAULT_GRAMS_PIECE = 100.0      # 개수단위인데 품목별 1개 무게를 모를 때 1개당 추정
 
+
+def _lookup_piece_grams(ingredient_name: str) -> float | None:
+    if not ingredient_name:
+        return None
+    ppg = _PER_PIECE_GRAMS.get(ingredient_name)
+    if ppg:
+        return ppg
+    # 복합/변형 표기(냉동새우 등) — 2글자 이상 키를 긴 것부터 부분 매칭
+    for key in sorted((k for k in _PER_PIECE_GRAMS if len(k) >= 2), key=len, reverse=True):
+        if key in ingredient_name:
+            return _PER_PIECE_GRAMS[key]
+    return None
+
 # 분수 패턴: "1/2", "1/3", "2/3" 등
 _FRACTION_RE = re.compile(r"^(\d+)\s*/\s*(\d+)$")
 # 수량 + 단위: "1큰술", "1.5kg", "200g", "1/2모", "5개" 등
@@ -157,7 +170,7 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
         # 단위 없이 숫자만 들어오면 '개'로 추정
         num = _parse_number(q)
         if num is not None:
-            ppg = _PER_PIECE_GRAMS.get(ingredient_name)
+            ppg = _lookup_piece_grams(ingredient_name)
             if ppg:
                 return (num * ppg, f"bare_number_piece:{ppg}g/개")
             # 품목 무게를 몰라도 0으로 버리지 말고 기본 개당무게로 추정
@@ -175,7 +188,7 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
 
     # 개수 단위(개/모/대/장/포기/쪽/캔/조각/줄 등)
     if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리", "짝", "덩이", "덩어리"):
-        ppg = _PER_PIECE_GRAMS.get(ingredient_name)
+        ppg = _lookup_piece_grams(ingredient_name)
         if ppg:
             return (num * ppg, f"piece:{ppg}g/{unit}")
         # 품목별 1개 무게를 몰라도 원가 미확인으로 버리지 말고 기본값으로 추정
@@ -183,7 +196,7 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
 
     # 단위 없음
     if not unit:
-        ppg = _PER_PIECE_GRAMS.get(ingredient_name)
+        ppg = _lookup_piece_grams(ingredient_name)
         if ppg:
             return (num * ppg, f"no_unit_piece:{ppg}g")
         return (num * _DEFAULT_GRAMS_PIECE, f"no_unit_default:{int(_DEFAULT_GRAMS_PIECE)}g")
@@ -228,7 +241,7 @@ def _genie_price_to_per_kg(qty: float, unit: str, price: int, name: str) -> int 
     if unit in _GENIE_UNIT_TO_GRAMS:
         grams = qty * _GENIE_UNIT_TO_GRAMS[unit]
     else:
-        ppg = _PER_PIECE_GRAMS.get(name)
+        ppg = _lookup_piece_grams(name)
         if not ppg:
             return None
         grams = qty * ppg
@@ -587,18 +600,19 @@ def _extract_industry(state: dict) -> str:
 # 사용자 입력이 없을 때만 BASE_COST_RATE를 쓰고, 입력된 마진율/원가율은 _pricing_policy_from_state에서 해석한다.
 
 
-def _parse_servings(servings) -> int:
-    """'3인분'->3, '2~3인분'->2, '4인분 이상'->4, 숫자 없으면 2(안전 기본값).
+def _parse_servings(servings) -> tuple[int, bool]:
+    """'3인분'->（3,False), '2~3인분'->(2,False), 숫자 없으면 (2,True).
+    두 번째 값은 estimated(분량 미상으로 기본값 추정 여부).
     레시피 재료 수량은 이 인분 기준이므로, 1인분 원가는 (전체÷인분수).
     분량 미상을 1로 두면 전체 원가가 1인분으로 잡혀 과대표시되므로 2로 둔다.
     (recipe_search에서 분량 있는 레시피를 우선 거르므로 이 기본값은 폴백용.)"""
     if not servings:
-        return 2
+        return (2, True)
     m = re.search(r'\d+', str(servings))
     if m:
         n = int(m.group())
-        return n if n > 0 else 2
-    return 2
+        return (n, False) if n > 0 else (2, True)
+    return (2, True)
 
 
 def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
@@ -676,12 +690,13 @@ def _calc_recipe_cost(recipe: dict, price_map: dict) -> dict:
                 ),
             })
 
-    servings_num = _parse_servings(recipe.get("servings"))
+    servings_num, servings_estimated = _parse_servings(recipe.get("servings"))
     return {
         "menu": recipe.get("menu") or recipe.get("name") or "이름없음",
         "rank": recipe.get("_rank"),
         "servings": recipe.get("servings"),
         "servings_num": servings_num,                       # 인분 수 (숫자)
+        "servings_estimated": servings_estimated,           # 분량 미상으로 2인분 추정 여부
         "difficulty": recipe.get("difficulty"),
         "items": items_out,
         "total_cost": total,                                # 전체(N인분) 재료비
@@ -739,7 +754,8 @@ def _format_recipe_section(calc: dict) -> str:
         if calc["unconfirmed_count"] else ""
     ))
     if total:
-        lines.append(f"**1인분 예상 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else ""))
+        est_note = " (분량 미상·2인분 추정)" if calc.get("servings_estimated") else ""
+        lines.append(f"**1인분 예상 원가:** {per:,}원" + (f"  (전체 {total:,}원 ÷ {sv}인분)" if sv > 1 else "") + est_note)
         lines.append(f"**참고 판매가 [{pricing_label} 기준]:** {sell_price:,}원")
         lines.append(f"**기준 원가율 / 예상 마진율:** {_pct_text(cr)} / {_pct_text(margin_rate)}")
         lines.append(f"**재료 기준 이익:** {profit:,}원")
