@@ -197,14 +197,14 @@ def _build_ai_briefing(ingredients: list[dict]) -> str:
     parts = []
     if ups:
         top = ups[0]
-        head = f"{_b(_name(top))}가 {_up(abs(top.get('change') or 0))} 올라 상승세를 이끌고 있어요."
+        head = f"{_b(_name(top))}(이)가 {_up(abs(top.get('change') or 0))} 올라 상승세를 이끌고 있어요."
         if len(ups) >= 2:
             others = ", ".join(_name(u) for u in ups[1:3])
-            head += f" {others} 등 총 <strong>{len(ups)}개 품목</strong>이 오르는 중이라 매운·채소 메뉴 단가에 부담이 있을 수 있어요."
+            head += f" {others} 등 총 <strong>{len(ups)}개 품목</strong>이 오르는 중이라 이러한 재료가 부담을 줄 수 있어요."
         parts.append(head)
     if downs:
         top = downs[0]
-        tail = f"반면 {_b(_name(top))}는 {_down(abs(top.get('change') or 0))} 내렸어요."
+        tail = f"반면 {_b(_name(top))}(은)는 {_down(abs(top.get('change') or 0))} 내렸어요."
         if len(downs) >= 2:
             others = ", ".join(_name(d) for d in downs[1:3])
             tail += f" {others} 등 {len(downs)}개 품목이 하락세라, 이 재료를 쓰는 메뉴를 밀면 원가를 아낄 수 있어요."
