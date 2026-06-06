@@ -10,7 +10,7 @@ def _get_last_human_query(messages: list) -> str:
     return ""
 
 
-MAX_LOOP_COUNT = 6
+MAX_LOOP_COUNT = 5
 
 _llm_router = None
 
