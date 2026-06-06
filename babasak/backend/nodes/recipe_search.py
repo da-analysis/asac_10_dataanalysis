@@ -9,9 +9,9 @@ from backend.db import (
     get_recipes_excluding_ingredient,
     recommend_recipes,
     get_popular_recipes,
-    build_graph_relation_context,   
-    find_similar_recipes,           
-    suggest_substitute_ingredient, 
+    build_graph_relation_context,
+    find_similar_recipes,
+    suggest_substitute_ingredient,
 )
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -207,10 +207,10 @@ def recipe_search_node(state: dict) -> dict:
     existing_errors = state.get("error_log", [])
 
     menu = entities.get("menu")
-    ingredient = entities.get("ingredient") 
+    ingredient = entities.get("ingredient")
     exclude = entities.get("exclude")
     is_alternative = entities.get("is_alternative", False)
-    conditions = entities.get("conditions") 
+    conditions = entities.get("conditions")
     is_popular = entities.get("is_popular", False)
     is_similar = entities.get("is_similar", False)
     reference_menu = entities.get("reference_menu") or menu
@@ -430,6 +430,23 @@ def recipe_search_node(state: dict) -> dict:
             leftover = re.sub(r'(이?랑|하고|와|과|및|그리고|좀|는|은|을|를|도|의|에|대해서?|대한|요|줘)', '', leftover)
             has_modifier = bool(menu_compact) and len(leftover) >= 1
 
+            # ★ 근본 수정: 수식어가 남았다는 건 전처리가 메뉴를 줄였을 수 있다는 뜻이다.
+            #   예) '차돌된장찌개' → menu '된장찌개' + 수식어 '차돌'. 이때 곧장 조합(graph)으로
+            #   가면 base 된장찌개만 써서 차돌박이가 빠지고 원가가 과소집계된다.
+            #   → 먼저 '풀 메뉴(차돌된장찌개)'가 DB에 실제 레시피로 있는지 확인한다.
+            #     · 있으면(차돌된장찌개·참치김치찌개): 그 레시피를 쓰고 조합은 만들지 않는다
+            #       (차돌박이 등 핵심재료가 살아 원가가 정확해짐).
+            #     · 없으면(말차제육볶음 같은 진짜 신규 조합): 기존대로 graph_context로 조합.
+            if has_modifier:
+                full_kw = re.sub(r'(\d+\s*인분\s*이?상?|초급|중급|고급)', '', clean_query_compact).strip()
+                if full_kw and full_kw != menu_compact:
+                    full_recipes = search_recipes(full_kw, limit=30)
+                    if full_recipes:
+                        recipes = full_recipes
+                        menu = full_kw
+                        menu_compact = full_kw
+                        has_modifier = False   # 실제 레시피를 찾았으니 조합 불필요
+
             # 1) DB 결과가 비었거나
             # 2) menu가 결과에 매칭 안 되거나
             # 3) modifier가 있으면 (preprocessor가 정규화한 케이스)
@@ -443,7 +460,7 @@ def recipe_search_node(state: dict) -> dict:
             if need_graph_context:
                 # menu 대신 원본 쿼리(modifier 포함)로 graph_context 호출
                 graph_query = clean_query if has_modifier else menu
-                graph_rows = build_graph_relation_context(graph_query, limit=3)
+                graph_rows = build_graph_relation_context(graph_query, limit=2)
                 if graph_rows:
                     if not recipes:
                         return {"recipe_info": {
@@ -468,7 +485,7 @@ def recipe_search_node(state: dict) -> dict:
             seen_ids = set()
             seen_names = set()
             primary = []   # 이름 다른 변형
-            fillers = []   # 같은 이름·다른 레시피 
+            fillers = []   # 같은 이름·다른 레시피
             for r in recipes:
                 rid = r.get("id")
                 if rid is not None and rid in seen_ids:
@@ -511,8 +528,7 @@ def recipe_search_node(state: dict) -> dict:
                 "search_type": "keyword",
             }
             if need_graph_context:
-                graph_query = clean_query if has_modifier else menu
-                graph_rows = build_graph_relation_context(graph_query, limit=2)
+                # 위에서 limit=2로 조회한 graph_rows 재사용 (재조회 제거)
                 if graph_rows:
                     result_payload["graph_context"] = graph_rows
                     result_payload["search_type"] = "keyword_with_graph_context"
