@@ -68,12 +68,14 @@ def _rule_based_route(state: dict, query: str) -> str | None:
         if not has_price:
             return "price_search"
         return "report_generator"
+    
+    is_substitute = (
+    entities.get("substitute_for")
+    or recipe_info.get("search_type") == "substitute")
 
-    # ★ 규칙 3 (C4 핵심 수정): 레시피 있을 때, intent에 따라 분기
     if has_recipe and not has_price:
-        if intent in _NEEDS_PRICE_INTENTS:
+        if intent in _NEEDS_PRICE_INTENTS or is_substitute:
             return "price_search"
-        # recipe_only, recommendation, alternative, general → 가격 불필요, 바로 report
         return "report_generator"
 
     # 규칙 4: 가격 있고 누락 재료 있으면 → missing_price_search

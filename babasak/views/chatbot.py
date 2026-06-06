@@ -404,6 +404,36 @@ def _recipe_card_html(rc: dict, idx: int, single: bool, group: str = "rc") -> st
     menu = _esc(rc.get("menu", "이름없음"))
     total = rc.get("total_cost")
     price = rc.get("suggested_price")
+        # 가격이 검증된 대체재 전용 카드
+    if rc.get("is_substitute_price_card"):
+        target = _esc(rc.get("target", "원본 재료"))
+        target_ppk = rc.get("target_ppk")
+        candidate_ppk = rc.get("candidate_ppk")
+        saving_per_kg = rc.get("saving_per_kg")
+        saving_pct = rc.get("saving_pct")
+        is_cheaper = rc.get("is_cheaper", False)
+        difference_label = "kg당 절감액" if is_cheaper else "kg당 추가비용"
+        rate_label = "예상 절감률" if is_cheaper else "예상 추가비용률"
+        value_class = "fc-green" if is_cheaper else ""
+
+        return (
+            f'<div class="fc-card">'
+            f'<div class="fc-head">'
+            f'<div><span class="fc-pill rank">{idx}위</span>'
+            f'<span class="fc-menu">{menu}</span></div>'
+            f'</div>'
+            f'<div class="fc-summary">'
+            f'<div class="fc-srow"><span class="k">{target} 단가</span>'
+            f'<span class="v">{_won(target_ppk)}/kg</span></div>'
+            f'<div class="fc-srow"><span class="k">{menu} 단가</span>'
+            f'<span class="v">{_won(candidate_ppk)}/kg</span></div>'
+            f'<div class="fc-srow"><span class="k">{difference_label}</span>'
+            f'<span class="v {value_class}">{_won(saving_per_kg)}</span></div>'
+            f'<div class="fc-srow"><span class="k">{rate_label}</span>'
+            f'<span class="v {value_class}">{saving_pct}%</span></div>'
+            f'</div>'
+            f'</div>'
+        )
 
     pill = ('<span class="fc-pill">오늘의 추천</span>' if single
             else f'<span class="fc-pill rank">{idx}위</span>')

@@ -625,16 +625,41 @@ def price_search_node(state: dict) -> dict:
     region = _extract_region(state)   # 지역 설정 시 그 시도(서울/부산..) 도매가로 원가 산정
 
     ingredients = []
-    if recipe_info and recipe_info.get("data"):
+
+# 대체재 질문이면 원본 재료와 모든 대체 후보의 가격을 조회
+    if recipe_info.get("search_type") == "substitute":
+        target = recipe_info.get("missing_ingredient")
+
+        candidates = [
+            row.get("name")
+            for row in recipe_info.get("data", [])
+            if isinstance(row, dict) and row.get("name")
+        ]
+
+        if target:
+            ingredients.append(target)
+        ingredients.extend(candidates)
+
+    elif recipe_info and recipe_info.get("data"):
         for recipe in recipe_info["data"]:
             for ing in recipe.get("ingredients", []):
                 name = ing.get("name", "") if isinstance(ing, dict) else str(ing)
                 if name:
                     ingredients.append(name)
+
     elif entities.get("ingredient"):
-        ingredients = [entities["ingredient"]] if isinstance(entities["ingredient"], str) else entities["ingredient"]
+        ingredients = (
+            [entities["ingredient"]]
+            if isinstance(entities["ingredient"], str)
+            else entities["ingredient"]
+        )
+
     elif entities.get("menu"):
-        ingredients = [entities["menu"]] if isinstance(entities["menu"], str) else entities["menu"]
+        ingredients = (
+            [entities["menu"]]
+            if isinstance(entities["menu"], str)
+            else entities["menu"]
+        )
 
     # ═══ [시계열 추이 요청 감지] ═══════════════════════════════════════════════
     # "계란 가격 추이 보여줘", "양파 시세 알려줘" 등 시계열 요청은

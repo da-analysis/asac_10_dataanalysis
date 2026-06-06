@@ -298,6 +298,55 @@ def _combo_modifier_ingredients(recipe_info: dict) -> list[str]:
                     out.append(name)
     return out
 
+def _attach_substitute_price_comparison(
+    recipe_info: dict,
+    price_info: dict,
+) -> dict:
+    """가격이 확인됐고 원본보다 저렴한 대체재만 남긴다."""
+    if recipe_info.get("search_type") != "substitute":
+        return recipe_info
+
+    result = dict(recipe_info)
+    target = result.get("missing_ingredient")
+    prices = price_info.get("structured_prices", {}) if isinstance(price_info, dict) else {}
+
+    target_ppk = (prices.get(target) or {}).get("price_per_kg")
+    verified = []
+
+    for row in result.get("data", []):
+        if not isinstance(row, dict):
+            continue
+
+        name = row.get("name")
+        candidate_ppk = (prices.get(name) or {}).get("price_per_kg")
+
+        # 원본 또는 후보 가격이 없으면 저렴하다고 증명할 수 없으므로 제외
+        if not target_ppk or not candidate_ppk:
+            continue
+
+        # 원본보다 저렴하지 않으면 제외
+        price_difference = target_ppk - candidate_ppk
+        is_cheaper = price_difference > 0
+
+        verified.append({
+            **row,
+            "target": target,
+            "target_ppk": target_ppk,
+            "candidate_ppk": candidate_ppk,
+            "saving_per_kg": abs(price_difference),
+            "saving_pct": round(abs(price_difference) / target_ppk * 100, 1),
+            "is_cheaper": is_cheaper,
+        })
+
+    verified.sort(key=lambda row: row["candidate_ppk"])
+    result["data"] = verified
+
+    if not target_ppk:
+        result["comparison_note"] = f"'{target}' 가격을 확인할 수 없어 저렴한 대체재를 증명하지 못했습니다."
+    elif not verified:
+        result["comparison_note"] = f"'{target}'보다 가격이 저렴하다고 확인된 대체재가 없습니다."
+
+    return result
 
 def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
     """recipe_info + cost_info에서 카드 렌더용 dict 조립. 정보 없으면 {}."""
@@ -310,6 +359,27 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
     recipes_src = recipe_info.get("data") or []
     if not isinstance(recipes_src, list) or not recipes_src:
         return {}
+    # 가격 검증된 대체재 전용 카드
+    if recipe_info.get("search_type") == "substitute":
+        target = recipe_info.get("missing_ingredient")
+
+        return {
+            "recipes": [
+                {
+                    "menu": row.get("name"),
+                    "is_substitute_price_card": True,
+                    "target": target,
+                    "target_ppk": row.get("target_ppk"),
+                    "candidate_ppk": row.get("candidate_ppk"),
+                    "saving_per_kg": row.get("saving_per_kg"),
+                    "saving_pct": row.get("saving_pct"),
+                    "is_cheaper": row.get("is_cheaper"),
+                }
+                for row in recipes_src
+                if isinstance(row, dict)
+            ]
+        }    
+    
 
     calc_by_menu = {}
     if isinstance(cost_info, dict):
@@ -445,6 +515,8 @@ async def report_generator_node(state: dict) -> dict:
     recipe_info = state.get("recipe_info", {})
     price_info = state.get("price_info", {})
     entities = state.get("entities", {})
+
+    recipe_info = _attach_substitute_price_comparison(recipe_info, price_info)
     user_query = _get_last_human_query(state.get("messages", []))
     rewritten_query = state.get("rewritten_query", "")
     intent = entities.get("intent", "")
