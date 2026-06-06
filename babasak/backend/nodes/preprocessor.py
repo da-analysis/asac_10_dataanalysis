@@ -556,16 +556,11 @@ def preprocessor_node(state: dict) -> dict:
     is_alternative = (intent == 'alternative')
     is_popular = any(kw in query for kw in ['인기', 'top', 'best', '추천순', '랭킹'])
 
-    # analytics: 특정 재료/메뉴가 없는 DB 전체 분석형 질문만 freeform 경로로 전달
-    # 특정 재료가 지정된 추이/시세 질문은 price_inquiry로 재분류하여 timeseries 차트 경로를 탐
+    # analytics: 메뉴/재료 추출 없이 원문 그대로 Genie freeform 경로로 전달
+    # price_search_node는 ingredients=[] + menu=None 이면 _ask_genie(user_query) freeform path를 탄다
     if intent == 'analytics':
-        if ingredients or menu:
-            # 특정 재료/메뉴 + 추이/분석 = price_inquiry (timeseries 차트 경로)
-            intent = 'price_inquiry'
-        else:
-            # 재료 미지정 분석형 질문 → Genie freeform
-            menu = None
-            ingredients = None
+        menu = None
+        ingredients = None
     else:
         # 문자열 매칭으로 LLM이 놓친 엔티티 보강 (보조 역할)
         if not menu:
@@ -580,12 +575,15 @@ def preprocessor_node(state: dict) -> dict:
                 intent = kw_intent
 
     # ═══ Phase 3: 히스토리 carry-over (0ms, 최후 수단) ═══
-    # LLM도 메뉴/재료를 못 찾았을 때만 이전 HumanMessage에서 상속
-    if not menu and not ingredients:
+    # LLM도 메뉴/재료를 못 찾았을 때만 이전 HumanMessage에서 상속.
+    # 단, '대체/대신' 질문은 재료(돼지고기)는 있어도 메뉴 맥락(제육볶음)을 이어받아야
+    # 대체재가 메뉴 기준으로 나온다. ("제육볶음 원가" → "돼지고기 대체재료")
+    _is_sub_query = bool(_SUBSTITUTE_PAT.search(query)) and not _SIMILAR_PHRASE_PAT.search(query)
+    if (not menu and not ingredients) or (not menu and _is_sub_query):
         hist_menu, hist_ings = _carry_from_history(state['messages'])
         if hist_menu:
             menu = hist_menu
-        if hist_ings:
+        if hist_ings and not ingredients:
             ingredients = hist_ings
 
     # ═══ Fallback 감지: 모든 단계에서 엔티티 추출 실패 ═══

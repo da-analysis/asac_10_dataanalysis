@@ -247,8 +247,11 @@ def recipe_search_node(state: dict) -> dict:
     recipe_data = []
 
     try:
-        if substitute_for and (menu or reference_menu):
-            target_menu = menu or reference_menu
+        if substitute_for:
+            # 메뉴가 있으면 메뉴 기준 대체(제육볶음→더 싼 돼지부위), 없으면(첫 질문 등 맥락 없음)
+            # 메뉴 무관 일반 대체(같은 계열 재료)로 처리한다. 예전엔 메뉴 없으면 이 블록을 통째로
+            # 건너뛰어 '돼지고기 든 레시피'(잡채·갈비찜)가 나오던 버그를 막는다.
+            target_menu = menu or reference_menu or ""
             substitutes = suggest_substitute_ingredient(
                 target_menu, substitute_for, limit=5
             )
@@ -258,7 +261,7 @@ def recipe_search_node(state: dict) -> dict:
                 "menu": target_menu,
                 "missing_ingredient": substitute_for,
                 "note": (
-                    f"'{target_menu}'에서 '{substitute_for}' 대체 후보. "
+                    f"'{target_menu or '일반'}'에서 '{substitute_for}' 대체 후보. "
                     "cost_calculator가 가격사전과 매칭해 원가 낮은 거 선택 가능."
                 ),
             }}
