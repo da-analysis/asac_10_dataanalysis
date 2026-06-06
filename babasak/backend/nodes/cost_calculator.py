@@ -95,6 +95,10 @@ _PER_PIECE_GRAMS = {
     "등뼈": 350.0, "돼지등뼈": 350.0, "목등뼈": 350.0, "사골": 500.0,
     "갈비": 250.0, "등갈비": 200.0, "돼지갈비": 250.0, "소갈비": 300.0,
     "닭": 1000.0, "닭다리": 100.0, "닭봉": 50.0, "오리": 1500.0,
+    # 통·낱개 향신료 (장/알 단위, 극소량) — 1개 무게가 매우 작음
+    "월계수잎": 0.3, "통후추": 0.1, "정향": 0.05, "팔각": 1.0, "건고추": 3.0, "마른고추": 3.0,
+    # 잎채소·김 (장 단위) — 1장이 가벼움 (100g 기본은 과대)
+    "깻잎": 2.0, "상추": 4.0, "김": 2.0, "쌈채소": 4.0, "치커리": 3.0,
 }
 
 _QUALITATIVE_GRAMS = {
@@ -112,6 +116,18 @@ _DEFAULT_SEASONING_HINTS = (
 _DEFAULT_GRAMS_SEASONING = 10.0   # 양념류 기본 ~1작은술 수준
 _DEFAULT_GRAMS_OTHER = 80.0       # 그 외(주/부재료) 기본
 _DEFAULT_GRAMS_PIECE = 100.0      # 개수단위인데 품목별 1개 무게를 모를 때 1개당 추정
+_DEFAULT_GRAMS_SPICE_PIECE = 1.0  # 개수단위 향신료(미등록)인데 1개 무게 모를 때 — 100g는 과대
+
+# 가벼운 가루·깨·씨앗류: 큰술/작은술이 일반(15g/5g)보다 가벼움
+_SPOON_UNITS = {
+    "큰술": 8.0, "테이블스푼": 8.0, "스푼": 8.0, "ts": 8.0, "T": 8.0,
+    "작은술": 3.0, "티스푼": 3.0, "tsp": 3.0, "t": 3.0,
+}
+_LIGHT_SPOON_HINTS = (
+    "고춧가루", "고추가루", "밀가루", "부침가루", "튀김가루", "전분", "녹말", "빵가루",
+    "들깨", "들깻가루", "참깨", "통깨", "깨소금", "콩가루", "미숫가루", "카레", "강황",
+    "통후추", "후춧가루", "후추", "다시다", "멸치가루", "다시마가루", "조미료",
+)
 
 
 def _lookup_piece_grams(ingredient_name: str) -> float | None:
@@ -182,15 +198,22 @@ def _quantity_to_grams(quantity: str, ingredient_name: str) -> tuple[float | Non
         return (None, f"bad_number:{m.group('num')}")
     unit = (m.group("unit") or "").strip()
 
+    # 가벼운 가루/깨류는 큰술/작은술이 일반(15g/5g)보다 가벼움(고춧가루·들깨 등 과대 방지)
+    if unit in _SPOON_UNITS and any(p in ingredient_name for p in _LIGHT_SPOON_HINTS):
+        return (num * _SPOON_UNITS[unit], f"light_spoon:{_SPOON_UNITS[unit]}g/{unit}")
+
     # 공통 부피/중량 단위
     if unit in _UNIT_TABLE:
         return (num * _UNIT_TABLE[unit], f"unit:{unit}")
 
-    # 개수 단위(개/모/대/장/포기/쪽/캔/조각/줄 등)
-    if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리", "짝", "덩이", "덩어리"):
+    # 개수 단위(개/모/대/장/포기/쪽/톨/편/캔/조각/줄 등)
+    if unit in ("개", "알", "모", "대", "장", "포기", "쪽", "톨", "편", "캔", "조각", "마리", "송이", "통", "줄", "봉", "팩", "토막", "뿌리", "짝", "덩이", "덩어리"):
         ppg = _lookup_piece_grams(ingredient_name)
         if ppg:
             return (num * ppg, f"piece:{ppg}g/{unit}")
+        # 양념/향신료는 개수단위(장/알)라도 극소량 — 100g 기본은 과대(월계수잎 3장, 통후추 6알 등)
+        if any(h in ingredient_name for h in _DEFAULT_SEASONING_HINTS):
+            return (num * _DEFAULT_GRAMS_SPICE_PIECE, f"piece_seasoning:{_DEFAULT_GRAMS_SPICE_PIECE}g/{unit}")
         # 품목별 1개 무게를 몰라도 원가 미확인으로 버리지 말고 기본값으로 추정
         return (num * _DEFAULT_GRAMS_PIECE, f"piece_default:{unit}:{int(_DEFAULT_GRAMS_PIECE)}g")
 
