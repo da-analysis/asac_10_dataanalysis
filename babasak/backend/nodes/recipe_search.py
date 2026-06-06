@@ -443,7 +443,7 @@ def recipe_search_node(state: dict) -> dict:
             if need_graph_context:
                 # menu 대신 원본 쿼리(modifier 포함)로 graph_context 호출
                 graph_query = clean_query if has_modifier else menu
-                graph_rows = build_graph_relation_context(graph_query, limit=3)
+                graph_rows = build_graph_relation_context(graph_query, limit=2)
                 if graph_rows:
                     if not recipes:
                         return {"recipe_info": {
@@ -511,8 +511,7 @@ def recipe_search_node(state: dict) -> dict:
                 "search_type": "keyword",
             }
             if need_graph_context:
-                graph_query = clean_query if has_modifier else menu
-                graph_rows = build_graph_relation_context(graph_query, limit=2)
+                # 위에서 limit=2로 조회한 graph_rows 재사용 (재조회 제거)
                 if graph_rows:
                     result_payload["graph_context"] = graph_rows
                     result_payload["search_type"] = "keyword_with_graph_context"
