@@ -772,6 +772,15 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
         """, menu=menu).single()
         menu_main = (mi_row["mi"] if mi_row else "") or ""
 
+        # 이 메뉴 레시피에 이미 들어가는 재료 — 대체재에서 제외(겹치면 대체 의미 없음)
+        recipe_ing_names = [
+            x["name"] for x in session.run("""
+                MATCH (r:Recipe)-[:CONTAINS]->(ing:Ingredient)
+                WHERE r.name CONTAINS $menu
+                RETURN DISTINCT ing.name AS name
+            """, menu=menu).data() if x.get("name")
+        ]
+
     # ── 핵심 재료(core) 판정 ──
     # 제육볶음의 돼지고기처럼, missing이 그 요리의 '정체성' 재료면
     # 계열 밖(스팸·참치)으로는 절대 대체하지 않는다(없으면 추천 안 함).
@@ -799,23 +808,38 @@ def suggest_substitute_ingredient(menu, missing_ingredient, limit=5):
             s += 2
         return s
 
+    # 제외 집합: 레시피에 이미 있는 재료 + missing 자신
+    _exclude = {_compact(n) for n in recipe_ing_names} | {_compact(missing)}
+    # 동의어 제외: alias 테이블로 같은 품목으로 정규화되면 제외(파=대파, 달걀=계란, 오징어=물오징어 등 데이터 기반)
+    from backend.catalog import get_alias_table
+    _alias_tbl = get_alias_table()
+    def _canon(n):
+        v = _alias_tbl.get(n)
+        return v["db_name"] if isinstance(v, dict) and v.get("db_name") else n
+    _missing_canon = _canon(missing)
+
     ranked = []
     for row in pool:
-        if not is_allowed_substitute_for_menu(menu, missing, row.get("name")):
+        name = row.get("name")
+        if _compact(name) in _exclude:
             continue
-        fs = _family_score(row["name"], row.get("lv2"))
+        if _canon(name) == _missing_canon:   # 동의어 제외(파↔대파 등)
+            continue
+        if not is_allowed_substitute_for_menu(menu, missing, name):
+            continue
+        fs = _family_score(name, row.get("lv2"))
         ranked.append((fs, row.get("menu_count", 0), row.get("recipe_count", 0), row))
     # 계열성 > 메뉴 등장수 > 전체 빈도 순
     ranked.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
 
-    # 계열 신호 있는 것 우선.
     family = [r for r in ranked if r[0] > 0]
     if is_core:
-        # 핵심 재료(제육볶음의 돼지고기)는 계열 밖(스팸·참치)으로 대체 금지.
-        # 같은 계열(돼지 부위)만 허용. 없으면 빈 결과 → 엉뚱한 대체 안 함.
+        # 핵심 재료(돼지고기)는 계열 밖(스팸·참치)으로 대체 금지. 같은 계열만, 없으면 빈 결과.
         chosen = family[:limit]
     else:
-        # 보조 재료는 계열 우선, 없으면 빈도순으로라도 채움.
+        # 보조 재료(대파 등)는 계열 신호 우선, 없으면 같은 lv1 풀의 빈도순으로 채운다.
+        # (lv1만 맞으면 후보로 노출 — 단, 풀은 lv1 일치 + 레시피재료/동의어 제외된 상태라
+        #  엉뚱한 카테고리 재료는 애초에 lv1 단계에서 걸러짐)
         chosen = (family if family else ranked)[:limit]
     return [{"name": r[3]["name"], "category": r[3]["lv1"],
              "recipe_count": r[3]["recipe_count"]} for r in chosen]
