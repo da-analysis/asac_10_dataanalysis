@@ -659,6 +659,167 @@ st.markdown(
     font-weight: 600;
     white-space: nowrap;
 }
+
+/* ── 프로젝트 소개 + 팀 소개를 한 카드에 담는 래퍼 ──────────── */
+.about-wrap {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 22px;
+    padding: 44px 52px;
+    margin-top: 8px;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.04);
+}
+/* 카드 안 맨 위 '프로젝트 소개' 제목 */
+.about-wrap-title {
+    font-size: 24px;
+    font-weight: 900;
+    color: #0f172a;
+    margin-bottom: 24px;
+}
+/* 두 섹션을 나누는 구분선 (한 카드 안에서 '나뉜 느낌'을 준다) */
+.about-divider {
+    height: 1px;
+    background: #eef1f6;
+    margin: 36px 0;
+}
+
+/* ── 팀/멘토 소개 ───────────────────────────────────────────── */
+/* 래퍼(.about-wrap) 안에 들어가므로 자체 박스 스타일은 제거하고 내용만. */
+.team-section {
+    padding: 0;
+    margin: 0;
+}
+.team-section-title {
+    font-size: 22px;
+    font-weight: 900;
+    color: #0f172a;
+    margin-bottom: 6px;
+}
+.team-section-desc {
+    font-size: 14px;
+    color: #64748b;
+    line-height: 1.7;
+    margin-bottom: 24px;
+}
+/* 멘토 카드: 가로형(사진 왼쪽 + 텍스트 오른쪽)으로 팀원과 구분해 강조.
+   전체 폭을 채우지 않고 내용 폭(최대 480px)으로 줄여 섹션 가운데에 둔다.
+   inline-flex + margin:auto 로 카드 자체를 중앙 정렬한다. */
+.mentor-card {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    background: #fbfbfd;
+    border: 1px solid #ece9f5;
+    border-radius: 18px;
+    padding: 22px 30px;
+    /* 내용 폭만큼만 차지하게 한 뒤 좌우 auto 마진으로 섹션 가운데 정렬 */
+    width: fit-content;
+    max-width: 480px;
+    margin: 0 auto 26px;
+}
+.mentor-photo {
+    flex: 0 0 auto;
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #ede9fe;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 44px;
+}
+.mentor-info-name { font-size: 19px; font-weight: 900; color: #0f172a; }
+.mentor-info-role {
+    display: inline-block;
+    margin: 8px 0 10px;
+    background: #ede9fe; color: #6d28d9;
+    font-size: 12px; font-weight: 800;
+    padding: 4px 12px; border-radius: 100px;
+}
+.mentor-info-desc { font-size: 13px; color: #475569; line-height: 1.7; }
+
+/* 팀원 카드 그리드 (한 줄 4개, 좁으면 자동 줄바꿈) */
+.team-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+}
+.member-card {
+    flex: 1 1 calc(25% - 14px);
+    min-width: 210px;
+    box-sizing: border-box;
+    background: #ffffff;
+    border: 1px solid #eef1f6;
+    border-radius: 18px;
+    padding: 26px 22px;
+    text-align: center;
+    box-shadow: 0 4px 14px rgba(15,23,42,0.03);
+}
+.member-photo {
+    width: 104px;
+    height: 104px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin: 0 auto 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+}
+.member-name { font-size: 17px; font-weight: 900; color: #0f172a; margin-bottom: 14px; }
+/* 배지 + 불릿을 한 줄에 두고 세로 중앙 정렬 (배지가 불릿 묶음 중앙에 오게) */
+.member-detail {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+.member-role {
+    flex: 0 0 auto;
+    display: inline-block;
+    font-size: 11px; font-weight: 800;
+    padding: 4px 12px; border-radius: 100px;
+    text-align: center;
+    line-height: 1.35;
+}
+/* 배지 둘째 줄 보조 텍스트((조기취업) 등) — 폰트만 작게 해서 배지 높이를
+   '팀원' 한 줄 배지(정유정 등)와 비슷하게 맞춘다. */
+.member-role .role-sub {
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0.9;
+}
+/* 역할 배지 색상 팔레트 (카드 순서대로 초록/파랑/주황/보라) */
+.member-role.c0 { background:#dcfce7; color:#15803d; }
+.member-role.c1 { background:#dbeafe; color:#1d4ed8; }
+.member-role.c2 { background:#ffedd5; color:#c2410c; }
+.member-role.c3 { background:#ede9fe; color:#6d28d9; }
+/* 사진 배경 톤도 배지와 맞춰 은은하게 */
+.member-photo.c0 { background:#dcfce7; }
+.member-photo.c1 { background:#dbeafe; }
+.member-photo.c2 { background:#ffedd5; }
+.member-photo.c3 { background:#ede9fe; }
+.member-bullets {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+}
+.member-bullets li {
+    font-size: 11px;
+    color: #475569;
+    line-height: 1.7;
+    padding-left: 12px;
+    position: relative;
+}
+.member-bullets li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: #94a3b8;
+}
 </style>
 """,
     unsafe_allow_html=True,
