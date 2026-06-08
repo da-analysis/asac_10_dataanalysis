@@ -286,12 +286,21 @@ def _card_estimate_qty(name: str) -> str:
 
 def _combo_modifier_ingredients(recipe_info: dict) -> list[str]:
     """조합 메뉴의 graph_context에서 base 레시피에 끼워넣을 modifier 재료를 모은다.
-    예: '김치 된장찌개' → ['김치']. 미지의 modifier('말차' 등)는 후보가 없으면 빈 list."""
+    예: '김치 된장찌개' → ['김치']. '말차/마라/우베'처럼 카탈로그에 없는 신규 수식어는
+    modifier_ingredients가 비고 modifier_terms에만 남으므로, modifier_terms까지 읽어야
+    조합 카드 재료에 누락 없이 들어간다.
+
+    단, modifier_terms는 '우베가들어간'처럼 조사·동사가 붙은 잡음이 섞이므로,
+    preprocessor가 추출한 깨끗한 재료(_combo_modifiers_clean = entities.ingredient,
+    예: '우베')가 있으면 그것을 최우선으로 쓴다."""
+    clean = [c for c in (recipe_info.get("_combo_modifiers_clean") or []) if c]
+    if clean:
+        return list(dict.fromkeys(clean))
     out = []
     for blk in (recipe_info.get("graph_context") or []):
         if not isinstance(blk, dict):
             continue
-        for key in ("modifier_ingredients", "modifier_menus"):
+        for key in ("modifier_ingredients", "modifier_menus", "modifier_terms"):
             for x in (blk.get(key) or []):
                 name = x if isinstance(x, str) else (x.get("name") if isinstance(x, dict) else None)
                 if name and name not in out:
@@ -470,6 +479,7 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
         if combo_name:
             first["menu"] = combo_name
         existing = {ing.get("name") for ing in (first.get("ingredients") or [])}
+        injected = []
         for mi in _combo_modifier_ingredients(recipe_info):
             if mi and mi not in existing:
                 first.setdefault("ingredients", []).append({
@@ -477,6 +487,14 @@ def _build_card_data(recipe_info: dict, cost_info: dict) -> dict:
                     "price_per_kg": None, "cost": None, "source": "non_cost",
                 })
                 existing.add(mi)
+                injected.append(mi)
+        # ★ 조리순서에도 조합 추가 재료를 안내한다. 카드 steps는 base 레시피 원본이라
+        #   modifier(우베·말차 등)가 빠져 있어, '재료엔 있는데 조리순서엔 없는' 괴리를 막는다.
+        #   (정밀한 단계 직조는 LLM 텍스트 답변이 담당, 카드는 안내 한 줄로 보강)
+        if injected:
+            first.setdefault("steps", []).append(
+                f"추가 재료({', '.join(injected)})는 기호에 맞게 더해주세요. (조합 메뉴)"
+            )
         card_recipes = [first]
 
     new_menus = []
@@ -683,6 +701,13 @@ async def report_generator_node(state: dict) -> dict:
         final_answer += f"\n(자연어 요약 생성 중 오류 발생: {e})"
 
     try:
+        # 조합 메뉴(keyword_with_graph_context): graph_context의 modifier_terms는
+        # '우베가들어간'처럼 조사·동사가 붙은 잡음이라, preprocessor가 뽑은 깨끗한
+        # 재료(entities.ingredient = '우베')를 카드 modifier로 넘겨 잡음을 막는다.
+        if recipe_info.get("search_type") == "keyword_with_graph_context":
+            _clean_mods = [i for i in (entities.get("ingredient") or []) if i]
+            if _clean_mods:
+                recipe_info = {**recipe_info, "_combo_modifiers_clean": _clean_mods}
         card_data = _build_card_data(recipe_info, cost_info)
     except Exception as _card_exc:
         card_data = {}
