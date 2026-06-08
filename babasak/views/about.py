@@ -37,25 +37,26 @@ _MEMBERS = [
     {
         "name": "노경준",
         "role": "팀장",
-        "bullets": ["프로젝트 총괄 및 일정 관리", "데이터 파이프라인 구축"],
+        "bullets": ["데이터 수집 및 전처리", "Neo4j 기반 재료 그래프 구축", "RAG 로직 개발", "대체 재료 추천 로직 개선", "통합 테스트 및 품질 개선"],
         "photo": "member_1.png",
     },
     {
         "name": "이예림",
         "role": "팀원",
-        "bullets": ["데이터 분석 및 모델링", "메뉴 추천 로직 설계"],
+        "bullets": ["데이터 리서치 및 수집", "데이터 정규화 및 표준화", "파이프라인 및 대시보드 구축", "Genie Space 환경 구축", "챗봇 성능 개선 및 평가"],
         "photo": "member_2.png",
     },
     {
         "name": "정유정",
         "role": "팀원",
-        "bullets": ["데이터 수집 및 전처리", "대시보드 구축", "챗봇 네이버 API 검색 구현", "웹앱&챗봇 UI 개발"],
+        "bullets": ["데이터 수집 및 전처리", "대시보드 구축", "챗봇 네이버 API 검색 구현", "웹앱&챗봇 UI 개발", "챗봇 속도 개선"],
         "photo": "member_3.png",
     },
     {
         "name": "윤정식",
-        "role": "팀원\n(조기취업)",
-        "bullets": ["협업 인프라 환경 구축", "데이터 크롤링 및 자동화", "langgraph 아키텍처 설계", "답변 품질 검증 환경 구축"],
+        "role": "팀원",
+        "role_sub": "(조기취업)",   # 배지 둘째 줄 — 더 작은 글씨로 표시
+        "bullets": ["데이터 수집", "협업 인프라 환경 구축", "데이터 수집", "Langgraph 아키텍처 설계", "RAG 설계", "답변 품질 검증 환경 구축"],
         "photo": "member_4.png",
     },
 ]
@@ -84,8 +85,10 @@ def _member_html(mb: dict, idx: int) -> str:
     c = f"c{idx % 4}"
     photo = _photo_html(mb["photo"], f"member-photo {c}", "👤")
     bullets = "".join(f"<li>{_esc(b)}</li>" for b in mb.get("bullets", []))
-    # 배지 텍스트의 줄바꿈(\n)은 <br>로 변환 (이스케이프 후 치환 → XSS 안전).
-    role_html = _esc(mb["role"]).replace("\n", "<br>")
+    # 배지: 메인 역할(role) + 선택적 보조 텍스트(role_sub, 더 작은 둘째 줄).
+    role_html = _esc(mb["role"])
+    if mb.get("role_sub"):
+        role_html += f'<br><span class="role-sub">{_esc(mb["role_sub"])}</span>'
     return (
         '<div class="member-card">'
         f'{photo}'

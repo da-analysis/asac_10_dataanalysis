@@ -778,10 +778,18 @@ st.markdown(
 .member-role {
     flex: 0 0 auto;
     display: inline-block;
-    font-size: 12px; font-weight: 800;
-    padding: 4px 14px; border-radius: 100px;
+    font-size: 11px; font-weight: 800;
+    padding: 4px 12px; border-radius: 100px;
     text-align: center;
-    line-height: 1.4;
+    line-height: 1.35;
+}
+/* 배지 둘째 줄 보조 텍스트((조기취업) 등) — 폰트만 작게 해서 배지 높이를
+   '팀원' 한 줄 배지(정유정 등)와 비슷하게 맞춘다. */
+.member-role .role-sub {
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0.9;
 }
 /* 역할 배지 색상 팔레트 (카드 순서대로 초록/파랑/주황/보라) */
 .member-role.c0 { background:#dcfce7; color:#15803d; }
@@ -800,7 +808,7 @@ st.markdown(
     text-align: left;
 }
 .member-bullets li {
-    font-size: 12px;
+    font-size: 11px;
     color: #475569;
     line-height: 1.7;
     padding-left: 12px;
