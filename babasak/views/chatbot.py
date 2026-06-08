@@ -15,6 +15,32 @@ def _esc(v) -> str:
     LLM/DB에서 온 값에 <, &, " 가 섞여도 레이아웃이 깨지지 않게 한다."""
     return html.escape(str(v if v is not None else ""))
 
+
+def _md_to_html(text) -> str:
+    """챗봇 텍스트 답변(마크다운)을 말풍선 안에 넣을 안전한 HTML로 변환한다.
+    외부 markdown 라이브러리는 배포 환경(requirements.txt)에 없으므로 쓰지 않고,
+    핵심 마크다운만 정규식으로 직접 처리한다.
+    - 먼저 전부 이스케이프(XSS 방지) → 그 다음 마크다운 토큰만 HTML로 복원.
+    - 지원: **굵게**, *기울임*, `코드`, 줄바꿈, 줄머리 '- '/'* '/'1. ' 글머리.
+    카드 응답이 아닌 일반 텍스트 답변에만 쓰인다."""
+    import re
+
+    s = _esc(text)
+    # 굵게 → 기울임 → 인라인코드 순서로 변환(굵게의 ** 가 * 변환에 먹히지 않게 먼저).
+    s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s, flags=re.S)
+    s = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"<em>\1</em>", s)
+    s = re.sub(r"`([^`]+?)`",
+               r'<code style="background:#f1f5f9;border-radius:4px;'
+               r'padding:1px 4px;font-size:.85em">\1</code>', s)
+    # 줄머리 글머리표( - , * , 1. )를 불릿(•)으로 치환해 평문 줄로 보여준다.
+    lines = []
+    for ln in s.split("\n"):
+        m = re.match(r"\s*(?:[-*]|\d+\.)\s+(.*)", ln)
+        lines.append(f"• {m.group(1)}" if m else ln)
+    # 줄바꿈 → <br>
+    return "<br>".join(lines)
+
+
 API_URL = os.getenv("BACKEND_API_URL", "http://localhost:9000")
 
 # 챗봇 헤더 로고. 새 로고(logo_new.png)가 있으면 그것, 없으면 기존 logo.png, 둘 다 없으면 이모지.
@@ -73,9 +99,22 @@ def _render_turn(role: str, message, chart_html, card, turn: int):
     히스토리 재생(루프)과 방금 받은 응답을 그 자리에서 그릴 때 같은 로직을 쓰도록
     분리한 함수. (호출부에서 with st.chat_message(role): 안에 둘 것)"""
     if role == "assistant" and card and card.get("recipes"):
+        # 레시피 카드 응답은 _render_cards가 와이드 버블로 감싸 렌더한다.
         _render_cards(card, message, turn)
+    elif role == "user":
+        # 사용자 질문: 오른쪽 브랜드 버블. 순수 텍스트라 이스케이프해도 안전.
+        st.markdown(
+            f'<div class="cb-row user"><div class="cb-bubble user">'
+            f'{_esc(message)}</div></div>',
+            unsafe_allow_html=True,
+        )
     else:
-        st.write(message)
+        # 챗봇 텍스트 답변: 왼쪽 흰 버블. 마크다운(**굵게** 등)을 살려 버블에 통째로 넣는다.
+        st.markdown(
+            f'<div class="cb-row bot"><div class="cb-bubble bot">'
+            f'{_md_to_html(message)}</div></div>',
+            unsafe_allow_html=True,
+        )
     if chart_html:
         components.html(chart_html, height=420, scrolling=False)
 
@@ -343,6 +382,71 @@ def _inject_card_css():
                 padding:12px 13px; }
       .cb-tip-title { font-size:.8rem; font-weight:800; color:#92400e; margin-bottom:6px; }
       .cb-tip-item { font-size:.74rem; color:#78350f; line-height:1.55; }
+
+      /* ── 말풍선(버블) UI ──────────────────────────────────────
+         Streamlit 기본 chat_message의 회색 박스/아바타 배경을 지우고,
+         그 안에 우리가 그린 .cb-bubble 말풍선만 보이게 한다.
+         - 사용자 질문: 오른쪽 정렬 + 브랜드(빨강→주황) 그라데이션 버블
+         - 챗봇 답변: 왼쪽 정렬 + 흰 버블 (꼬리 포함)
+         카드 응답(레시피)은 와이드 버블(.cards)로 감싼다. */
+      [data-testid="stChatMessage"] {
+          background: transparent !important;
+          padding: 0 !important;
+          box-shadow: none !important;
+      }
+      /* 기본 아바타 아이콘 숨김 (말풍선만으로 화자 구분).
+         Streamlit 버전마다 아바타 컨테이너의 testid/클래스가 달라
+         testid 접두 매칭 + 이미지/아바타류를 폭넓게 잡아 확실히 지운다. */
+      [data-testid="stChatMessage"] [data-testid^="stChatMessageAvatar"],
+      [data-testid="stChatMessage"] [data-testid^="chatAvatarIcon"],
+      [data-testid="stChatMessage"] > img:first-child,
+      [data-testid="stChatMessageAvatarUser"],
+      [data-testid="stChatMessageAvatarAssistant"] {
+          display: none !important;
+      }
+      /* 아바타가 빠진 만큼 본문이 왼쪽 끝까지 차지하도록 메시지 콘텐츠 여백 제거 */
+      [data-testid="stChatMessage"] > [data-testid="stChatMessageContent"],
+      [data-testid="stChatMessage"] > div:last-child {
+          margin-left: 0 !important;
+          padding-left: 0 !important;
+          width: 100% !important;
+      }
+      /* 말풍선 공통 */
+      .cb-bubble {
+          display: inline-block;
+          max-width: 78%;
+          padding: 11px 15px;
+          border-radius: 18px;
+          font-size: .92rem;
+          line-height: 1.6;
+          word-break: break-word;
+          white-space: pre-wrap;
+          box-shadow: 0 2px 8px rgba(15,23,42,.06);
+      }
+      /* 챗봇(왼쪽, 흰색) — 왼쪽 아래 꼬리 */
+      .cb-row.bot { display:flex; justify-content:flex-start; margin:8px 0; }
+      .cb-bubble.bot {
+          background:#ffffff;
+          border:1px solid #e5e7eb;
+          color:#0f172a;
+          border-bottom-left-radius:5px;
+      }
+      /* 사용자(오른쪽, 브랜드 그라데이션) — 오른쪽 아래 꼬리 */
+      .cb-row.user { display:flex; justify-content:flex-end; margin:8px 0; }
+      .cb-bubble.user {
+          background:linear-gradient(135deg,#ef4444,#f97316);
+          color:#ffffff;
+          border:none;
+          border-bottom-right-radius:5px;
+      }
+      /* 카드(레시피) 응답을 감싸는 와이드 버블 — 폭 제한을 풀어 카드가 넓게 펼쳐지게 */
+      .cb-bubble.cards {
+          display:block;
+          max-width:100%;
+          width:100%;
+          padding:14px 16px;
+      }
+      .cb-bubble.cards .fc-grid { margin:0; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -517,7 +621,12 @@ def _render_cards(card: dict, fallback_text: str, turn: int = 0):
     if new_menus:
         cards_block += "".join(_new_menu_html(m, i) for i, m in enumerate(new_menus, 1))
 
-    st.markdown(cards_block, unsafe_allow_html=True)
+    # 카드 응답 전체를 챗봇 흰색 말풍선(와이드)으로 감싼다.
+    st.markdown(
+        f'<div class="cb-row bot"><div class="cb-bubble bot cards">'
+        f'{cards_block}</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ──────────────────────────────────────────────────────────────
