@@ -1,0 +1,598 @@
+﻿ing_id,std_name,lv1,lv2,freq,matched_kca,matched_agrofood,matched_any_reference,agro_category_ref,kca_category_ref,std_name_2nd,source_file,std_name_normalized,상품명,가격,단위,단위_수치,단위_문자,score,url
+M00864,고추장,,,86,False,False,False,,,고추장,완1,,고추장[순창궁고추장]6.5kg,14800,6.5kg,6.5,kg,3.5,https://www.foodspring.co.kr/goods/detail/870418
+M01034,올리고당,양념·기름,당류,63,False,False,False,,,올리고당,완1,,올리고당 700G 대상,2936,700G,700.0,G,5.5,https://www.foodspring.co.kr/goods/detail/525699
+M01664,청크초콜릿,양념·기름,식초·발효,30,False,False,False,,,청크초콜릿,완1,,칼리바우트 밀크 청크 초콜릿 200g,4560,200g,200.0,g,1.5,https://www.foodspring.co.kr/goods/detail/749303
+M01683,비정제황설탕,,,30,False,False,False,,,비정제황설탕,완6,,데메라라 비정제 황설탕 5KG 사탕수수당,25744,5KG,5.0,KG,1.4,https://www.foodspring.co.kr/goods/detail/525912
+M01944,고수,기타,기타,24,False,False,False,,,고수,완1,,고수(상품/국산)100g,3136,100g,100.0,g,3.5,https://www.foodspring.co.kr/goods/detail/781415
+M02166,비타민채소,기타,기타,20,False,False,False,,,비타민채소,완2,,★매일시장특가★ 비타민( 상 500g/EA) 초특가 야채 채소,2565,500g,500.0,g,0.8,https://www.foodspring.co.kr/goods/detail/734256
+M02294,푸실리파스타,채소류,양념채소,19,False,False,False,,,푸실리파스타,완1,,푸실리 500G 파스타비노,968,500G,500.0,G,1.5,https://www.foodspring.co.kr/goods/detail/591388
+M02440,곰표분식집우동다시,기타,기타,17,False,False,False,,,분식집우동다시,완10,,곰표 분식집 우동다시 2kg,5600,2kg,2.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/944660
+M02496,미니토마토,채소류,열매채소,17,False,True,True,채소류,,미니토마토,완2,,푸디버디 새콤달콤미니아란치니토마토(390g/EA),3293,390g,390.0,g,1.15,https://www.foodspring.co.kr/goods/detail/873305
+M02524,갈비,기타,기타,16,False,False,False,축산물,,갈비,완1,,도리토스 갈비 84g,1032,84g,84.0,g,2.5,https://www.foodspring.co.kr/goods/detail/682406
+M02657,버터한,유제품,버터,15,False,False,False,,,버터한,완3,버터한,서울우유 고소한 버터 450g 담백 풍부 부드럽고 고소한 풍미,7040,450g,450.0,g,5.8,https://www.foodspring.co.kr/goods/detail/450014
+M02876,카누커피,기타,기타,14,False,False,False,,,카누커피,완2,,카누 커피(마일드_0.9g*100T 90g/EA),27000,0.9g,0.9,g,1.15,https://www.foodspring.co.kr/goods/detail/399067
+M02976,곤드레,기타,기타,13,False,False,False,,,곤드레,완2,,곤드레 냉면사리 2kg*9봉,48240,2kg,2.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/455396
+M03172,카펠리니면,곡류·면,면류,12,False,False,False,,,카펠리니면,완5,카펠리니면,카펠리니파스타면(500g)(데체코),3080,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/795366
+M03274,또띠아,기타,기타,11,False,False,False,,,또띠아,완1,,"또띠아,576g(8인치),플라워,8인치(EA)",3056,576g,576.0,g,3.25,https://www.foodspring.co.kr/goods/detail/971883
+M03450,갓피클,기타,기타,10,False,False,False,,,갓피클,완10,,순천 홍갓 피클 1kg 업소용 갓김치 밑반찬,13048,1kg,1.0,kg,1.3,https://www.foodspring.co.kr/goods/detail/645837
+M03483,꽃송이버섯,채소류,버섯,10,False,False,False,,,꽃송이버섯,완6,,건조 백목이버섯 특상품 1kg 은이 꽃송이 휜목이버섯,15920,1kg,1.0,kg,4.05,https://www.foodspring.co.kr/goods/detail/532238
+M03552,김치밥,어패류,해조류,10,False,False,False,,,김치밥,완5,김치밥,(냉동)[엄지] 김치치즈주먹밥,704,100g,100.0,g,1.5,https://www.foodspring.co.kr/goods/detail/795025
+M03720,연겨자소스,기타,기타,10,False,False,False,,,연겨자소스,완10,,튜브 연겨자(오뚜기 100g) 머스타드 겨자 소스,3928,100g,100.0,g,1.15,https://www.foodspring.co.kr/goods/detail/458501
+M03734,비트,기타,기타,10,False,False,False,,,비트,완1,,비트(상품/국산)300g내외,1792,300g,300.0,g,3.5,https://www.foodspring.co.kr/goods/detail/781398
+M03904,가지나물,채소류,잎채소,9,False,True,True,채소류,,가지나물,완1,,빼어날수 건가지 300g 가지 말린가지 나물재료 건나물 가지나물 식자재 업소용 반찬재료,17880,300g,300.0,g,0.1,https://www.foodspring.co.kr/goods/detail/728506
+M04084,검은콩서리태,기타,기타,8,False,False,False,,,검은콩서리태,완1,,검은콩 콩가루(할매손 콩맷돌 850g) 검정콩가루 서리태가루 맷돌콩가루 미숫가루재료 콩국수재료 선식재료 식자재 업소용,11408,850g,850.0,g,-0.75,https://www.foodspring.co.kr/goods/detail/706002
+M04090,들기름참기름,,,8,False,False,False,,,들기름참기름,완10,,들기름 참기름대용 고소한기름 해표 1.8Kg 업소용,45424,1.8Kg,1.8,Kg,1.1,https://www.foodspring.co.kr/goods/detail/935662
+M04166,칼국수건면,곡류·면,면류,8,False,False,False,,,칼국수건면,완2,,오뚜기 칼국수 건면 900g,2800,900g,900.0,g,3.5,https://www.foodspring.co.kr/goods/detail/529110
+M04193,손질주꾸미,기타,주류,8,False,False,False,,,손질주꾸미,완6,,냉동쭈꾸미 200g(8미) 손질 주꾸미,3600,200g,200.0,g,1.45,https://www.foodspring.co.kr/goods/detail/958866
+M04211,후르츠칵테일통조림,,,8,False,False,False,,,후르츠칵테일통조림,완4,,델몬트 후르츠칵테일 통조림 850g 24개,52480,850g,850.0,g,1.35,https://www.foodspring.co.kr/goods/detail/466028
+M04292,견과류호두,과일·견과,견과·씨앗,8,False,True,True,,,견과류호두,완5,견과류호두,두리 혼합 견과류 1kg 호두 아몬드 캐슈넛 호박씨 해바라기씨,10160,1kg,1.0,kg,1.8,https://www.foodspring.co.kr/goods/detail/449007
+M04317,겨자분말가루,,,8,False,False,False,,,겨자가루,완3,겨자가루,오뚜기 겨자 분말 200g 가루,1806,200g,200.0,g,1.5,https://www.foodspring.co.kr/goods/detail/368130
+M04343,스틱과자,기타,기타,8,False,False,False,,,스틱과자,완6,,미니 롱 스틱 과자 80g,103040,80g,80.0,g,0.5,https://www.foodspring.co.kr/goods/detail/370420
+M04434,소금,,,8,False,False,False,,,소금,완1,,"소금나라 꽃소금 3kg (고운,재제염)",3010,3kg,3.0,kg,3.45,https://www.foodspring.co.kr/goods/detail/366826
+M04458,소기름,,,8,False,False,False,,,소기름,완8,,해표 식용유(소/콩기름) 1.8L,4560,1.8L,1.8,L,1.5,https://www.foodspring.co.kr/goods/detail/515094
+M04481,혼합다시,기타,기타,7,False,False,False,,,혼합다시,완4,,와다시팩 100gX10개입 총1kg/육수/국물용/혼합게즈리부시/다시팩,29520,100g,100.0,g,0.6,https://www.foodspring.co.kr/goods/detail/587859
+M04554,생크림,유제품,우유·크림,7,False,False,False,,,생크림,완1,,생크림/에버휩/1030g,2776,1030g,1030.0,g,4.5,https://www.foodspring.co.kr/goods/detail/847550
+M04627,단호박중,채소류,열매채소,7,False,True,True,채소류,,단호박중,완3,단호박중,냉동단호박(유피/2*3cm/중국산)1kg,2960,1kg,1.0,kg,1.4,https://www.foodspring.co.kr/goods/detail/964040
+M04702,대게다리,기타,기타,7,False,False,False,,,대게다리,완5,대게다리,해각포 50g 대게 홍게다리살 맥주안주,7920,50g,50.0,g,1.45,https://www.foodspring.co.kr/goods/detail/970628
+M04754,부추,기타,기타,7,False,False,False,,,부추,완1,,부추/국내산 1단 (500g 내외),1248,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/564788
+M04836,콘옥수수통조림,기타,기타,7,False,True,True,식량작물,,콘옥수수통조림,완2,,명진 영콘 400g 미니 옥수수통조림,1520,400g,400.0,g,1.5,https://www.foodspring.co.kr/goods/detail/707379
+M04863,보름나물,채소류,잎채소,7,False,False,False,,,보름나물,완6,,건가지 300g 업소용 말린 가지 보름 나물,18848,300g,300.0,g,1.3,https://www.foodspring.co.kr/goods/detail/652015
+M04924,레몬즙,기타,기타,7,False,True,True,과일류,,레몬즙,완1,,레몬즙 200ml/피오디,1040,200ml,200.0,ml,3.5,https://www.foodspring.co.kr/goods/detail/758261
+M04941,감자소,,,6,False,True,True,,,감자소,완4,,"감자수제비,1Kg,황소식품,냉동",2072,1Kg,1.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/643027
+M04993,물미역,,,6,False,False,False,,,물미역,완6,,한우물 소고기미역국밥(210g/EA),1358,210g,210.0,g,1.5,https://www.foodspring.co.kr/goods/detail/881950
+M05036,김치깍두기,어패류,해조류,6,False,False,False,,,김치깍두기,완2,,[이공김치] 국내산 깍두기 10kg 발송,22400,10kg,10.0,kg,1.4,https://www.foodspring.co.kr/goods/detail/778486
+M05344,가쓰오국물쯔유,양념·기름,기름,6,False,False,False,,,가쓰오국물쯔유,완1,,화미 가쓰오국물 쯔유 600g,2728,600g,600.0,g,1.5,https://www.foodspring.co.kr/goods/detail/752276
+M05525,흰콩,기타,기타,6,False,False,False,,,흰콩,완7,흰콩,백태 일반 업소용 흰콩 1Kg X 10,51408,1Kg,1.0,Kg,1.45,https://www.foodspring.co.kr/goods/detail/475307
+M05566,가다랑어육수,,,6,False,False,False,,,가다랑어육수,완2,,가쓰오부시 해울찬 국물용 가다랑어 육수 500g,12296,500g,500.0,g,1.2,https://www.foodspring.co.kr/goods/detail/928129
+M05676,홍합국물,기타,물·음료,6,False,True,True,,,홍합국물,완2,,모노마트 피홍합 1kg 손질 세척 냉동 홍합 국물용,3920,1kg,1.0,kg,1.1,https://www.foodspring.co.kr/goods/detail/945325
+M05811,홀그레인머스타드씨겨자,기타,기타,5,False,False,False,,,홀그레인머스타드씨겨자,완4,,선인 홀그레인머스타드 1kg 파우치형 씨겨자 디핑용,8800,1kg,1.0,kg,1.1,https://www.foodspring.co.kr/goods/detail/986409
+M05824,유자청,,,5,False,False,False,,,유자청,완1,,유자청 970ML 광야식품,4752,970ML,970.0,ML,3.5,https://www.foodspring.co.kr/goods/detail/532354
+M05876,허브,기타,기타,5,False,False,False,,,허브,완2,,허브 바질 약 5g 내외 [팩],400,5g,5.0,g,3.5,https://www.foodspring.co.kr/goods/detail/847959
+M06025,돌게,기타,기타,5,False,False,False,,,돌게,완7,돌게,베이비크랩 1kg 꽃게튀김 튀김용게 작은게 돌게 방게,5840,1kg,1.0,kg,1.05,https://www.foodspring.co.kr/goods/detail/465668
+M06133,호도,기타,기타,5,False,False,False,,,호도,완6,,캘리포니아 호도 분태 1KG 호두,13440,1KG,1.0,KG,2.5,https://www.foodspring.co.kr/goods/detail/976842
+M06157,블랙올리브절임,기타,기타,5,False,False,False,,,블랙올리브절임,완3,블랙올리브절임,비오오가니카 유기농 블랙올리브 피티드 오가닉 올리브절임 280g,7528,280g,280.0,g,0.75,https://www.foodspring.co.kr/goods/detail/905188
+M06225,콘킬리에파스타면,채소류,양념채소,5,False,False,False,,,콘킬리에파스타면,완7,콘킬리에파스타면,데체코 콘낄리에 꼰낄리에 콘킬리에면 파스타면 500g,3440,500g,500.0,g,1.05,https://www.foodspring.co.kr/goods/detail/879302
+M06261,바질허브,기타,기타,5,False,False,False,,,바질허브,완4,,"바질 10g (팩,허브,국내산)",735,10g,10.0,g,1.5,https://www.foodspring.co.kr/goods/detail/434304
+M06304,후추가루,곡류·면,밀가루·전분,5,False,False,False,,,후추가루,완1,,후추가루 1kg 경동시장,11920,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/449862
+M06352,차조,기타,기타,5,False,False,False,,,차조,완5,차조,"차조(상품,중국)",2480,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/940331
+M06399,고추창,,,5,False,False,False,,,고추창,완9,,실고추(국내산) 5g이상/대창상회,640,5g,5.0,g,1.5,https://www.foodspring.co.kr/goods/detail/760366
+M06411,강낭콩통조림,기타,기타,5,False,False,False,,,강낭콩통조림,완4,,키드니빈스 삼아 업소용 강낭콩 통조림 400g,1968,400g,400.0,g,1.25,https://www.foodspring.co.kr/goods/detail/932942
+M06649,양지고기,기타,기타,4,False,False,False,,,양지고기,완9,,삶은 아롱사태 양지 가루파품 300g 이유식고기 갈은소고기,4720,300g,300.0,g,0.9,https://www.foodspring.co.kr/goods/detail/976199
+M06785,시나몬분말,기타,기타,4,False,False,False,,,시나몬분말,완7,시나몬분말,계피가루(솔표 200g)X10 시나몬가루 분말,27024,200g,200.0,g,1.25,https://www.foodspring.co.kr/goods/detail/475190
+M06841,백태콩,,,4,False,False,False,,,백태콩,완4,,"백태콩(상품,실온,중국)",4480,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/941311
+M07046,콩물,기타,물·음료,4,False,False,False,,,콩물,완2,,콩게미 콩물 450ml / 콩국수 콩국물 콩국 국산 왕태콩,2000,450ml,450.0,ml,1.9,https://www.foodspring.co.kr/goods/detail/793728
+M07084,굵은소금,,,4,False,False,False,,,굵은소금,완1,,"굵은소금[탈수천일염,국산]5K",5720,5kg,5.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/532189
+M07284,데리야끼소스,,,4,False,False,False,,,데리야끼소스,완1,,"데리야끼소스(오뚜기,실온)",3008,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/694285
+M07446,얼갈이,기타,기타,4,False,False,False,,,얼갈이,완2,,"얼갈이배추,1Kg,상품,국산",1112,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/627231
+M07596,닭넓적다리살,육류·계란,닭고기,4,False,False,False,,,닭넓적다리살,완2,,(냉동) 국내산 닭 사이정육 1kg 국산 넓적다리살,10800,1kg,1.0,kg,3.1,https://www.foodspring.co.kr/goods/detail/826936
+M08000,딸기한,,,4,False,True,True,,,딸기한,완10,,새콤달콤한 급냉 국내산 산딸기 500G 1팩 / 새콤달콤한 급냉 국내산 산딸기 500G 1팩,15040,500G,500.0,G,-0.05,https://www.foodspring.co.kr/goods/detail/842086
+M08356,순두부찌개용,가공식품,두부·묵,3,False,False,False,,,순두부찌개용,완2,,진선 순두부 400gX5 업소용 부드럽고 고소한 찌개용,4576,400g,400.0,g,4.0,https://www.foodspring.co.kr/goods/detail/464052
+M08476,버섯가루,채소류,버섯,3,False,False,False,,,버섯가루,완2,,표고버섯가루 600g 경동시장,13840,600g,600.0,g,5.5,https://www.foodspring.co.kr/goods/detail/449872
+M08490,토란나물,채소류,잎채소,3,False,False,False,,,토란나물,완10,,[당일출고] 말린 토란대 1kg 건토란대나물,7120,1kg,1.0,kg,1.3,https://www.foodspring.co.kr/goods/detail/868751
+M08514,검정콩서리태,기타,기타,3,False,False,False,,,검정콩서리태,완1,,검정깨 콩국수가루(할매 850g) 업소용 콩맷돌 서리태 콩국가루 분말,6432,850g,850.0,g,0.6,https://www.foodspring.co.kr/goods/detail/458149
+M08729,토마토피자소스,,,3,False,True,True,,,토마토피자소스,완9,,네슬레 부이토니 토마토쿨리 3kg 토마토소스 피자소스,10992,3kg,3.0,kg,1.05,https://www.foodspring.co.kr/goods/detail/59618
+M08917,초이삼,기타,기타,3,False,False,False,,,초이삼,완3,초이삼,초이푸드 훈제삼겹(슬라이스) 200g 냉동,3680,200g,200.0,g,1.35,https://www.foodspring.co.kr/goods/detail/837211
+M09026,언양불고기,기타,기타,3,False,False,False,,,언양불고기,완2,,CJ프레시웨이 언양식소불고기(1Kg/EA),13928,1Kg,1.0,Kg,1.35,https://www.foodspring.co.kr/goods/detail/738378
+M09055,꼬치용꼬지,기타,기타,3,False,False,False,,,꼬치용꼬지,완7,꼬치용꼬지,핫바꼬치(20cm/식품용대나무꼬지/100개*1타),992,100개,100.0,개,0.15,https://www.foodspring.co.kr/goods/detail/617802
+M09073,켈로그리얼그래놀라,기타,기타,3,False,False,False,,,켈로그리얼그래놀라,완6,,켈로그 리얼그래놀라(400g/EA),5588,400g,400.0,g,1.5,https://www.foodspring.co.kr/goods/detail/386104
+M09084,호지차파우더,채소류,양념채소,3,False,False,False,,,호지차파우더,완1,,티젠 프리미엄 호지차 파우더 500g,6720,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/782467
+M09378,산적용꼬지,기타,기타,3,False,False,False,,,산적용꼬지,완8,,산적꽂이 (대 40개 내외) X2개 업소용 대나무 꼬치 꼬지,864,40개,40.0,개,-0.15,https://www.foodspring.co.kr/goods/detail/463164
+M09478,식빵한,곡류·면,빵·곡식가공,3,False,False,False,,,식빵한,완8,,굿오닥꾸 꽈배기 50gX20개 냉동꽈배기 빵류 간식빵 달콤한꽈배기 바삭한꽈배기 업소용꽈배기 식당간식 카페디저트 급식간식,15560,50g,50.0,g,-0.8,https://www.foodspring.co.kr/goods/detail/890638
+M09504,바질파우더,채소류,양념채소,3,False,False,False,,,바질파우더,완1,,신영 바질 럽드 150g(용기) x 3개 허브 바질 가루 파우더 그라운드,14880,150g,150.0,g,0.5,https://www.foodspring.co.kr/goods/detail/459528
+M09587,자반용김,어패류,해조류,3,False,False,False,,,자반용김,완3,자반용김,돌자반(시골 300g) 업소용 김자반 반찬,7952,300g,300.0,g,1.35,https://www.foodspring.co.kr/goods/detail/898341
+M09599,페퍼민트티백,기타,기타,3,False,False,False,,,페퍼민트티백,완9,,페퍼민트 10티백 8g 쿠우쿠우 1개,2880,8g,8.0,g,1.5,https://www.foodspring.co.kr/goods/detail/877071
+M09601,찰흑미,,,3,False,False,False,,,찰흑미,완4,,"찰흑미, 500g, 상품,국산",2400,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/940332
+M09774,무뼈닭발,육류·계란,닭고기,3,False,False,False,,,무뼈닭발,완1,,무뼈닭발 냉동 200g,3040,200g,200.0,g,5.5,https://www.foodspring.co.kr/goods/detail/948726
+M09903,가쓰오부시국물,,,3,False,False,False,,,가쓰오부시국물,완6,,"가쓰오부시[이엔,국물,육수용]500g",8792,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/422120
+M09914,슈가파우더,채소류,양념채소,3,False,False,False,,,슈가파우더,완1,,슈가파우더(삼양사/110g)ea,1168,110g,110.0,g,3.5,https://www.foodspring.co.kr/goods/detail/965641
+M10256,미트볼소스,기타,기타,3,False,False,False,,,미트볼소스,완2,,참소당 오므라이스소스0.9L / 오믈렛 미트볼 양식소스,4400,0.9L,0.9,L,1.0,https://www.foodspring.co.kr/goods/detail/79751
+M10285,왕방울토마토,채소류,열매채소,3,False,True,True,,,왕방울토마토,완7,왕방울토마토,야채왕 대추방울토마토 700g,4400,700g,700.0,g,1.5,https://www.foodspring.co.kr/goods/detail/900927
+M10347,무껍질,기타,기타,3,False,False,False,,,무껍질,완3,무껍질,페르디가오 무뼈 순살 껍질 붙은 닭다리살 2kg (냉동) 닭 정육 고기,9840,2kg,2.0,kg,0.55,https://www.foodspring.co.kr/goods/detail/484757
+M10438,오리뼈,,,3,False,False,False,,,오리뼈,완8,,청림 오리 날개뼈 1kg,4152,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/508441
+M10450,갈색만가닥버섯,채소류,버섯,3,False,False,False,,,갈색만가닥버섯,완10,,갈색 만가닥버섯/국내산 150g,792,150g,150.0,g,4.5,https://www.foodspring.co.kr/goods/detail/564644
+M10533,불고기거리,기타,기타,3,False,False,False,,,불고기거리,완6,,남도청년 1등급 등심+불고기+국거리 (팩당400g),60720,400g,400.0,g,1.1,https://www.foodspring.co.kr/goods/detail/880546
+M10615,팬네파스타,채소류,양념채소,3,False,False,False,,,팬네파스타,완7,팬네파스타,팬네 500G 파스타비노,968,500G,500.0,G,1.5,https://www.foodspring.co.kr/goods/detail/543020
+M10637,커스터드믹스,기타,기타,3,False,False,False,,,커스터드크림믹스,완3,커스터드크림믹스,커스터드믹스M(선인/커스터드파우더)1kg,4952,1kg,1.0,kg,3.4,https://www.foodspring.co.kr/goods/detail/965217
+M10707,밤페이스트,,,2,False,False,False,,,밤페이스트,완3,밤페이스트,베이크 앤드로스 밤페이스트 1.3kg,17872,1.3kg,1.3,kg,1.5,https://www.foodspring.co.kr/goods/detail/788171
+M10718,올리고당설탕,,,2,False,False,False,,,올리고당설탕,완8,,올리고당(오뚜기 5kg) 설탕 대신 건강하게 업소용 말통,16176,5kg,5.0,kg,0.95,https://www.foodspring.co.kr/goods/detail/458102
+M10774,계피,,,2,False,False,False,,,계피,완1,,계피분 200g/영흥,2080,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/760414
+M10954,치자,기타,기타,2,False,False,False,,,치자,완1,,치자단무지(압축슬라이스/일가집)1kg,4960,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/845754
+M10967,페이스트리냉동생지,기타,기타,2,False,False,False,,,페이스트리냉동생지,완3,페이스트리냉동생지,★프리미엄★아소비에 페이스트리 시트 냉동생지 1100g*6EA(몽블랑 등),114400,1100g,1100.0,g,-0.55,https://www.foodspring.co.kr/goods/detail/840983
+M10975,오가피나무,기타,기타,2,False,False,False,,,오가피나무,완7,오가피나무,"삼계용티백(황기,오가피,엄나무,당귀,대추)(실온,국산)",14448,500g,500.0,g,1.0,https://www.foodspring.co.kr/goods/detail/693764
+M11126,맥심커피믹스,기타,기타,2,False,False,False,,,맥심커피믹스,완2,,맥심 모카골드 마일드 커피믹스 180T,25440,2160g,2160.0,g,1.45,https://www.foodspring.co.kr/goods/detail/902134
+M11283,누텔라초코,기타,기타,2,False,False,False,,,누텔라초코,완6,,누텔라 초코잼 1kg (상온),15880,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/676900
+M11544,석화,,,2,False,False,False,,,석화,완1,,"석화굴 10kg 국내산 (약120미,반각,하프쉘) 찜용",39800,10kg,10.0,kg,3.0,https://www.foodspring.co.kr/goods/detail/945170
+M11731,건조딸기칩,기타,기타,2,False,True,True,,,건조딸기칩,완4,,아임요_동결건조 딸기슬라이스칩,6736,40g,40.0,g,1.5,https://www.foodspring.co.kr/goods/detail/927163
+M11776,레몬갈릭드레싱,기타,기타,2,False,True,True,,,레몬갈릭드레싱,완2,,롯데웰푸드 레몬갈릭올리브오일드레싱(2Kg/EA),12495,2Kg,2.0,Kg,1.2,https://www.foodspring.co.kr/goods/detail/690170
+M11847,표고버섯중,,,2,False,True,True,,,표고버섯중,완3,표고버섯중,표고버섯(상품 300g/EA)/중국산,2918,300g,300.0,g,1.5,https://www.foodspring.co.kr/goods/detail/387495
+M11934,호박잎,채소류,열매채소,2,False,True,True,,,호박잎,완1,,★입점 특가★ 햇 호박잎 (국내산 / 300g 내외) 1단,2040,300g,300.0,g,0.9,https://www.foodspring.co.kr/goods/detail/976647
+M11951,다래순나물,채소류,잎채소,2,False,False,False,,,다래순나물,완4,,아침미소 건다래순 1kg 다래순나물 마른다래순 나물반찬 비빔밥재료 한정식재료 건나물 식자재 업소용 식당,29144,1kg,1.0,kg,-0.35,https://www.foodspring.co.kr/goods/detail/727306
+M12046,닭발,육류·계란,닭고기,2,False,False,False,,,닭발,완2,,닭발(무뼈),3520,200g,200.0,g,5.5,https://www.foodspring.co.kr/goods/detail/531561
+M12104,오렌지액,기타,기타,2,False,True,True,,,오렌지액,완1,,참존 오렌지 액기스 835ml,3160,835ml,835.0,ml,1.5,https://www.foodspring.co.kr/goods/detail/792706
+M12315,덩어리치즈,,,2,False,False,False,,,덩어리치즈,완7,덩어리치즈,만토바 그라나파다노 블럭 1KG 내외 냉장 1kg 덩어리 블럭치즈,24800,1KG,1.0,KG,0.7,https://www.foodspring.co.kr/goods/detail/58138
+M12366,흰목이버섯,채소류,버섯,2,False,False,False,,,흰목이버섯,완2,,목이 흰목이버섯 1kg 하얀목이 은이버섯 백목이 건버섯 업소용 건목이,10800,1kg,1.0,kg,4.6,https://www.foodspring.co.kr/goods/detail/878256
+M12556,떡볶이용밀떡,곡류·면,떡,2,False,False,False,,,떡볶이용밀떡,완2,,밀볶이 2kg 떡볶이용 밀떡,3680,2kg,2.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/974439
+M12598,일반고추가루,,,2,False,False,False,,,일반고추가루,완8,,해아란 일반고추가루 고운/국내산 1kg,20000,1kg,1.0,kg,1.45,https://www.foodspring.co.kr/goods/detail/590233
+M12689,황도중,기타,기타,2,False,False,False,,,황도중,완9,,황도(중국산-대)3kg,6320,3kg,3.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/819488
+M12826,복숭아조림,기타,기타,2,False,True,True,,,복숭아조림,완2,,삼아 황도 통조림 황도 캔 과일 통조림 황도 슬라이스 복숭아 병조림 2.95Kg 6개,66424,2.95Kg,2.95,Kg,0.15,https://www.foodspring.co.kr/goods/detail/736026
+M12874,소고기,,,2,False,False,False,,,소고기,완1,,소고기 장터국밥600g,2960,600g,600.0,g,3.5,https://www.foodspring.co.kr/goods/detail/925404
+M13081,생닭8호,육류·계란,닭고기,2,False,False,False,,,생닭8호,완4,,생닭/삼계 8호/국내산 1마리,5400,8호,8.0,호,2.5,https://www.foodspring.co.kr/goods/detail/565603
+M13289,시저드레싱,양념·기름,당류,2,False,False,False,,,시저드레싱,완9,,크림시저드레싱(평강 2Kg),14232,2Kg,2.0,Kg,2.5,https://www.foodspring.co.kr/goods/detail/503238
+M13513,다진마을,기타,기타,2,False,False,False,,,다진마을,완6,,"다진마늘[황보마을,중국산,특A]1kg",2504,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/398946
+M13600,소고기우둔,,,2,False,False,False,,,소고기우둔,완10,,헬스꼬기 지방제한 호주산 소고기 우둔살 큐브 1KgX1팩,22000,1Kg,1.0,Kg,0.95,https://www.foodspring.co.kr/goods/detail/898501
+M13638,샤브샤브용소고기,,,2,False,False,False,,,샤브샤브용소고기,완8,,"바라던 샤브샤브,불고기용, 소등심불고기 , 200g x 1팩",4800,200g,200.0,g,0.85,https://www.foodspring.co.kr/goods/detail/848596
+M13661,실파,,,2,False,False,False,,,실파,완4,,민트라벨 하동매실파우더 800g,6800,800g,800.0,g,1.5,https://www.foodspring.co.kr/goods/detail/733311
+M13777,그릭요거트플레인,,,2,False,False,False,,,그릭요거트플레인,완3,그릭요거트플레인,[더블데이] 그릭 요거트 플레인 파우더 800G 2개,22040,800G,800.0,G,1.05,https://www.foodspring.co.kr/goods/detail/970971
+M13806,계란지,,,2,False,True,True,,,계란지,완2,,계란지단(파머스 냉동 1Kg),13760,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/794023
+M14126,계피가루시나몬가루,곡류·면,밀가루·전분,2,False,False,False,,,계피가루시,완2,,(솔표) 계피가루 업소용 시나몬가루 200g,3696,200g,200.0,g,1.3,https://www.foodspring.co.kr/goods/detail/901790
+M14148,화이트비네거,기타,기타,2,False,False,False,,,화이트비네거,완8,,데니그리스 화이트와인 비네거 500ml,3640,500ml,500.0,ml,1.45,https://www.foodspring.co.kr/goods/detail/945684
+M14259,먹태채,기타,기타,2,False,False,False,,,먹태채,완9,,인제 손질먹태채 130g(냉동제품),4736,130g,130.0,g,2.5,https://www.foodspring.co.kr/goods/detail/629296
+M14274,우롱차,기타,기타,2,False,False,False,,,우롱차,완1,,"참맑은 우롱차 175ml, 30캔",6320,175ml,175.0,ml,2.5,https://www.foodspring.co.kr/goods/detail/541353
+M14306,매운쌈,채소류,잎채소,2,False,False,False,,,매운쌈,완2,,펀쿡 매운 닭양쌈 닭가슴살 양배추쌈 280g,2440,280g,280.0,g,1.3,https://www.foodspring.co.kr/goods/detail/832759
+M14409,멸치다시물,,,2,False,False,False,,,멸치다시물,완9,,육수용멸치 650g 다시멸치 업소용 국물 멸치,18616,650g,650.0,g,1.25,https://www.foodspring.co.kr/goods/detail/668488
+M14490,와플,기타,기타,2,False,False,False,,,와플,완10,,와플파이믹스 10kg/곰표,21760,10kg,10.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/760355
+M14789,재료국수,곡류·면,면류,2,False,False,False,,,재료국수,완9,,쌀국수(10mm 몬 250g) 대량구매 요리재료 식당용 쌀국수면 베트남쌀국수 업소용 식자재 국수 쌀면,5504,250g,250.0,g,1.7,https://www.foodspring.co.kr/goods/detail/19767
+M14805,청국,양념·기름,식초·발효,2,False,False,False,,,청국,완7,청국,청국장(뚝배기표 2kg) 업소용 발효 된장,10064,2kg,2.0,kg,4.35,https://www.foodspring.co.kr/goods/detail/623258
+M14846,설탕소,,,2,False,False,False,,,설탕소,완2,,흑설탕(소)(대한제당/푸드림)1kg,1760,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/807882
+M14951,여주,기타,주류,2,False,False,False,,,여주,완4,,여주단무지(썬무),4000,2.6kg,2.6,kg,3.5,https://www.foodspring.co.kr/goods/detail/956618
+M14959,브라질넛,기타,기타,2,False,False,False,,,브라질넛,완9,,웰넛 브라질넛(200g/EA),3788,200g,200.0,g,2.5,https://www.foodspring.co.kr/goods/detail/402811
+M15052,무김치,어패류,해조류,2,False,False,False,,,무김치,완5,무김치,맘푸드 무김치(깍두기_중국산) 10kg,14800,10kg,10.0,kg,2.45,https://www.foodspring.co.kr/goods/detail/842059
+M15054,오레오,기타,기타,2,False,False,False,,,오레오,완1,,오레오 화이트크림 100g/미가방,1320,100g,100.0,g,3.5,https://www.foodspring.co.kr/goods/detail/849517
+M15141,연어장,,,2,False,False,False,,,연어장,완4,,더효탄 연어알장 100g,19920,100g,100.0,g,1.5,https://www.foodspring.co.kr/goods/detail/970890
+M15328,싸우전드드레싱,,,2,False,False,False,,,싸우전드드레싱,완8,,퀴네 싸우전드 아일랜드드레싱 250ml,2632,250ml,250.0,ml,1.45,https://www.foodspring.co.kr/goods/detail/969372
+M15519,김치무,어패류,해조류,2,False,False,False,,,김치무,완9,,일가냉면김치(무채/無) 3kg,6872,3kg,3.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/563533
+M15692,바질페스트,기타,기타,2,False,False,False,,,바질페스트,완5,바질페스트,바질 페스트 500G 디벨라,14568,500G,500.0,G,1.5,https://www.foodspring.co.kr/goods/detail/525683
+M15918,돼지다짐육,,,2,False,True,True,,,돼지다짐육,완8,,돼지고기다짐육 돈민찌 국내산 1kg,7200,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/948737
+M16023,콩송이버섯,채소류,버섯,2,False,False,False,,,콩송이버섯,완6,,콩알새송이버섯(국내산) 1kg,2560,1kg,1.0,kg,4.5,https://www.foodspring.co.kr/goods/detail/816854
+M16099,마파소스,,,2,False,False,False,,,마파소스,완9,,오뚜기 마파소스(226g/EA),3443,226g,226.0,g,2.5,https://www.foodspring.co.kr/goods/detail/497171
+M16226,고구마줄기,,,2,False,True,True,,,고구마줄기,완2,,고구마줄기(수입/삶은),4400,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/877375
+M16294,옥수수콘,기타,기타,2,False,True,True,,,옥수수콘,완1,,옥수수콘 2.95kg,3680,2.95kg,2.95,kg,3.5,https://www.foodspring.co.kr/goods/detail/534196
+M16729,마리브리자드민트시럽,기타,기타,2,False,False,False,,,민트시럽,완9,,마리브리자드 모히또민트시럽 700ml,12000,700ml,700.0,ml,1.5,https://www.foodspring.co.kr/goods/detail/529381
+M16825,돼지뒷다리살,,,2,False,True,True,,,돼지뒷다리살,완7,돼지뒷다리살,[냉동] 돼지후지 뒷다리살_국내산_가공_짜장/카레용_1kg,5440,1kg,1.0,kg,0.9,https://www.foodspring.co.kr/goods/detail/715010
+M17064,아귀,기타,기타,2,False,False,False,,,아귀,완1,,"아귀(냉동,절단/소제,상품,중국)",4000,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/939280
+M17069,다래순,기타,기타,2,False,False,False,,,다래순,완9,,건다래순(200g/EA),4568,200g,200.0,g,2.5,https://www.foodspring.co.kr/goods/detail/868961
+M17110,오리고기가슴살,,,2,False,False,False,,,오리고기가슴살,완10,,오리네타 6g (180g) 초밥용 훈제오리고기 가슴살 스시네타,3440,6g,6.0,g,0.8,https://www.foodspring.co.kr/goods/detail/894670
+M17303,육수갈비탕육수,양념·기름,액젓·국물조미료,2,False,False,False,,,육수갈비탕육수,완6,,소고기육수베이스 (갈비탕육수베이스) 2Kg,14960,2Kg,2.0,Kg,1.35,https://www.foodspring.co.kr/goods/detail/891317
+M17566,함초소금,,,2,False,False,False,,,함초소금,완2,,딜리셔스마켓 함초소금 350g,4320,350g,350.0,g,1.5,https://www.foodspring.co.kr/goods/detail/483644
+M17835,높은틀,기타,기타,2,False,False,False,,,높은틀,완7,높은틀,베니스 높은 타르트틀 1호(분리형),4960,1호,1.0,호,0.5,https://www.foodspring.co.kr/goods/detail/784361
+M17867,하인즈스파게티미트소스,,,2,False,False,False,,,스파게티미트소스,완3,하인즈스파게티미트소스,하인즈 비프 스파게티소스 3kg 미트소스,18160,3kg,3.0,kg,1.4,https://www.foodspring.co.kr/goods/detail/795749
+M17874,꽃소금굵은소금,,,2,False,False,False,,,꽃소금굵은소금,완1,,신한주 천일염 3kg 7개 꽃소금 굵은 소금 업소용,48112,3kg,3.0,kg,1.1,https://www.foodspring.co.kr/goods/detail/515992
+M17971,크러쉬페퍼,기타,기타,2,False,False,False,,,크러쉬페퍼,완4,,스위트웰 크러쉬드레드페퍼 40g,2368,40g,40.0,g,1.5,https://www.foodspring.co.kr/goods/detail/886557
+M18297,굵은고춧가루,,,2,False,True,True,,,굵은고춧가루,완3,굵은고춧가루,"굵은고춧가루,1Kg(6매쉬),중품,막분",7608,1Kg,1.0,Kg,3.45,https://www.foodspring.co.kr/goods/detail/971662
+M18304,오리브유,,,2,False,False,False,,,오리브유,완1,,★초특가★ABRIL 엑스트라버진올리브유(5L_직수입 5Kg/EA) 올리브 오리브유,41738,5L,5.0,L,0.25,https://www.foodspring.co.kr/goods/detail/867992
+M18408,매운탕,기타,기타,2,False,False,False,,,매운탕,완8,,냉동 민물새우 400g / 매운탕재료,4232,400g,400.0,g,1.5,https://www.foodspring.co.kr/goods/detail/556808
+M18470,디핑치즈소스,,,2,False,False,False,,,디핑치즈소스,완10,,체다치즈소스( 삼조 2kg) 딥핑 디핑 나쵸치즈소스 업소용,23464,2kg,2.0,kg,0.9,https://www.foodspring.co.kr/goods/detail/459776
+M18474,의성마늘스모크햄,,,2,False,False,False,,,의성마늘스모크햄,완1,,의성마늘 스모크햄(1Kg/EA),11040,1Kg,1.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/402249
+M18575,밀떡,곡류·면,떡,2,False,False,False,,,밀떡,완7,밀떡,밀떡(초록) 1kg,2000,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/834974
+M18619,설탕흰설탕,,,2,False,False,False,,,설탕흰설탕,완9,,[백설] 하얀설탕 흰설탕 3kg,4480,3kg,3.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/669369
+M18623,계란지단용,,,2,False,True,True,,,계란지단용,완6,,계란지단 채(FW 2mm 고명용 700g) X10,74088,700g,700.0,g,1.15,https://www.foodspring.co.kr/goods/detail/697853
+M18656,피넛버터잼,유제품,버터,2,False,False,False,,,피넛버터잼,완2,,땅콩버터(리고 1kg) 고소한 피넛버터 크리미 땅콩잼,10168,1kg,1.0,kg,6.05,https://www.foodspring.co.kr/goods/detail/457439
+M18885,롤라로사,기타,기타,2,False,False,False,,,롤라로사,완7,롤라로사,★매일시장특가★ 롤라로사 500g/EA,3750,500g,500.0,g,1.45,https://www.foodspring.co.kr/goods/detail/971156
+M18957,찹쌀한,곡류·면,쌀,2,False,True,True,,,찹쌀한,완3,찹쌀한,휴먼앤푸드 찹쌀새알한그릇(1Kg/EA),5093,1Kg,1.0,Kg,1.45,https://www.foodspring.co.kr/goods/detail/734091
+M19254,루꼴라,기타,기타,2,False,False,False,,,루꼴라,완1,,루꼴라 로켓/소분/국내산 100g,3600,100g,100.0,g,3.5,https://www.foodspring.co.kr/goods/detail/589753
+M19352,매운돼지갈비,,,2,False,True,True,,,매운돼지갈비,완5,매운돼지갈비,동인동식 매운 돼지갈비찜 400g,7120,400g,400.0,g,1.5,https://www.foodspring.co.kr/goods/detail/849278
+M19564,열무,기타,기타,2,False,True,True,,,열무,완1,,열무(KG)/국내산,1395,1KG,1.0,KG,3.5,https://www.foodspring.co.kr/goods/detail/499820
+M19782,목살스테이크,,,2,False,False,False,,,목살스테이크,완5,목살스테이크,돈목살(250g*5입 스테이크용 1.25Kg/EA),10628,250g,250.0,g,1.1,https://www.foodspring.co.kr/goods/detail/612341
+M19846,소금구운소금,,,2,False,False,False,,,소금구운소금,완2,,소금(구운소금500g),2640,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/618141
+M19998,아몬드호두,과일·견과,견과·씨앗,2,False,True,True,,,아몬드호두,완8,,동서 다이아몬드 호두분태 1kg,16480,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/754378
+M20042,화유,양념·기름,기름,2,False,False,False,,,화유,완5,화유,업소용 라드유 중화유 13kg 돼지기름 프로쉐프 식용유,38800,13kg,13.0,kg,6.0,https://www.foodspring.co.kr/goods/detail/621150
+M20123,가는고추가루,,,2,False,False,False,,,가는고추가루,완6,,고운 청양고춧가루(임가네 1kg)업소용 가는 고추가루,15120,1kg,1.0,kg,1.05,https://www.foodspring.co.kr/goods/detail/777603
+M20396,살구잼,육류·계란,계란,1,False,False,False,,,살구잼,완2,,다보 살구잼(올네츄럴 450g/EA),4808,450g,450.0,g,2.5,https://www.foodspring.co.kr/goods/detail/400565
+M20414,바게트빵,곡류·면,빵·곡식가공,1,False,False,False,,,바게트빵,완1,,바게트빵 갈릭 스틱 50g 15개입 마늘빵 마늘바게트 냉동생지,12720,50g,50.0,g,2.8,https://www.foodspring.co.kr/goods/detail/830307
+M20704,초코펜,기타,기타,1,False,False,False,,,초코펜,완1,,소프트펜 오렌지 18g(굳지 않는 초코펜,736,18g,18.0,g,1.4,https://www.foodspring.co.kr/goods/detail/748431
+M20796,파우더슈가,곡류·면,밀가루·전분,1,False,False,False,,,파우더슈가,완2,,타코 복숭아아이스티파우더(제로슈가 1Kg/EA),14093,1Kg,1.0,Kg,1.2,https://www.foodspring.co.kr/goods/detail/729542
+M20833,핫초코,기타,기타,1,False,False,False,,,핫초코,완6,,위드고 핫초코 파우더 900g,4320,900g,900.0,g,2.5,https://www.foodspring.co.kr/goods/detail/64849
+M20894,케일,기타,기타,1,False,True,True,,,케일,완1,,케일 국내산 100g,1200,100g,100.0,g,3.5,https://www.foodspring.co.kr/goods/detail/589791
+M21081,생면국수,곡류·면,면류,1,False,False,False,,,생면국수,완4,,칼국수 생면 평화 생칼국수 1.4Kg,7632,1.4Kg,1.4,Kg,3.5,https://www.foodspring.co.kr/goods/detail/926219
+M21233,셀러리,양념·기름,식초·발효,1,False,False,False,,,셀러리,완6,,셀러리(상품/국산)500g,1968,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/781264
+M21662,텐더치킨,기타,기타,1,False,False,False,,,텐더치킨,완5,텐더치킨,맘스터치 시그니처 치킨텐더 1kg 냉동 순살치킨,7420,1kg,1.0,kg,1.2,https://www.foodspring.co.kr/goods/detail/515976
+M21794,기버터스프레이,유제품,버터,1,False,False,False,,,기버터스프레이,완1,,만토바 기버터 스프레이 2개,20160,2개,2.0,개,5.5,https://www.foodspring.co.kr/goods/detail/971478
+M21866,커피스틱,유제품,우유·크림,1,False,False,False,,,커피스틱,완2,,커피스틱(검정색_15cm_1000입 EA),3773,0.4KG,0.4,KG,3.35,https://www.foodspring.co.kr/goods/detail/729623
+M22012,쿨소스,기타,기타,1,False,False,False,,,쿨소스,완5,쿨소스,브이토니쿨리스(토마토소스),13304,3Kg,3.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/515298
+M22226,일본카레,기타,기타,1,False,False,False,,,일본카레,완2,,가토코 일본풍카레(농축형 1Kg/EA) 커리,18555,1Kg,1.0,Kg,1.3,https://www.foodspring.co.kr/goods/detail/495777
+M22312,채소모듬,기타,기타,1,False,False,False,,,채소모듬,완5,채소모듬,"새싹채소-모듬(실온,수입)",1048,100g,100.0,g,1.5,https://www.foodspring.co.kr/goods/detail/693840
+M22344,와사비초밥,기타,기타,1,False,False,False,,,와사비초밥,완1,,코우 타코와사비 1kg 군함말이 초밥 토핑,17600,1kg,1.0,kg,1.35,https://www.foodspring.co.kr/goods/detail/810259
+M22407,피자도우생지,기타,기타,1,False,False,False,,,피자도우생지,완3,피자도우생지,피자도우 270g 54개 피자 생지볼,36000,270g,270.0,g,1.5,https://www.foodspring.co.kr/goods/detail/588391
+M22588,배갈배,과일·견과,과일,1,False,False,False,,,배갈배,완8,,갈아만든배 1.5L 갈배,2672,1.5L,1.5,L,1.5,https://www.foodspring.co.kr/goods/detail/916746
+M22614,무순,기타,기타,1,False,False,False,,,무순,완1,,무순(약50g),360,50g,50.0,g,3.5,https://www.foodspring.co.kr/goods/detail/938111
+M22856,핫겨자,기타,기타,1,False,False,False,,,핫겨자,완2,,★공산 핫★ 움트리 강겨자 분말 200g,3112,200g,200.0,g,1.4,https://www.foodspring.co.kr/goods/detail/957027
+M23026,글레이즈발사믹,기타,기타,1,False,False,False,,,글레이즈발사믹,완2,,폰티 글레이즈 발사믹크림 500g,8944,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/548555
+M23045,피클머스터드,기타,기타,1,False,False,False,,,피클머스터드,완7,피클머스터드,사워피클드그린머스터드(MUSTARD) 350G /EA _절임채소 _동남아_동남아식재_아시안,1256,350G,350.0,G,0.0,https://www.foodspring.co.kr/goods/detail/975499
+M23134,시나몬,기타,기타,1,False,False,False,,,시나몬,완1,,시나몬 통계피(베트남산) 500g,3040,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/876185
+M23239,주스,기타,주류,1,False,False,False,,,주스,완9,,라임주스(MM/500ml/태국)ea,1032,500ml,500.0,ml,2.5,https://www.foodspring.co.kr/goods/detail/967154
+M23252,흥국레몬농축액,기타,기타,1,False,True,True,,,흥국레몬농축액,완5,흥국레몬농축액,흥국 레몬농축액1.5L,27840,1.5L,1.5,L,1.5,https://www.foodspring.co.kr/goods/detail/454072
+M23361,그린올리브,기타,기타,1,False,False,False,,,그린올리브,완4,,그린올리브(리치스-소)365g,1840,365g,365.0,g,3.5,https://www.foodspring.co.kr/goods/detail/824886
+M23418,베이비순,기타,기타,1,False,False,False,,,베이비순,완8,,베이비순(모듬/국산)250g,4080,250g,250.0,g,3.5,https://www.foodspring.co.kr/goods/detail/781325
+M23677,소라무침,기타,기타,1,False,False,False,,,소라무침,완3,소라무침,업소용 위소라 슬라이스 5kg (500g x 10팩) 위고동 냉동 짬뽕 무침,37600,5kg,5.0,kg,0.4,https://www.foodspring.co.kr/goods/detail/642261
+M23726,밤다이스,유제품,우유·크림,1,False,False,False,,,밤다이스,완2,,진산 밤다이스 340g,4880,340g,340.0,g,2.5,https://www.foodspring.co.kr/goods/detail/789602
+M23793,밤잼,과일·견과,과일,1,False,False,False,,,밤잼,완6,,주에그 밤잼 330g,5376,330g,330.0,g,2.5,https://www.foodspring.co.kr/goods/detail/536265
+M23850,지퍼백소,기타,기타,1,False,False,False,,,지퍼백소,완10,,크린엎 지퍼백(소_18*20cm_20입 EA),795,0.118Kg,0.118,Kg,1.25,https://www.foodspring.co.kr/goods/detail/689857
+M24024,메이플시럽,육류·계란,계란,1,False,True,True,,,메이플시럽,완1,,메이플시럽,8400,250ml,250.0,ml,3.5,https://www.foodspring.co.kr/goods/detail/638151
+M24334,치폴레소스,기타,기타,1,False,False,False,,,치폴레소스,완1,,치폴레소스(아이엠)2kg,14880,2kg,2.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/811349
+M24454,김밥,육류·계란,소고기,1,False,False,False,,,김밥,완1,,김밥 전용 맛기름 1.8L 외국산,8920,1.8L,1.8,L,3.5,https://www.foodspring.co.kr/goods/detail/550273
+M24627,홀스래디쉬,기타,기타,1,False,True,True,,,홀스래디쉬,완3,홀스래디쉬,홀스래디쉬(오뚜기/250g)EA,3216,250g,250.0,g,3.5,https://www.foodspring.co.kr/goods/detail/966882
+M24860,통더덕,양념·기름,장류,1,False,False,False,,,통더덕,완10,,깐통더덕/중국산 500g,11096,500g,500.0,g,2.5,https://www.foodspring.co.kr/goods/detail/564307
+M25015,디저트컵,기타,기타,1,False,False,False,,,디저트컵,완7,디저트컵,"국내산 고급형 92파이 200ml(7온스) PET컵 무지 디저트컵 아이스컵 1,000개",39120,200ml,200.0,ml,0.1,https://www.foodspring.co.kr/goods/detail/796066
+M25082,중화면칼국수우동,곡류·면,면류,1,False,False,False,,,중화면칼국수우동,완5,중화면칼국수우동,"곰표 고급제면용1호 밀가루 20kg(중화면, 칼국수, 우동등)",19840,1호,1.0,호,1.8,https://www.foodspring.co.kr/goods/detail/988137
+M25311,나무꼬치산적꼬치,기타,기타,1,False,False,False,,,나무꼬치산적꼬치,완4,,대꽂이(꼬치용 12Cm 1000입) 꼬치 나무꼬치 대나무꼬치 산적꼬치 꼬지 업소용 식당용품 바베큐,6488,1개,1.0,개,-1.2,https://www.foodspring.co.kr/goods/detail/19743
+M25322,래디시,기타,물·음료,1,False,False,False,,,래디시,완5,래디시,래디시(상품 KG),9810,1KG,1.0,KG,3.5,https://www.foodspring.co.kr/goods/detail/871319
+M25650,명란젓명란젓,기타,기타,1,False,False,False,,,명란젓명란젓,완10,,★초특가★천년의반찬 속초명인 백명란젓 200g 명란젓갈 저염 무색소 명란젓,3920,200g,200.0,g,0.45,https://www.foodspring.co.kr/goods/detail/927644
+M25753,삼계탕약재티백,기타,기타,1,False,False,False,,,삼계탕약재티백,완6,,국산 한방 삼계탕 재료 백숙 수육 식당 육수 약재 100g 티백 50개,46400,100g,100.0,g,0.55,https://www.foodspring.co.kr/goods/detail/643119
+M25816,코코볼시리얼,기타,기타,1,False,False,False,,,코코볼시리얼,완2,,포스트 오곡 코코볼 1kg 시리얼,7196,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/367858
+M25953,체리잼,기타,기타,1,False,True,True,,,체리잼,완6,,앤드로스 체리리플잼(1Kg/EA),13365,1Kg,1.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/690655
+M25964,지름,육류·계란,계란,1,False,False,False,,,지름,완1,,2Kg(지름 약 5cm) / EA,40344,2Kg,2.0,Kg,2.5,https://www.foodspring.co.kr/goods/detail/695474
+M26231,오리로스용,기타,기타,1,False,False,False,,,오리로스용,완4,,청림 오리 슬라이스 1kg 1개 오리로스 주물럭 생오리고기 업소용,17344,1kg,1.0,kg,0.7,https://www.foodspring.co.kr/goods/detail/508437
+M26270,우유요거트,유제품,우유·크림,1,False,True,True,,,우유요거트,완10,,서울우유 플레인요거트무가당 1.8L,5984,1.8L,1.8,L,2.5,https://www.foodspring.co.kr/goods/detail/796651
+M26314,쫄면국수,곡류·면,면류,1,False,False,False,,,쫄면국수,완1,,흑마늘 생 소면 320g 콩국수 쫄면 비빔국수,9600,320g,320.0,g,3.25,https://www.foodspring.co.kr/goods/detail/654832
+M26332,황태육수물,양념·기름,장류,1,False,False,False,,,황태육수물,완5,황태육수물,황태머리 200g (크기 중) 황태대가리 북어머리 황태 북어 건어물 육수재료 국물재료 해장국재료 식자재,11864,200g,200.0,g,1.65,https://www.foodspring.co.kr/goods/detail/662741
+M26357,로즈마리허브,기타,기타,1,False,False,False,,,로즈마리허브,완3,로즈마리허브,로즈마리 500g 생잎 생로즈마리 허브,16000,500g,500.0,g,1.45,https://www.foodspring.co.kr/goods/detail/756260
+M26416,염장해초,기타,기타,1,False,False,False,,,염장해초,완2,,[새벽바다] 식자재용 염장 해초모듬 2kg,16400,2kg,2.0,kg,1.35,https://www.foodspring.co.kr/goods/detail/23582
+M26518,오로발사믹,기타,기타,1,False,False,False,,,오로발사믹,완8,,갈레티 오로 디 모데나 화이트 발사믹 비네거 와인 식초 500ml,4240,500ml,500.0,ml,0.7,https://www.foodspring.co.kr/goods/detail/946258
+M26572,바질시드,기타,기타,1,False,False,False,,,바질시드,완5,바질시드,웰바질 시드(290ml_망고 290g/EA),15345,290ml,290.0,ml,1.3,https://www.foodspring.co.kr/goods/detail/986314
+M26657,짠지채,기타,기타,1,False,False,False,,,짠지채,완3,짠지채,마라 무짠지채(단지/중국산)1kg,4424,1kg,1.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/966158
+M26664,육수스톡,양념·기름,액젓·국물조미료,1,False,False,False,,,육수스톡,완1,,칼노트 야채스톡 250g 채소육수 베지터블스톡 국물베이스 요리재료 가정용 비건요리 식자재,7368,250g,250.0,g,0.05,https://www.foodspring.co.kr/goods/detail/442946
+M26779,가지중사이즈,기타,기타,1,False,True,True,,,가지중사이즈,완9,,국내산 축양 농장 직송 가지 특상품 2Kg 중 사이즈 10-15개 내외,21000,2Kg,2.0,Kg,0.55,https://www.foodspring.co.kr/goods/detail/587681
+M26795,건곤드레,양념·기름,장류,1,False,False,False,,,건곤드레,완7,건곤드레,"건곤드레,200g(pk),국산",9000,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/693301
+M26918,카레고기,기타,기타,1,False,False,False,,,카레고기,완8,,돈후지 짜장 카레 깍뚝썰기 돼지고기,32640,5kg,5.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/473961
+M26957,김치냉면김치,곡류·면,면류,1,False,False,False,,,김치냉면김치,완3,김치냉면김치,다오 냉면 무김치 2.5kg 냉면김치,5166,2.5kg,2.5,kg,3.5,https://www.foodspring.co.kr/goods/detail/369304
+M26964,플레,기타,기타,1,False,False,False,,,플레,완1,,플레인두유 1L/연세두유,2000,1L,1.0,L,3.5,https://www.foodspring.co.kr/goods/detail/975299
+M27197,오겹살,기타,기타,1,False,False,False,,,오겹살,완3,오겹살,쫀득한 통오겹살(보쌈용) 1.2kg*7pk(8.4kg),9520,1.2kg,1.2,kg,2.0,https://www.foodspring.co.kr/goods/detail/959305
+M27284,알타리,기타,기타,1,False,False,False,,,알타리,완1,,"알타리무,1Kg,상품,국산",2080,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/941181
+M27321,산초가루,곡류·면,밀가루·전분,1,False,False,False,,,산초가루,완4,,산초가루(솔표/40g)ea,2368,40g,40.0,g,3.5,https://www.foodspring.co.kr/goods/detail/968216
+M27464,할라피뇨,기타,기타,1,False,False,False,,,할라피뇨,완1,,할라피뇨 슬라이스 800G 파로,5856,800G,800.0,G,3.5,https://www.foodspring.co.kr/goods/detail/532374
+M27506,조미료다시다,기타,기타,1,False,False,False,,,조미료다시다,완2,,백설 쇠고기다시다 2kg 다시다 조미료 소고기다시다,26392,2kg,2.0,kg,1.1,https://www.foodspring.co.kr/goods/detail/565095
+M27539,우엉조림김밥용,어패류,해조류,1,False,True,True,,,우엉조림김밥용,완9,,새싹찬 우엉조림(김밥용 1Kg/EA),6008,1Kg,1.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/500953
+M27542,베이건,기타,기타,1,False,False,False,,,베이건,완5,베이건,빼어날수 건살구 700g 말린살구 살구 건과일 말린과일 식자재 업소용 카페 베이킹재료 건강간식,24984,700g,700.0,g,-0.1,https://www.foodspring.co.kr/goods/detail/728478
+M27646,단무,기타,기타,1,False,False,False,,,단무,완2,,단무지(깍둑/세미로),2800,2.6kg,2.6,kg,3.5,https://www.foodspring.co.kr/goods/detail/663583
+M27897,생면사리,양념·기름,액젓·국물조미료,1,False,False,False,,,생면사리,완3,생면사리,생면사리(오뚜기 200gx50),41344,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/489442
+M28004,튀김기름,양념·기름,기름,1,False,True,True,,,튀김기름,완1,,3M 튀김 기름 산가 측정 페이퍼 50매,17800,50매,50.0,매,5.4,https://www.foodspring.co.kr/goods/detail/167916
+M28383,한돈등심,기타,기타,1,False,False,False,,,한돈등심,완6,,한돈 생등심(다짐육) 600g,7080,600g,600.0,g,1.5,https://www.foodspring.co.kr/goods/detail/757838
+M28564,뉴슈가,기타,기타,1,False,False,False,,,뉴슈가,완1,,뉴슈가 60g/금하,304,60g,60.0,g,3.5,https://www.foodspring.co.kr/goods/detail/760496
+M28744,코코아가루,곡류·면,밀가루·전분,1,False,False,False,,,코코아가루,완1,,코코아분(유한-자판)900g*가루,4022,900g,900.0,g,1.5,https://www.foodspring.co.kr/goods/detail/49223
+M28783,버미셀리,기타,기타,1,False,False,False,,,버미셀리,완6,,"버미셀리면, 200g, 상온",1352,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/693142
+M28828,갈비약,채소류,양념채소,1,False,False,False,,,갈비약,완8,,"그릴떡갈비(한성기업,냉동),1kg(약26g*38ea)/봉",7744,1kg,1.0,kg,0.95,https://www.foodspring.co.kr/goods/detail/651646
+M28921,머위잎,채소류,양념채소,1,False,False,False,,,머위잎,완4,,머위잎(500g/EA),4343,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/968955
+M28940,야채찌개용,기타,기타,1,False,False,False,,,야채찌개용,완10,,냉동혼합야채(찌개용) 500g,1760,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/902107
+M29032,돌나물돗나물,채소류,잎채소,1,False,False,False,,,돌나물돗나물,완5,돌나물돗나물,★매일시장특가★ 돈나물 500g/EA 돌나물 돗나물,705,500g,500.0,g,1.1,https://www.foodspring.co.kr/goods/detail/722524
+M29106,연두부순두부,가공식품,두부·묵,1,False,False,False,,,연두부순두부,완2,,연두부(댓골 냉장 300g) X5 식자재 업소용 두부요리 건강식 반찬가게 순두부 부드러운두부 냉장두부,7688,300g,300.0,g,2.7,https://www.foodspring.co.kr/goods/detail/702491
+M29134,라즈베리,기타,기타,1,False,False,False,,,라즈베리,완1,,라즈베리냉동크럼 (IQF) 500g,6640,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/749987
+M29247,커피콜드브루,기타,기타,1,False,False,False,,,커피콜드브루,완3,커피콜드브루,수가 커피베이스(440ml_콜드브루 440g/EA),8528,440ml,440.0,ml,1.1,https://www.foodspring.co.kr/goods/detail/399039
+M29304,치자가루,곡류·면,밀가루·전분,1,False,False,False,,,치자가루,완1,,오케이 치자가루 50g,1184,50g,50.0,g,2.5,https://www.foodspring.co.kr/goods/detail/850577
+M29434,한천가루,곡류·면,밀가루·전분,1,False,False,False,,,한천가루,완1,,더해담 한천가루 1kg,32400,1kg,1.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/725469
+M29476,옥수수캔,양념·기름,기타양념,1,False,True,True,,,옥수수캔,완2,,"옥수수캔(리치스),425g/캔,스위트콘,",1232,425g,425.0,g,3.4,https://www.foodspring.co.kr/goods/detail/952757
+M29574,찹쌀호떡믹스,곡류·면,떡,1,False,True,True,,,찹쌀호떡믹스,완1,,백설 찹쌀호떡믹스(400g/EA),1973,400g,400.0,g,1.5,https://www.foodspring.co.kr/goods/detail/922958
+M29698,오올리고당,양념·기름,당류,1,False,False,False,,,오올리고당,완8,,오가닉스토리 쌀올리고당(유기농 480g/EA),7785,480g,480.0,g,3.25,https://www.foodspring.co.kr/goods/detail/403307
+M29715,피자스파게티소스,채소류,양념채소,1,False,False,False,,,피자스파게티소스,완7,피자스파게티소스,[피자다] 오쉐프 스파게티소스 (2kg),6960,2kg,2.0,kg,1.4,https://www.foodspring.co.kr/goods/detail/731615
+M29846,문어중,과일·견과,견과·씨앗,1,False,False,False,,,문어중,완2,,(냉동)문어볼/타코야끼볼(재호)(중국산)1kg,3936,1kg,1.0,kg,1.25,https://www.foodspring.co.kr/goods/detail/808441
+M29891,쌈장해찬들,채소류,잎채소,1,False,False,False,,,쌈장해찬들,완4,,사계절 쌈장(해찬들) 1kg ea,5760,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/601312
+M30014,페퍼론치노,유제품,우유·크림,1,False,False,False,,,페퍼론치노,완1,,신영 페퍼론치노 홀 200g,16960,200g,200.0,g,2.5,https://www.foodspring.co.kr/goods/detail/448937
+M30082,폴렌타가루,곡류·면,밀가루·전분,1,False,False,False,,,폴렌타가루,완5,폴렌타가루,폴렌타(디벨라 500g) 옥수수가루 콘밀 이탈리아음식 양식재료 레스토랑재료 업소용 식자재 요리재료 사이드디쉬,8408,500g,500.0,g,-0.5,https://www.foodspring.co.kr/goods/detail/19891
+M30281,초코우유,곡류·면,밀가루·전분,1,False,True,True,,,초코우유,완4,,티엠제과_딥초코우유마카롱,8400,40g,40.0,g,1.5,https://www.foodspring.co.kr/goods/detail/886781
+M30514,갑오징어,어패류,두족류,1,False,False,False,,,갑오징어,완1,,갑오징어 60-80 200g 냉동,2800,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/166172
+M30704,마른김,어패류,해조류,1,False,False,False,,,마른김,완1,,곱창김 최상품 돌김 50장 김 도매 식자재 반찬 재료 해산물 업소용 마른김 vb,31024,50장,50.0,장,-0.7,https://www.foodspring.co.kr/goods/detail/662738
+M30730,프락토올리고당,양념·기름,당류,1,False,False,False,,,프락토올리고당,완10,,백설 프락토올리고당 700g,2400,700g,700.0,g,3.5,https://www.foodspring.co.kr/goods/detail/645264
+M31051,통항정살,기타,기타,1,False,False,False,,,통항정살,완4,,수입산 냉동 통항정살 천겹살 수육용 1Kg,19144,1Kg,1.0,Kg,1.35,https://www.foodspring.co.kr/goods/detail/974777
+M31113,혼다시다시다,기타,기타,1,False,False,False,,,혼다시다시다,완6,,"혼다시(농심,아지노모도,다시다)1kg",15920,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/82202
+M31216,라임잎,기타,기타,1,False,False,False,,,라임잎,완2,,건조라임잎(인코트레이딩)50g,3848,50g,50.0,g,2.5,https://www.foodspring.co.kr/goods/detail/965993
+M31234,김밥용김,채소류,양념채소,1,False,False,False,,,김밥용김,완1,,"더고소한김밥용김, 20g, 사조대림,실온",1760,20g,20.0,g,2.4,https://www.foodspring.co.kr/goods/detail/695078
+M31237,홍국쌀,곡류·면,쌀,1,False,False,False,,,홍국쌀,완3,홍국쌀,홍국쌀(1Kg/EA)/국내산,8123,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/386110
+M31275,초코,기타,기타,1,False,False,False,,,초코,완7,초코,초코 마시멜로90g,1040,90g,90.0,g,3.5,https://www.foodspring.co.kr/goods/detail/681735
+M31328,청국장콩,양념·기름,기름,1,False,False,False,,,청국장콩,완8,,이쁜이표 파주장단콩청국장(국내산콩 200g/EA),3503,200g,200.0,g,1.15,https://www.foodspring.co.kr/goods/detail/402727
+M31508,탕수육고기,기타,기타,1,False,False,False,,,탕수육고기,완8,,수입 돈등심 탕수육 돼지고기 스페인산,32640,5kg,5.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/714284
+M31744,통닭7호,육류·계란,닭고기,1,False,False,False,,,통닭7호,완1,,한샘종합식품 통닭(7호_껍질있음_700±50g/마리 700g/EA)/국내산,3945,7호,7.0,호,1.45,https://www.foodspring.co.kr/goods/detail/498860
+M31777,누텔라초코스프레드,기타,기타,1,False,False,False,,,누텔라초코스프레드,완3,누텔라초코스프레드,누텔라 초코스프레드 370g,4400,370g,370.0,g,1.5,https://www.foodspring.co.kr/goods/detail/534860
+M32134,국내산홍어,기타,기타,1,False,False,False,,,국내산홍어,완1,,[남도씨푸드]국내산 홍어회 500g,23200,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/388375
+M32247,밴댕이,기타,기타,1,False,False,False,,,밴댕이,완3,밴댕이,밴댕이 디포리 1.5kg (사이즈 9-11),8560,1.5kg,1.5,kg,3.3,https://www.foodspring.co.kr/goods/detail/830298
+M32434,간마늘,채소류,양념채소,1,False,False,False,,,간마늘,완1,,간마늘(A급/국내산) 500g,3520,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/817001
+M32497,황태육수용,양념·기름,액젓·국물조미료,1,False,False,False,,,황태육수용,완3,황태육수용,황태머리(대 1kg) 업소용 육수용 북어 대가리 머리,22912,1kg,1.0,kg,1.05,https://www.foodspring.co.kr/goods/detail/623284
+M32594,단팥,기타,기타,1,False,False,False,,,단팥,완1,,통단팥 850g/참존,3160,850g,850.0,g,2.5,https://www.foodspring.co.kr/goods/detail/757569
+M32619,쥐눈이콩,기타,기타,1,False,False,False,,,쥐눈이콩,완9,,볶은 쥐눈이콩 수입 10kg,52000,10kg,10.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/988997
+M32926,빨래건조,기타,기타,1,False,False,False,,,빨래건조,완2,,빨래줄(일조화학 코팅 6m)X10개 캠핑 야외 건조 스트링,55944,10개,10.0,개,-0.1,https://www.foodspring.co.kr/goods/detail/477435
+M33184,까르보나라,기타,기타,1,False,False,False,,,까르보나라,완1,,CJ 까르보나라 스파게티 2인분 600g,7840,600g,600.0,g,2.4,https://www.foodspring.co.kr/goods/detail/892688
+M33324,오레가노,양념·기름,식초·발효,1,False,False,False,,,오레가노,완1,,오레가노(10g/EA),938,10g,10.0,g,3.5,https://www.foodspring.co.kr/goods/detail/968963
+M33378,거품기수동,기타,기타,1,False,False,False,,,거품기수동,완8,,거품기 세븐아트 업소용 수동 스텐거품기 핸드 휘핑기 1개,3160,1개,1.0,개,-0.05,https://www.foodspring.co.kr/goods/detail/922131
+M33435,스위트콘옥수수통조림,기타,기타,1,False,True,True,,,스위트콘옥수수통조림,완7,스위트콘옥수수통조림,스위트콘 2.95kg 옥수수 캔 통조림,3504,2.95kg,2.95,kg,1.45,https://www.foodspring.co.kr/goods/detail/920665
+M33451,닭뼈육수,양념·기름,가루양념,1,False,False,False,,,닭뼈육수,완4,,(냉장) 국내산 닭몸통뼈 1kg 육수용 닭뼈,1040,1kg,1.0,kg,1.3,https://www.foodspring.co.kr/goods/detail/832589
+M33730,무가염버터,유제품,버터,1,False,True,True,,,무가염버터,완10,,뉴질랜드 앵커 무가염 버터 454g,8400,454g,454.0,g,6.5,https://www.foodspring.co.kr/goods/detail/652170
+M33831,볶음땅콩,기타,기타,1,False,True,True,,,볶음땅콩,완4,,볶음땅콩 740g(중국산),4000,740g,740.0,g,3.5,https://www.foodspring.co.kr/goods/detail/369194
+M33844,해바라기씨,양념·기름,기름,1,False,False,False,,,해바라기씨,완1,,"해바라기씨(상품,수입)",1000,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/693920
+M33853,보리빵,곡류·면,빵·곡식가공,1,False,True,True,,,보리빵,완6,,참식품 보리떡가루 보리술빵 3kg,9200,3kg,3.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/977423
+M34116,자른닭,육류·계란,닭고기,1,False,False,False,,,자른닭,완2,,당면(자른 오뚜기 500g) 자른당면 오뚜기당면 식자재 업소용 잡채재료 찜닭재료 분식재료 한식당 급식,10816,500g,500.0,g,1.7,https://www.foodspring.co.kr/goods/detail/17636
+M34147,크기,기타,물·음료,1,False,False,False,,,크기,완3,크기,깐양파(1번크기) 10kg[봉],13336,10kg,10.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/885571
+M34164,오리생육,기타,기타,1,False,False,False,,,오리생육,완1,,청림 오리 생육 슬라이스 1kg 업소용 식자재 오리고기,17424,1kg,1.0,kg,1.0,https://www.foodspring.co.kr/goods/detail/465100
+M34198,초코칩쿠키,기타,기타,1,False,False,False,,,초코칩쿠키,완8,,초코칩쿠키 1.8kg 신흥제과 1봉,8800,1.8kg,1.8,kg,3.5,https://www.foodspring.co.kr/goods/detail/821639
+M34311,미니떡볶이떡,채소류,열매채소,1,False,False,False,,,미니떡볶이떡,완4,,가예 미니 단호박떡볶이떡 1Kg,4656,1Kg,1.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/471725
+M34556,파래김,채소류,양념채소,1,False,False,False,,,파래김,완2,,일등 파래김16단,2960,4g,4.0,g,2.5,https://www.foodspring.co.kr/goods/detail/640345
+M34747,미숫가루스틱,곡류·면,밀가루·전분,1,False,False,False,,,미숫가루스틱,완3,미숫가루스틱,뚜레반 미숫가루(스틱) 26gX40포,10320,26g,26.0,g,1.5,https://www.foodspring.co.kr/goods/detail/310952
+M34874,방아잎,기타,기타,1,False,True,True,,,방아잎,완1,,방아잎(KG)/국내산,8175,1KG,1.0,KG,3.5,https://www.foodspring.co.kr/goods/detail/500198
+M35046,쌀조청,곡류·면,쌀,1,False,False,False,,,쌀조청,완2,,영월농협 쌀조청700g,8720,700g,700.0,g,2.5,https://www.foodspring.co.kr/goods/detail/529437
+M35094,바닐라,기타,기타,1,False,False,False,,,바닐라,완1,,바닐라 엣센스 500G 유니크,12640,500G,500.0,G,3.5,https://www.foodspring.co.kr/goods/detail/520598
+M35237,황태포북어,기타,기타,1,False,True,True,,,황태포북어,완3,황태포북어,황태포(38~40cm/북어찜포/10미),24720,10미,10.0,미,0.45,https://www.foodspring.co.kr/goods/detail/620884
+M35360,약콩,기타,기타,1,False,False,False,,,약콩,완10,,약콩(일반 500g/EA)/국내산,6353,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/402511
+M35603,까나리액젓갈,양념·기름,액젓·국물조미료,1,False,False,False,,,까나리액젓갈,완6,,사조오양 까나리액젓 9kg 김장젓갈,11600,9kg,9.0,kg,4.5,https://www.foodspring.co.kr/goods/detail/928133
+M35835,생면면사리,양념·기름,장류,1,False,False,False,,,생면면사리,완7,생면면사리,중화면사리(평화 1.4K) 중화면 생면 면사리 업소용 중식당 중국집 식자재 짜장면면 짬뽕면,9840,1개,1.0,개,1.0,https://www.foodspring.co.kr/goods/detail/73376
+M36206,통밀빵,곡류·면,빵·곡식가공,1,False,False,False,,,통밀빵,완2,,새롬푸드 통밀빵프리믹스(3Kg/EA),13965,3Kg,3.0,Kg,2.5,https://www.foodspring.co.kr/goods/detail/881068
+M36274,발사믹글레이즈,양념·기름,식초·발효,1,False,False,False,,,발사믹글레이즈,완1,,데니그리스 발사믹 글레이즈 250ml,5760,250ml,250.0,ml,1.5,https://www.foodspring.co.kr/goods/detail/90480
+M36640,황태물,기타,물·음료,1,False,False,False,,,황태물,완10,,황태해장국(40팩)-조리시 물350ml추가,100672,40팩,40.0,팩,-0.65,https://www.foodspring.co.kr/goods/detail/657626
+M36877,갈릭파우더,채소류,양념채소,1,False,True,True,,,갈릭파우더,완3,갈릭파우더,TRI 티알아이 고메 스파이스 마늘 그레뉼레이티드 650g 갈릭 가루 그래뉼 파우더,13520,650g,650.0,g,0.2,https://www.foodspring.co.kr/goods/detail/466505
+M36946,타르트누름돌,기타,기타,1,False,False,False,,,타르트누름돌,완2,,"베니스 타르트 누름돌(500g,황토)",4240,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/790292
+M37209,갈비고기,기타,기타,1,False,False,False,,,갈비고기,완9,,냉동 LA갈비 2kg 꽃갈비 소갈비 수입산 소고기,39920,2kg,2.0,kg,1.15,https://www.foodspring.co.kr/goods/detail/514145
+M37669,홍삼정,기타,기타,1,False,False,False,,,홍삼정,완9,,고려홍삼절편골드100g 20gx5 고려홍삼절편 홍삼절편 홍삼 슬라이스홍삼 홍삼정과 건강간식 단체간식 사무실간식 업소용간식 영양간식,39360,100g,100.0,g,-1.1,https://www.foodspring.co.kr/goods/detail/890675
+M37932,단팥호빵,곡류·면,빵·곡식가공,1,False,False,False,,,단팥호빵,완5,단팥호빵,꼬마단팥호빵,2800,240g,240.0,g,2.5,https://www.foodspring.co.kr/goods/detail/654575
+M38243,김치주먹밥,어패류,해조류,1,False,False,False,,,김치주먹밥,완6,,한우물 참치김치주먹밥(100g/EA),27983,100g,100.0,g,1.5,https://www.foodspring.co.kr/goods/detail/951073
+M38254,돈가스소스,양념·기름,기타양념,1,False,False,False,,,돈가스소스,완1,,돈가스소스(소담),3200,2kg,2.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/953969
+M38296,젓가락,기타,기타,1,False,True,True,,,젓가락,완2,,젓가락(막저/비닐/1봉=250개입),2888,1봉,1.0,봉,2.5,https://www.foodspring.co.kr/goods/detail/843892
+M38301,부대찌개소스,기타,기타,1,False,False,False,,,부대찌개소스,완4,,고추명가 부대찌개 소스 2kg,8715,2kg,2.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/478766
+M38339,건빵,곡류·면,빵·곡식가공,1,False,False,False,,,건빵,완9,,건빵가루 1KG 행성,4344,1KG,1.0,KG,3.5,https://www.foodspring.co.kr/goods/detail/530574
+M38411,스위트칠리소스시,기타,기타,1,False,False,False,,,스위트칠리소스시,완4,,스위트칠리소스(시아스),8960,2kg,2.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/518377
+M38784,레드크러쉬페퍼,기타,기타,1,False,False,False,,,레드크러쉬페퍼,완1,,이슬나라 고춧가루 300g 레드페퍼 크러쉬드페퍼 업소용,12384,300g,300.0,g,1.0,https://www.foodspring.co.kr/goods/detail/724901
+M38871,청경채중,양념·기름,식초·발효,1,False,True,True,,,청경채중,완4,,냉동청경채(5~6cm절단 1Kg/EA)/중국산,2415,1Kg,1.0,Kg,1.25,https://www.foodspring.co.kr/goods/detail/499297
+M38982,보늬밤,기타,기타,1,False,False,False,,,보늬밤,완5,보늬밤,보늬밤베이스_1kg/ea,14664,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/751435
+M39016,마아가린버터,유제품,버터,1,False,False,False,,,마아가린버터,완2,,마가린(오뚜기 파운드 450g) 블럭 마아가린 버터,2816,450g,450.0,g,6.1,https://www.foodspring.co.kr/goods/detail/457440
+M39104,통생강,채소류,열매채소,1,False,True,True,,,통생강,완1,,통생강 깐생강/국내산 1kg,7920,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/589716
+M39306,편생강,기타,기타,1,False,True,True,,,편생강,완2,,편강 1kg (어르신간식/생강편강/생강편),8000,1kg,1.0,kg,1.35,https://www.foodspring.co.kr/goods/detail/894560
+M39314,오렌지,기타,기타,1,False,True,True,,,오렌지,완1,,오뚜기 오렌지 시럽 1kg,2800,1kg,1.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/448888
+M39362,닭발뼈닭발,육류·계란,닭고기,1,False,False,False,,,닭발뼈닭발,완5,닭발뼈닭발,업소용 뼈없는 닭발 무뼈닭발 1kg 수입산 냉동 생닭발,11200,1kg,1.0,kg,3.0,https://www.foodspring.co.kr/goods/detail/957213
+M39377,토마토바질소스,채소류,열매채소,1,False,True,True,,,토마토바질소스,완3,토마토바질소스,삼립하인즈 토마토바질 파스타소스 350g,3520,350g,350.0,g,1.4,https://www.foodspring.co.kr/goods/detail/921817
+M39662,양장피,기타,기타,1,False,False,False,,,양장피,완5,양장피,양장피 중찬명가 건면 300g,1760,300g,300.0,g,3.5,https://www.foodspring.co.kr/goods/detail/977201
+M40014,파소스,채소류,양념채소,1,False,False,False,,,파소스,완1,,코다노 고깃집 양파소스20g,152,20g,20.0,g,1.5,https://www.foodspring.co.kr/goods/detail/433982
+M40290,쌀백미,곡류·면,쌀,1,False,False,False,,,쌀백미,완10,,구멍쌀볶이떡(한입/백미)1kg,2104,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/847501
+M40717,명태,양념·기름,당류,1,False,True,True,,,명태,완3,명태,명태포 슬라이스 700g,3200,700g,700.0,g,3.5,https://www.foodspring.co.kr/goods/detail/922651
+M40721,메론시럽,기타,기타,1,False,False,False,,,메론시럽,완4,,오뚜기 메론시럽 1kg,3104,1kg,1.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/870569
+M40769,고추땡초,채소류,열매채소,1,False,False,False,,,고추땡초,완9,,일품 건고추 땡초/베트남산 100g,2080,100g,100.0,g,1.5,https://www.foodspring.co.kr/goods/detail/590127
+M40860,석쇠,육류·계란,닭고기,1,False,False,False,,,석쇠,완10,,석쇠닭갈비 300g,6891,300g,300.0,g,5.5,https://www.foodspring.co.kr/goods/detail/925451
+M40911,하림토종닭,육류·계란,닭고기,1,False,False,False,,,하림토종닭,완4,,하림 토종닭(국내산) 16호 1봉 냉동,17600,16호,16.0,호,2.45,https://www.foodspring.co.kr/goods/detail/834592
+M40935,청주맛술,양념·기름,식초·발효,1,False,False,False,,,청주맛술,완7,청주맛술,아지플러스 요리용 청주 18L 말통 업소용 요리술 맛술,68608,18L,18.0,L,1.0,https://www.foodspring.co.kr/goods/detail/534330
+M41263,파인애플드레싱소스,채소류,양념채소,1,False,True,True,,,파인애플드레싱소스,완6,,파인애플드레싱 2kg 캐드 소스텍,9440,2kg,2.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/820698
+M41267,스피아민트잎,기타,기타,1,False,False,False,,,스피아민트잎,완3,스피아민트잎,스피아민트/박하잎 국내산 100g,5904,100g,100.0,g,1.5,https://www.foodspring.co.kr/goods/detail/564926
+M41286,사워크림,유제품,우유·크림,1,False,False,False,,,사워크림,완2,,사워크림(덴마크)970g,8240,970g,970.0,g,4.5,https://www.foodspring.co.kr/goods/detail/921524
+M41544,올방개묵,가공식품,두부·묵,1,False,False,False,,,올방개묵,완1,,올방개묵 중국산 2kg,5992,2kg,2.0,kg,5.5,https://www.foodspring.co.kr/goods/detail/564615
+M41636,콩국수용가루,곡류·면,밀가루·전분,1,False,False,False,,,콩국수용가루,완2,,복만네 콩국수용 콩가루 70g*10개 콩국가루,6992,70g,70.0,g,1.25,https://www.foodspring.co.kr/goods/detail/842250
+M41714,생강채,기타,기타,1,False,True,True,,,생강채,완1,,오케이 초생강채(백색) 1.3kg,1760,1.3kg,1.3,kg,2.5,https://www.foodspring.co.kr/goods/detail/830122
+M41741,순살아구,기타,기타,1,False,False,False,,,순살아구,완4,,순살 아귀 1kg 손질 아구 흰살생선,9840,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/987214
+M41890,다시백주머니,기타,주류,1,False,False,False,,,다시백주머니,완10,,*크린랲 다시백 국물백 다시주머니 멸치다시망 50매/30팩,1592,50매,50.0,매,-0.1,https://www.foodspring.co.kr/goods/detail/839963
+M41935,즈마,채소류,양념채소,1,False,False,False,,,즈마,완7,즈마,"로즈마리 10g (허브,팩,국내산)",700,10g,10.0,g,2.5,https://www.foodspring.co.kr/goods/detail/424130
+M41957,통계피,기타,기타,1,False,False,False,,,통계피,완3,통계피,통계피 500g 1개,2800,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/886453
+M42479,갯고동,기타,기타,1,False,False,False,,,갯고동,완9,,갯고동 1kg,5120,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/760040
+M42517,참크래커과자,기타,기타,1,False,False,False,,,참크래커과자,완3,참크래커과자,참크래커(크라운제과 280g) 업소용 크래커 과자,4840,280g,280.0,g,1.15,https://www.foodspring.co.kr/goods/detail/752391
+M42594,사과샐러드,과일·견과,과일,1,False,True,True,,,사과샐러드,완1,,"사과 10kg (샐러드용,30-50개,국내산)",42900,10kg,10.0,kg,1.25,https://www.foodspring.co.kr/goods/detail/449656
+M42642,동물성크림,유제품,우유·크림,1,False,False,False,,,동물성크림,완5,동물성크림,엘로이 동물성 휘핑크림 1L,8400,1L,1.0,L,2.5,https://www.foodspring.co.kr/goods/detail/753265
+M42736,피클머스타드,기타,기타,1,False,False,False,,,피클머스타드,완2,,피클링 스파이스(은진 450g) 겨자씨 머스타드 씨드,9728,450g,450.0,g,1.05,https://www.foodspring.co.kr/goods/detail/457886
+M42754,백앙금,양념·기름,당류,1,False,False,False,,,백앙금,완1,,굿모닝서울 백앙금(5Kg/EA),15053,5Kg,5.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/689403
+M42833,주부,기타,주류,1,False,False,False,,,주부,완6,,"주부초밥짱, 320g, 사조대림,냉장",2800,320g,320.0,g,3.5,https://www.foodspring.co.kr/goods/detail/693165
+M42884,옥수수전분,곡류·면,밀가루·전분,1,False,True,True,,,옥수수전분,완1,,옥수수전분(승진),1200,500g,500.0,g,6.5,https://www.foodspring.co.kr/goods/detail/554253
+M42970,생오리,기타,기타,1,False,False,False,,,생오리,완10,,생오리/통/국내산 2kg,16392,2kg,2.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/565607
+M43096,잡채,기타,기타,1,False,False,False,,,잡채,완2,,잡채말이 800g/에스제이,3840,800g,800.0,g,3.5,https://www.foodspring.co.kr/goods/detail/760002
+M43299,마른호박,채소류,열매채소,1,False,True,True,,,마른호박,완9,,호박씨(500g) 업소용 마른 안주 호박 씨,6728,500g,500.0,g,1.3,https://www.foodspring.co.kr/goods/detail/464160
+M43691,요리고당,양념·기름,당류,1,False,False,False,,,요리고당,완4,,백설 요리올리고당 2.45kg,7024,2.45kg,2.45,kg,3.5,https://www.foodspring.co.kr/goods/detail/310895
+M44084,가염버터,유제품,버터,1,False,False,False,,,가염버터,완1,,루어팍 가염버터 250g,5760,250g,250.0,g,7.5,https://www.foodspring.co.kr/goods/detail/754243
+M44181,할라피뇨고추,채소류,열매채소,1,False,False,False,,,할라피뇨고추,완4,,할라피뇨 델숄 고추채2.8kg,9600,2.8kg,2.8,kg,1.5,https://www.foodspring.co.kr/goods/detail/948366
+M44188,가위한,채소류,양념채소,1,False,False,False,,,가위한,완8,,롯데- 주방가위 1호 260mm 롯데주방가위 식가위 요리가위 업소용주방가위 식당가위 주방용품 조리도구 260mm가위 튼튼한주방가위,9312,1호,1.0,호,-2.1,https://www.foodspring.co.kr/goods/detail/463655
+M44325,닭정육,채소류,열매채소,1,False,False,False,,,닭정육,완7,닭정육,닭정육(수입/브라질),12000,2kg,2.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/517721
+M44463,호박오가리,채소류,양념채소,1,False,True,True,,,호박오가리,완6,,"호박오가리(상품,국산)",12560,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/693924
+M44492,연근중,기타,기타,1,False,True,True,,,연근중,완5,연근중,자숙연근(중국산) 250g,1440,250g,250.0,g,1.5,https://www.foodspring.co.kr/goods/detail/715664
+M44594,대구살,기타,기타,1,False,False,False,,,대구살,완1,,청대구살 냉동 생선가스 2.5kg 1봉 생선까스,10000,2.5kg,2.5,kg,2.2,https://www.foodspring.co.kr/goods/detail/970783
+M44633,개할라피뇨,기타,기타,1,False,False,False,,,개할라피뇨,완6,,[6개] 지오씨팜 할라피뇨 슬라이스 3kg 매콤피클,5720,6개,6.0,개,0.1,https://www.foodspring.co.kr/goods/detail/530504
+M44747,패션후르츠,기타,기타,1,False,False,False,,,패션후르츠,완3,패션후르츠,"패션후르츠, 1Kg, 냉동, 베트남",3672,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/693790
+M44793,홍게액,기타,기타,1,False,False,False,,,홍게액,완6,,사조 홍게액900g,5144,900g,900.0,g,2.5,https://www.foodspring.co.kr/goods/detail/724164
+M44859,연겨자고추냉이,채소류,열매채소,1,False,False,False,,,연겨자고추냉이,완9,,튜브 연겨자(튜브 오뚜기 100g)X4 짜먹는 고추냉이,12672,100g,100.0,g,1.0,https://www.foodspring.co.kr/goods/detail/466792
+M44942,스윗칠리소스,기타,기타,1,False,False,False,,,스윗칠리소스,완5,스윗칠리소스,비셰프 스윗칠리소스(1.19Kg/EA),5415,1.19Kg,1.19,Kg,1.45,https://www.foodspring.co.kr/goods/detail/887118
+M44973,코코넛채,육류·계란,계란,1,False,False,False,,,코코넛채,완6,,코코넛채(건조/꼬미다),3040,400g,400.0,g,3.5,https://www.foodspring.co.kr/goods/detail/556066
+M45123,갈비찜소스,기타,기타,1,False,False,False,,,갈비찜소스,완6,,업소용 간장 갈비찜 소스 5kg,28360,5kg,5.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/899893
+M45194,브로커리,기타,기타,1,False,False,False,,,브로커리,완1,,브로커리(냉동/중국산),2756,1EA,1.0,EA,2.5,https://www.foodspring.co.kr/goods/detail/48266
+M45391,버섯팽이버섯,채소류,버섯,1,False,True,True,,,버섯팽이버섯,완4,,팽이버섯 5kg(국내산) 팽이 버섯,7112,5kg,5.0,kg,4.5,https://www.foodspring.co.kr/goods/detail/921194
+M45568,닭똥집튀김,육류·계란,닭고기,1,False,False,False,,,닭똥집튀김,완8,,닭똥집튀김/상도,7480,1봉,1.0,봉,4.5,https://www.foodspring.co.kr/goods/detail/420557
+M45861,맘스리얼베이스레몬,기타,기타,1,False,True,True,,,맘스리얼베이스레몬,완4,,흥국 맘스리얼베이스 레몬 1kg,17200,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/505584
+M45878,수입등심,기타,기타,1,False,False,False,,,수입등심,완8,,수입직송 프리미엄 등심 300g,7120,300g,300.0,g,1.5,https://www.foodspring.co.kr/goods/detail/609438
+M46334,콩물콩가루,곡류·면,밀가루·전분,1,False,False,False,,,콩물콩가루,완1,,할매손 고소한 콩국물용 콩가루 700g,7104,700g,700.0,g,1.45,https://www.foodspring.co.kr/goods/detail/901683
+M46416,링귀니파스타면,채소류,양념채소,1,False,False,False,,,링귀니파스타면,완2,,데체코 링귀니 7번 1kg 파스타 스파게티면,3968,1kg,1.0,kg,1.3,https://www.foodspring.co.kr/goods/detail/827239
+M46437,식은잡곡밥,기타,기타,1,False,False,False,,,식은잡곡밥,완3,식은잡곡밥,흑미(일반 4K) 건강식 혼합곡 쌀 잡곡 식자재 검은쌀 잡곡밥 건강미 유색미,45264,1개,1.0,개,-0.6,https://www.foodspring.co.kr/goods/detail/20665
+M46940,건궁채,기타,기타,1,False,False,False,,,건궁채,완10,,건궁채나물(불림 1Kg/EA),11813,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/867830
+M47049,아카페라바닐라라떼,기타,기타,1,False,False,False,,,아카페라바닐라라떼,완9,,"아카페라 바닐라라떼, 240ml, 20개",14000,240ml,240.0,ml,1.4,https://www.foodspring.co.kr/goods/detail/542923
+M47124,콘푸라이트,기타,기타,1,False,False,False,,,콘푸,완1,,콘푸라이트,3440,600g,600.0,g,3.5,https://www.foodspring.co.kr/goods/detail/518114
+M47348,딜가루,곡류·면,밀가루·전분,1,False,False,False,,,딜가루,완8,,★공산 딜★ 콩가루 (할매손 콩맷돌) 콩국수가루 850g,4520,850g,850.0,g,0.95,https://www.foodspring.co.kr/goods/detail/979835
+M47446,빙수통팥,기타,기타,1,False,False,False,,,빙수통팥,완2,,선인_빙수용 통팥앙금 850g,4800,850g,850.0,g,1.5,https://www.foodspring.co.kr/goods/detail/886829
+M47775,갈릭딥핑소스피자용,기타,기타,1,False,False,False,,,갈릭딥핑소스피자용,완7,갈릭딥핑소스피자용,비셰프 갈릭 딥핑 소스 2kg X5 점도 유지 피자 패스트푸드 본가 업소용,64784,2kg,2.0,kg,0.45,https://www.foodspring.co.kr/goods/detail/717939
+M47960,동전육수육수,양념·기름,액젓·국물조미료,1,False,False,False,,,동전육수육수,완10,,[40알/리뉴얼] 홍영의 프리미엄 처음육수 국물 조미료 동전 육수 캠핑용 고체 한알 더진한 멸치 만능 자연 다시다 코인육수,9600,120g,120.0,g,-0.9,https://www.foodspring.co.kr/goods/detail/411682
+M48118,찹쌀떡모찌,곡류·면,떡,1,False,True,True,,,찹쌀떡모찌,완8,,찹쌀떡 둥근 넙덕(36알) 4kg 찹쌀모찌,16160,4kg,4.0,kg,1.35,https://www.foodspring.co.kr/goods/detail/976793
+M48264,보리밥,기타,기타,1,False,True,True,,,보리밥,완1,,더미식 찰보리밥(180g/EA),938,180g,180.0,g,2.5,https://www.foodspring.co.kr/goods/detail/887317
+M48295,문어소,기타,기타,1,False,False,False,,,문어소,완7,문어소,통문어 (소) 오족 통족 1kg,16800,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/144013
+M48333,북어대,양념·기름,기름,1,False,True,True,,,북어대,완6,,온국민 북어 머리 북어대가리 1kg,14800,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/901351
+M48358,국수면비빔국수,채소류,열매채소,1,False,False,False,,,국수면비빔국수,완8,,청수 국수 중면 2.5Kg 비빔국수 물국수면,9760,2.5Kg,2.5,Kg,1.3,https://www.foodspring.co.kr/goods/detail/458140
+M48377,조랭이떡볶이칠갑농산,곡류·면,떡,1,False,False,False,,,조랭이떡볶이칠갑농산,완3,조랭이떡볶이칠갑농산,조랭이 쌀떡볶이 1kg (수입) 칠갑농산 10개,21360,1kg,1.0,kg,1.2,https://www.foodspring.co.kr/goods/detail/667277
+M48611,미니족발,기타,기타,1,False,False,False,,,미니족발,완4,,미니족발 700g/미도식품,7360,700g,700.0,g,3.5,https://www.foodspring.co.kr/goods/detail/757270
+M48785,게살게다리살,기타,기타,1,False,False,False,,,게살게다리살,완7,게살게다리살,국내산 붉은 대게살 믹스 1kg(실중량 700g)홍게몸살 홍게다리살,13200,1kg,1.0,kg,0.65,https://www.foodspring.co.kr/goods/detail/955769
+M49211,캔파인애플,채소류,양념채소,1,False,True,True,,,캔파인애플,완4,,캔파인애플/파인링-소-(쿡샾)836g,3120,836g,836.0,g,3.5,https://www.foodspring.co.kr/goods/detail/881279
+M49371,바닐라향분말,기타,기타,1,False,False,False,,,바닐라향분말,완4,,바닐라향파우더(맷돌 150g) X2 업소용 바닐라 파우더 분말,2536,150g,150.0,g,0.8,https://www.foodspring.co.kr/goods/detail/801958
+M49472,샤인머스켓청,양념·기름,식초·발효,1,False,False,False,,,샤인머스켓청,완5,샤인머스켓청,샤인머스켓 아이스크림 240ml 청포도 샤베트,2640,240ml,240.0,ml,1.25,https://www.foodspring.co.kr/goods/detail/630081
+M49534,유러피안샐러드채소,양념·기름,기름,1,False,False,False,,,유러피안샐러드채소,완1,,유러피안 샐러드 채소 1kg (3~4종),6800,1kg,1.0,kg,1.4,https://www.foodspring.co.kr/goods/detail/591380
+M49925,낙지볶음,어패류,두족류,1,False,False,False,,,낙지볶음,완7,낙지볶음,낙지볶음밥(시아스),1600,300g,300.0,g,3.5,https://www.foodspring.co.kr/goods/detail/552570
+M50219,빙수떡,곡류·면,떡,1,False,False,False,,,빙수떡,완9,,빙수떡(스위트웰),1520,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/609175
+M50314,쿠키,기타,기타,1,False,False,False,,,쿠키,완1,,쿠키 카다이프 초코모찌 60g 1개입 카다이프 초코쿠키 모찌,1760,60g,60.0,g,2.85,https://www.foodspring.co.kr/goods/detail/988290
+M50396,포육수,양념·기름,액젓·국물조미료,1,False,False,False,,,포육수,완2,,해울찬 조미료 500g X10 가쓰오부시 훈연포 육수 업소용,112360,500g,500.0,g,-0.15,https://www.foodspring.co.kr/goods/detail/519331
+M50556,타르트틀2호,기타,기타,1,False,False,False,,,타르트틀2호,완2,,베니스 높은 타르트틀 2호(분리형),4720,2호,2.0,호,0.5,https://www.foodspring.co.kr/goods/detail/784362
+M50935,카페에스프레소,기타,기타,1,False,False,False,,,카페에스프레소,완7,카페에스프레소,카페토 에스프레소 클린세정제 500g,13920,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/660332
+M51041,우엉우엉,기타,기타,1,False,True,True,,,우엉우엉,완4,,우엉채(포에버 진공포장 3mm 4kg) X2 업소용 삶은 우엉,27488,4kg,4.0,kg,0.8,https://www.foodspring.co.kr/goods/detail/688482
+M51147,스위트옥수수,기타,기타,1,False,True,True,,,스위트옥수수,완3,스위트옥수수,스위트 콘 (삼도/옥수수),3560,2.95kg,2.95,kg,1.5,https://www.foodspring.co.kr/goods/detail/943439
+M51246,우유식빵,육류·계란,계란,1,False,True,True,,,우유식빵,완2,,소화가잘되는우유식빵,2240,420g,420.0,g,1.5,https://www.foodspring.co.kr/goods/detail/654539
+M51261,물육수,양념·기름,액젓·국물조미료,1,False,False,False,,,물육수,완4,,사골밑국물육수(면사랑),13040,1.8kg,1.8,kg,2.5,https://www.foodspring.co.kr/goods/detail/542787
+M51283,생김치,어패류,해조류,1,False,False,False,,,생김치,완6,,소담 생생김치 포기김치/중국산 10kg,12320,10kg,10.0,kg,2.45,https://www.foodspring.co.kr/goods/detail/589425
+M51476,믹스커피,기타,기타,1,False,False,False,,,믹스커피,완2,,맥스웰 마일드 자판기 믹스커피 분말,6400,800g,800.0,g,1.5,https://www.foodspring.co.kr/goods/detail/905542
+M51544,어린열무,기타,기타,1,False,True,True,,,어린열무,완1,,"어린열무,1Kg,상품,국산",2336,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/651577
+M51596,시레기,기타,기타,1,False,False,False,,,시레기,완2,,얼큰 시레기순대국 700g,3600,700g,700.0,g,2.5,https://www.foodspring.co.kr/goods/detail/608743
+M52025,베이키드빈스통조림,기타,기타,1,False,False,False,,,베이키드빈스통조림,완7,베이키드빈스통조림,썬큐 베이키드빈스 통조림 2.7kg,7720,2.7kg,2.7,kg,1.5,https://www.foodspring.co.kr/goods/detail/641216
+M52046,동물성생크림,유제품,우유·크림,1,False,False,False,,,동물성생크림,완2,,매일유업 휘핑크림(1L_동물성 1Kg/EA) 생크림,7980,1L,1.0,L,2.1,https://www.foodspring.co.kr/goods/detail/648514
+M52069,생김,어패류,해조류,1,False,False,False,,,생김,완9,,생김가루(200g/PAC)/국내산,8048,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/399346
+M52162,우엉썰기,기타,기타,1,False,True,True,,,우엉썰기,완5,우엉썰기,우엉/엇썰기 1kg,5648,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/564326
+M52282,카스테라소,기타,기타,1,False,False,False,,,카스테라소,완5,카스테라소,카스테라 옛날 핫도그 700g(140gX5개) 냉동 간식 메뉴 학교 급식 카페 휴게소 음식 에어프라이어,9280,700g,700.0,g,-0.35,https://www.foodspring.co.kr/goods/detail/389210
+M52591,찰수수,기타,기타,1,False,True,True,,,찰수수,완4,,찰수수500g(중국산),2688,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/6514
+M52721,레드빈통조림,기타,기타,1,False,False,False,,,레드빈통조림,완4,,스위트웰 레드 키드니빈 콩 통조림 캔 400g,1200,400g,400.0,g,1.25,https://www.foodspring.co.kr/goods/detail/526594
+M52982,런천미트,기타,기타,1,False,False,False,,,런천미트,완5,런천미트,런천미트 340g/롯데햄,1984,340g,340.0,g,3.5,https://www.foodspring.co.kr/goods/detail/760142
+M52997,두부전,채소류,열매채소,1,False,True,True,,,두부전,완3,두부전,매콤어두부전(오쉐프/오뚜기/1kg/냉동)EA,8128,1kg,1.0,kg,2.3,https://www.foodspring.co.kr/goods/detail/967023
+M53187,즉석밥햇,기타,기타,1,False,False,False,,,즉석밥햇,완3,즉석밥햇,시아스 백미밥 210g X 24개 즉석밥 햇반 haccp 우리쌀로 갓지은듯한,20800,210g,210.0,g,0.4,https://www.foodspring.co.kr/goods/detail/82735
+M53231,콘프레이크,양념·기름,기름,1,False,False,False,,,콘프레이크,완4,,켈로그 시리얼 1.5kg 콘푸로스트 콘프레이크 업소용,13792,1.5kg,1.5,kg,1.05,https://www.foodspring.co.kr/goods/detail/722122
+M53501,하선정단무지,기타,기타,1,False,False,False,,,하선정단무지,완4,,하선정 단무지(통 400g/EA),1958,400g,400.0,g,1.5,https://www.foodspring.co.kr/goods/detail/497731
+M53626,생파스타면,채소류,양념채소,1,False,False,False,,,생파스타면,완2,,이가자연면 반조리 생 페투치네 파스타면 (25인분) 페투치니 스파게티면,14960,150g,150.0,g,0.55,https://www.foodspring.co.kr/goods/detail/849018
+M54003,향신재료,기타,기타,1,False,False,False,,,향신재료,완6,,스타아니스(신영 200g)X12 식자재 업소용 향신료 중식재료 동남아요리 팔각 향신채 중국향신료 베이킹향신료,107040,200g,200.0,g,-1.5,https://www.foodspring.co.kr/goods/detail/21616
+M54105,손질복어,기타,기타,1,False,False,False,,,손질복어,완7,손질복어,냉동 손질 복어살 300g,2960,300g,300.0,g,1.5,https://www.foodspring.co.kr/goods/detail/668963
+M54109,꼬치용나무,채소류,열매채소,1,False,False,False,,,꼬치용나무,완9,,핫바꼬치(20cm/식품용대나무꼬지/100개*1타),992,100개,100.0,개,0.15,https://www.foodspring.co.kr/goods/detail/844023
+M54117,닭강정,육류·계란,닭고기,1,False,False,False,,,닭강정,완3,닭강정,순살 닭강정1kg 닭고기 튀김 업소용 가라아게 치킨,9088,1kg,1.0,kg,7.1,https://www.foodspring.co.kr/goods/detail/485479
+M54408,화이트와인비니거,양념·기름,기타양념,1,False,False,False,,,화이트와인비니거,완8,,화이트와인비니거(보라티알 500ml),8352,500ml,500.0,ml,3.5,https://www.foodspring.co.kr/goods/detail/809698
+M54561,베이킹파우더소다,채소류,양념채소,1,False,False,False,,,베이킹파우더소다,완4,,베이킹파우더(맷돌 150g) X2 업소용 베이킹소다,1912,150g,150.0,g,1.1,https://www.foodspring.co.kr/goods/detail/730208
+M54613,마가린,기타,기타,1,False,True,True,,,마가린,완6,,마가린(파운드/오뚜기)450g,1728,450g,450.0,g,3.5,https://www.foodspring.co.kr/goods/detail/48171
+M54792,오트밀,기타,기타,1,False,False,False,,,오트밀,완5,오트밀,오트밀[미국산](이든) 500g,2000,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/790475
+M54943,만능소스,기타,기타,1,False,False,False,,,만능소스,완6,,농심 짜파게티 만능소스 280g,3276,280g,280.0,g,1.5,https://www.foodspring.co.kr/goods/detail/479063
+M55019,유기농레몬즙,양념·기름,기름,1,False,True,True,,,유기농레몬즙,완9,,리담 NFC 저온 유기농 레몬즙 14포 x 2개,10240,14포,14.0,포,0.2,https://www.foodspring.co.kr/goods/detail/879060
+M55088,육개장국물,기타,물·음료,1,False,False,False,,,육개장국물,완8,,선미 즉석국 600g 육개장 소고기 사골 육수 국물 요리,4536,600g,600.0,g,0.95,https://www.foodspring.co.kr/goods/detail/736062
+M55236,빵식빵,곡류·면,빵·곡식가공,1,False,False,False,,,빵식빵,완2,,구스 브리오슈 식빵 360g 통식빵,3040,360g,360.0,g,1.5,https://www.foodspring.co.kr/goods/detail/926392
+M55797,해표부드럽고쫄깃한국수,곡류·면,면류,1,False,False,False,,,해표부드럽고쫄깃한국수,완3,해표부드럽고쫄깃한국수,사조해표 부드럽고 쫄깃한 국수 3kg,5368,3kg,3.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/922227
+M55844,김밥단무지,어패류,해조류,1,False,False,False,,,김밥단무지,완1,,"김밥단무지,2.6Kg,냉장,중국",4808,2.6Kg,2.6,Kg,3.5,https://www.foodspring.co.kr/goods/detail/693829
+M56203,용팥통조림,기타,기타,1,False,False,False,,,용팥통조림,완6,,통단팥(참존 빙수용 850g) 업소용 통팥앙금 통조림,4392,850g,850.0,g,1.05,https://www.foodspring.co.kr/goods/detail/792196
+M56331,몬트리올시즈닝,기타,기타,1,False,False,False,,,몬트리올시즈닝,완4,,"맥코믹 몬트리올 스테이크시즈닝,822g",15600,822g,822.0,g,1.45,https://www.foodspring.co.kr/goods/detail/881689
+M56543,고기다진고기,기타,기타,1,False,False,False,,,고기다진고기,완6,,더고기 돼지고기 민찌 1kg 국내산 돈민찌 다진고기,5586,1kg,1.0,kg,1.1,https://www.foodspring.co.kr/goods/detail/388566
+M56796,수수,기타,기타,1,False,True,True,,,수수,완2,,수수(일반 1Kg/EA),1988,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/689641
+M57147,코코넛과육,기타,기타,1,False,False,False,,,코코넛과육,완3,코코넛과육,코코넛 슬라이스 400g 비앤지월넛 업소용 말린 건조 과육,4672,400g,400.0,g,0.9,https://www.foodspring.co.kr/goods/detail/459892
+M57224,바베큐시즈닝,채소류,열매채소,1,False,True,True,,,바베큐시즈닝,완1,,카르멘시타 바베큐용 시즈닝 65g,3120,65g,65.0,g,1.5,https://www.foodspring.co.kr/goods/detail/90583
+M57233,콩가루분말,곡류·면,밀가루·전분,1,False,False,False,,,콩가루분말,완6,,은이네 콩가루(콩국수용분말) 850g,3960,850g,850.0,g,1.5,https://www.foodspring.co.kr/goods/detail/825138
+M57309,후루,기타,기타,1,False,False,False,,,후루,완9,,후루티 딸기스무디(1.8Kg/EA),7838,1.8Kg,1.8,Kg,3.5,https://www.foodspring.co.kr/goods/detail/496113
+M57505,대두콩,기타,기타,1,False,False,False,,,대두콩,완7,대두콩,냉동 자숙 대두콩 450g 1팩,2240,450g,450.0,g,1.5,https://www.foodspring.co.kr/goods/detail/756627
+M57574,무가미김,어패류,해조류,1,False,False,False,,,무가미김,완1,,"[정담김] 무가미 구운 김가루 100g, 10봉",43120,100g,100.0,g,1.2,https://www.foodspring.co.kr/goods/detail/376479
+M57834,동태포,기타,기타,1,False,False,False,,,동태포,완1,,동태포(A/8-10),2800,750g,750.0,g,3.5,https://www.foodspring.co.kr/goods/detail/517780
+M57886,환타,기타,기타,1,False,True,True,,,환타,완2,,환타파인애플355ml24캔 업소용,12400,355ml,355.0,ml,3.5,https://www.foodspring.co.kr/goods/detail/825846
+M57895,참외장아찌,기타,기타,1,False,True,True,,,참외장아찌,완7,참외장아찌,참외장아찌 500g 업소용 고추장 장아찌 밑반찬,17480,500g,500.0,g,3.2,https://www.foodspring.co.kr/goods/detail/645834
+M58044,팥양갱,유제품,우유·크림,1,False,False,False,,,팥양갱,완1,,마망갸또_통팥양갱_50g*12ea/PK,21280,50g,50.0,g,1.45,https://www.foodspring.co.kr/goods/detail/750686
+M58067,통귀리,기타,기타,1,False,True,True,,,통귀리,완3,통귀리,켈로그 통귀리그래놀라(시리얼 500g/EA),6383,500g,500.0,g,2.3,https://www.foodspring.co.kr/goods/detail/403122
+M58241,건무,채소류,버섯,1,False,False,False,,,건무,완4,,건무시래기(1Kg/EA)/중국산,5940,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/501458
+M58287,비엔,육류·계란,가공육,1,False,False,False,,,비엔,완3,비엔,애니쿡 착한비엔나소시지(1Kg/EA),3780,1Kg,1.0,Kg,2.5,https://www.foodspring.co.kr/goods/detail/871755
+M58325,프랑크소시지,육류·계란,가공육,1,False,False,False,,,프랑크소시지,완7,프랑크소시지,프랑크소시지 454g/슈페리어,3000,454g,454.0,g,3.5,https://www.foodspring.co.kr/goods/detail/760072
+M58948,대추토마토,채소류,열매채소,1,False,True,True,,,대추토마토,완8,,대추방울토마토(중) 750g[팩],4104,750g,750.0,g,1.5,https://www.foodspring.co.kr/goods/detail/885610
+M59011,케찹소스용,양념·기름,기타양념,1,False,False,False,,,케찹소스용,완4,,케찹(오뚜기 500g) 소스 조미료 식자재 업소용 식당비품 케첩 토마토케찹 오뚜기케찹,6944,500g,500.0,g,0.15,https://www.foodspring.co.kr/goods/detail/54398
+M59116,콩국,기타,기타,1,False,False,False,,,콩국,완2,,"콩국수(칠갑농산,실온)",2200,900g,900.0,g,3.5,https://www.foodspring.co.kr/goods/detail/693696
+M59222,팥적앙금,기타,기타,1,False,False,False,,,팥적앙금,완5,팥적앙금,[앙금백화점] 통팥 적앙금 5kg,13600,5kg,5.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/733638
+M59302,오코노미야끼,기타,기타,1,False,False,False,,,오코노미야끼,완5,오코노미야끼,오코노미야끼 - 250g 1팩,1320,250g,250.0,g,3.5,https://www.foodspring.co.kr/goods/detail/547009
+M59307,멸치다시육수,어패류,젓갈·건어물,1,False,False,False,,,멸치다시육수,완3,멸치다시육수,한정성 멸치 다시 육수가루 1kg,8400,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/924367
+M59452,파르미지아노레지아노,채소류,양념채소,1,False,False,False,,,파르미지아노레지아노,완5,파르미지아노레지아노,파르미지아노레지아노치즈(이탈리멘티/이태리)1kg,31680,1kg,1.0,kg,3.2,https://www.foodspring.co.kr/goods/detail/966238
+M59562,초밥밥,기타,기타,1,False,False,False,,,초밥밥,완5,초밥밥,코아 날치알 골드 500g 초밥 알밥 마끼 생선알,6800,500g,500.0,g,1.15,https://www.foodspring.co.kr/goods/detail/811905
+M59669,양지삶은고기,기타,기타,1,False,False,False,,,양지삶은고기,완9,,양지수육 2kg 삶은양지 소고기수육 냉면고기 국밥고기,70400,2kg,2.0,kg,1.05,https://www.foodspring.co.kr/goods/detail/686334
+M59984,라오깐마고추기름,채소류,열매채소,1,False,False,False,,,라오깐마고추기름,완1,,라오깐마 땅콩고추기름 275g (상온),2560,275g,275.0,g,1.45,https://www.foodspring.co.kr/goods/detail/677829
+M60172,3분카레,채소류,양념채소,1,False,False,False,,,분카레,완5,3분카레,3분카레/쇠고기카레/오뚜기,1280,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/844527
+M60201,초록샐러드채소,기타,기타,1,False,False,False,,,초록샐러드채소,완4,,⭐손질야채특가⭐ 샐러드 채소믹스(초록+보라_비세척_단순절단 500g/EA) 샐러드 포케 채소믹스,4635,500g,500.0,g,-0.15,https://www.foodspring.co.kr/goods/detail/951072
+M60226,돈육,기타,기타,1,False,False,False,,,돈육,완2,,"돈육,민찌,1Kg,후지,냉동,국산,밀봉/진공포장 아님",7112,1Kg,1.0,Kg,3.05,https://www.foodspring.co.kr/goods/detail/627385
+M60674,가쓰오다시육수,육류·계란,소고기,1,False,False,False,,,가쓰오다시육수,완1,,대상 가쓰오다시 1kg 혼다시 샤브샤브육수,6880,1kg,1.0,kg,1.35,https://www.foodspring.co.kr/goods/detail/610291
+M60860,돈가스소스경양식,기타,기타,1,False,False,False,,,돈가스소스경양식,완10,,비셰프 일식돈까스소스 2kg 돈가스소스 경양식 일본돈까스소스,4480,2kg,2.0,kg,0.85,https://www.foodspring.co.kr/goods/detail/654990
+M60971,현미크런치,기타,기타,1,False,False,False,,,현미크런치,완4,,[까로망]현미스위트크런치토핑(200g),7040,200g,200.0,g,1.45,https://www.foodspring.co.kr/goods/detail/807540
+M61076,견과류믹스,유제품,버터,1,False,False,False,,,견과류믹스,완2,,"견과류믹스,500g,수입",9656,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/651535
+M61101,클럽소다,기타,기타,1,False,False,False,,,클럽소다,완4,,클럽소다(코카콜라)250ml*30ea,16720,250ml,250.0,ml,3.5,https://www.foodspring.co.kr/goods/detail/781748
+M61236,화이트초콜릿,기타,기타,1,False,False,False,,,화이트초콜릿,완2,,르본 화이트 컴파운드 초콜릿 150g,1440,150g,150.0,g,1.5,https://www.foodspring.co.kr/goods/detail/749263
+M61255,빨간색,기타,기타,1,False,False,False,,,빨간색,완7,빨간색,린넨(빨간색_10입 PAC),16358,0.5KG,0.5,KG,2.5,https://www.foodspring.co.kr/goods/detail/404387
+M61393,막국수,곡류·면,면류,1,False,False,False,,,막국수,완6,,쟁반막국수(면사랑),3120,2kg,2.0,kg,4.5,https://www.foodspring.co.kr/goods/detail/550794
+M61992,생면칼국수용,곡류·면,면류,1,False,False,False,,,생면칼국수용,완5,생면칼국수용,카푸토 프레스카1kg Tipo 00 생면용 파스타 뇨끼 칼국수용 이탈리아 밀가루,2960,1kg,1.0,kg,2.3,https://www.foodspring.co.kr/goods/detail/516413
+M62054,가문어,기타,기타,1,False,False,False,,,가문어,완1,,가문어 500g/에이스,9360,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/759935
+M62146,색소,유제품,우유·크림,1,False,False,False,,,색소,완2,,색소(초록/천우)1g*30봉,1408,1g,1.0,g,3.5,https://www.foodspring.co.kr/goods/detail/617972
+M62220,버터헤드레터스,유제품,버터,1,False,False,False,,,버터헤드레터스,완10,,버터헤드레터스(KG),10350,1KG,1.0,KG,8.5,https://www.foodspring.co.kr/goods/detail/958151
+M62323,오뚜기토마토케챂,채소류,열매채소,1,False,True,True,,,토마토케챂,완6,,오뚜기 토마토 케챂 9g,48,9g,9.0,g,1.5,https://www.foodspring.co.kr/goods/detail/921701
+M62326,화이트발사믹,기타,기타,1,False,False,False,,,화이트발사믹,완2,,화이트발사믹크림(쉐프스/폰티/크레메 모스카토)235ml,6112,235ml,235.0,ml,3.0,https://www.foodspring.co.kr/goods/detail/964748
+M62364,콘토르티야,기타,기타,1,False,False,False,,,콘토르티야,완1,,라레이나 콘또띠아 5-6인치 60장 990g 또띠아 멕시칸음식 타코재료 브리또재료 식당재료 업소용 옥수수또띠아 토르티야,13200,60장,60.0,장,-1.8,https://www.foodspring.co.kr/goods/detail/422759
+M62589,산적꼬치,기타,기타,1,False,False,False,,,산적꼬치,완9,,산적꼬치(손잡이/15CM/100개),784,100개,100.0,개,2.5,https://www.foodspring.co.kr/goods/detail/617731
+M62878,볼로냐소스,기타,기타,1,False,False,False,,,볼로냐소스,완8,,면사랑 미트볼로냐파스타소스(2Kg/EA),9345,2Kg,2.0,Kg,1.4,https://www.foodspring.co.kr/goods/detail/945554
+M63141,현미잡곡밥,기타,기타,1,False,False,False,,,현미잡곡밥,완4,,오뚜기 오뚜기밥(식감만족_부드러운현미잡곡밥 210g/EA),1508,210g,210.0,g,0.9,https://www.foodspring.co.kr/goods/detail/882432
+M63513,유자,양념·기름,기름,1,False,False,False,,,유자,완6,,코우 유자단무지 1kg 슬라이스,3240,1kg,1.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/563528
+M63557,스노우파우더,채소류,양념채소,1,False,True,True,,,스노우파우더,완3,스노우파우더,스위트페이지_밀크스노우파우더,7704,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/680167
+M63588,콘후레이크,기타,기타,1,False,False,False,,,콘후레이크,완8,,"콘후레이크 핫도그(대상,냉동)",8680,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/694910
+M64225,대구중,기타,기타,1,False,False,False,,,대구중,완7,대구중,대구농산 기장(500g/EA)/중국산,2025,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/497537
+M64269,시즈닝스테이크,기타,기타,1,False,False,False,,,시즈닝스테이크,완9,,★제당 초특가★크레잇 허브 시즈닝 폭찹스테이크(3Kg/EA),24203,3Kg,3.0,Kg,0.85,https://www.foodspring.co.kr/goods/detail/904862
+M64481,트레비탄산수,유제품,우유·크림,1,False,True,True,,,트레비탄산수,완4,,트레비 190ml*30 (캔/탄산수),8400,190ml,190.0,ml,1.5,https://www.foodspring.co.kr/goods/detail/532695
+M64484,스테비아,육류·계란,계란,1,False,True,True,,,스테비아,완1,,스테비아 토마토 1.5L 델몬트,2640,1.5L,1.5,L,3.5,https://www.foodspring.co.kr/goods/detail/550702
+M64686,면짜장사리,곡류·면,면류,1,False,False,False,,,면짜장사리,완2,,농심 냉동 짜장면 1.25kg (250g x 5개) / 냉동면 중화면 짜장면 짬뽕사리,3240,1.25kg,1.25,kg,2.15,https://www.foodspring.co.kr/goods/detail/449344
+M65101,윙치킨,기타,기타,1,False,False,False,,,윙치킨,완4,,사세 바베큐윙스틱 1kg 냉동 치킨,10136,1kg,1.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/374507
+M65106,파이생지,육류·계란,계란,1,False,False,False,,,파이생지,완2,,삼립 애플파이생지 (80g*10),7520,80g,80.0,g,1.5,https://www.foodspring.co.kr/goods/detail/753469
+M65275,묵은지씻은,가공식품,두부·묵,1,False,False,False,,,묵은지씻은,완7,묵은지씻은,"씻은김치(씻은묵은지,씻은지) 10kg(중국)",15120,10kg,10.0,kg,3.3,https://www.foodspring.co.kr/goods/detail/165217
+M65599,스테이크등심,기타,기타,1,False,False,False,,,스테이크등심,완9,,미국산 수입 소고기 탑초이스 캠핑 홈파티 가정용 스테이크 블랙 앵거스 등심 500g,18960,500g,500.0,g,0.2,https://www.foodspring.co.kr/goods/detail/548522
+M65817,단호박호박,채소류,열매채소,1,False,True,True,,,단호박호박,완3,단호박호박,★매일시장특가★ 단호박 1통 1개 호박,2498,1개,1.0,개,0.45,https://www.foodspring.co.kr/goods/detail/728781
+M65824,면수,곡류·면,면류,1,False,False,False,,,면수,완1,,스폰지양면수세미(3M/9*15*3cm/외포장X)1ea,776,1ea,1.0,ea,3.05,https://www.foodspring.co.kr/goods/detail/964271
+M66074,청량초,육류·계란,소고기,1,False,False,False,,,청량초,완1,,청량초고추지 4kg/동보,11600,4kg,4.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/760111
+M66264,오렌지필,육류·계란,계란,1,False,True,True,,,오렌지필,완1,,선인 오렌지필 다이스 1.5kg,12144,1.5kg,1.5,kg,2.5,https://www.foodspring.co.kr/goods/detail/944266
+M66291,돈나물,채소류,잎채소,1,False,False,False,,,돈나물,완4,,돈나물(수도권 상품 KG),2910,1KG,1.0,KG,3.5,https://www.foodspring.co.kr/goods/detail/902708
+M66366,판초콜렛,기타,기타,1,False,False,False,,,판초콜렛,완2,,베니스 실리콘팬 판초콜렛 105*213*6,1600,1EA,1.0,EA,0.35,https://www.foodspring.co.kr/goods/detail/783600
+M66419,등심카레용,기타,기타,1,False,False,False,,,등심카레용,완9,,참푸드팜 돈등심(1*1*1cm 짜장카레용 KG)/국내산,8138,1KG,1.0,KG,1.0,https://www.foodspring.co.kr/goods/detail/501296
+M66607,튀김오일,어패류,해조류,1,False,True,True,,,튀김오일,완3,튀김오일,[4개/무료배송] 시타 포마스올리브오일 포마스유 5L 이탈리아산 튀김 요리용 오일,26000,4개,4.0,개,-0.75,https://www.foodspring.co.kr/goods/detail/968657
+M66674,포기김치묵은지,어패류,해조류,1,False,False,False,,,포기김치묵은지,완1,,청우 포기김치(숙성/묵은지_중국산) 10kg,14240,10kg,10.0,kg,1.3,https://www.foodspring.co.kr/goods/detail/842018
+M67029,냉면메밀냉면,곡류·면,면류,1,False,True,True,,,냉면메밀냉면,완9,,냉면(뉴마포 2kg) 업소용 냉동 메밀냉면 사리,6216,2kg,2.0,kg,3.2,https://www.foodspring.co.kr/goods/detail/687456
+M67542,찰깨빵,곡류·면,빵·곡식가공,1,False,False,False,,,찰깨빵,완5,찰깨빵,★베이커리특가★ 미니깨찰빵생지(31.5g*30입 945g/EA) 깨찰빵 베이커리 카페,8768,31.5g,31.5,g,0.15,https://www.foodspring.co.kr/goods/detail/978997
+M67998,가쓰오엑기스,기타,기타,1,False,False,False,,,가쓰오엑기스,완8,,면사랑 가쓰오 우동장국 1.8L / 우동엑기스 우동국물 일본식자재,6800,1.8L,1.8,L,0.7,https://www.foodspring.co.kr/goods/detail/442379
+M68035,빵용쌀가루,곡류·면,밀가루·전분,1,False,False,False,,,빵용쌀가루,완7,빵용쌀가루,혼합찹쌀가루(초야 300g)X5 찹쌀가루 떡재료 제과제빵 업소용 떡집 베이커리 복합찹쌀가루 쌀가루,11112,300g,300.0,g,-0.2,https://www.foodspring.co.kr/goods/detail/104492
+M68264,튀김,곡류·면,밀가루·전분,1,False,False,False,,,튀김,완1,,곰표 튀김가루 1kg,1337,1kg,1.0,kg,2.5,https://www.foodspring.co.kr/goods/detail/366910
+M68417,크로,기타,기타,1,False,False,False,,,크로,완3,크로,크로바 국산 당면 1Kg,10000,1Kg,1.0,Kg,3.5,https://www.foodspring.co.kr/goods/detail/736272
+M68809,산초,기타,기타,1,False,False,False,,,산초,완9,,산초가루 40g/솔표,2080,40g,40.0,g,3.5,https://www.foodspring.co.kr/goods/detail/760412
+M68874,드레싱소스,기타,기타,1,False,False,False,,,드레싱소스,완1,,오뚜기 참깨드레싱(1Kg/EA) 소스,6593,1Kg,1.0,Kg,1.5,https://www.foodspring.co.kr/goods/detail/386267
+M68942,과일통조림,기타,기타,1,False,False,False,,,과일통조림,완5,과일통조림,후르츠칵테일 델몬트 업소용 과일 통조림 3Kg X 6,75720,3Kg,3.0,Kg,1.05,https://www.foodspring.co.kr/goods/detail/921309
+M69167,하선정김치,어패류,해조류,1,False,False,False,,,하선정김치,완3,하선정김치,하선정 까나리액젓(실속형/김장/액젓/김치) 9kg,19920,9kg,9.0,kg,1.15,https://www.foodspring.co.kr/goods/detail/515411
+M69392,즉석,기타,기타,1,False,False,False,,,즉석,완5,즉석,즉석 타피오카 블랙 펄 컵타입 60g x 18개입 홈카페,10560,60g,60.0,g,2.95,https://www.foodspring.co.kr/goods/detail/748349
+M69424,막국수면,곡류·면,면류,1,False,False,False,,,막국수면,완1,,순메밀막국수면 2kg 1봉,9680,2kg,2.0,kg,4.5,https://www.foodspring.co.kr/goods/detail/333230
+M69509,어니언크런치,기타,기타,1,False,False,False,,,어니언크런치,완9,,헹스 양파튀김 프라이드어니언 크런치 1kg,5520,1kg,1.0,kg,1.35,https://www.foodspring.co.kr/goods/detail/748719
+M69800,프리미엄말차파우더,채소류,양념채소,1,False,False,False,,,프리미엄말차파우더,완10,,프리미엄말차믹스파우더 500g,45040,500g,500.0,g,1.5,https://www.foodspring.co.kr/goods/detail/783649
+M70024,각얼음,기타,기타,1,False,False,False,,,각얼음,완1,,한국냉동 각얼음(2.5Kg/EA),2430,2.5Kg,2.5,Kg,2.5,https://www.foodspring.co.kr/goods/detail/500319
+M70244,열무물김치,어패류,해조류,1,False,True,True,,,열무물김치,완1,,"열무물김치(냉면,국수용20개)",36480,20개,20.0,개,2.5,https://www.foodspring.co.kr/goods/detail/988318
+M70333,돈까스살,기타,기타,1,False,False,False,,,돈까스살,완6,,치즈돈까스(상신/통살/200g*10ea)2kg,21064,200g,200.0,g,1.25,https://www.foodspring.co.kr/goods/detail/965109
+M70350,알타리김치,어패류,해조류,1,False,False,False,,,알타리김치,완10,,국산알타리김치 10kg 형통식품 1ea,36000,10kg,10.0,kg,2.45,https://www.foodspring.co.kr/goods/detail/715408
+M71981,가라아게파우더,채소류,양념채소,1,False,False,False,,,가라아게파우더,완4,,모노 미즈토키 가라아게 파우더 1kg (상온),12608,1kg,1.0,kg,1.25,https://www.foodspring.co.kr/goods/detail/676575
+M72039,국내산목이버섯,채소류,버섯,1,False,False,False,,,국내산목이버섯,완9,,늘바른 국내산 친환경 무농약 흰목이버섯(생)200g3팩,13520,200g,200.0,g,4.0,https://www.foodspring.co.kr/goods/detail/829087
+M72075,마리브리자드블랙커런트시럽,기타,기타,1,False,False,False,,,블랙커런트시럽,완7,블랙커런트시럽,마리브리자드 블랙커런트시럽 700ml,12000,700ml,700.0,ml,1.5,https://www.foodspring.co.kr/goods/detail/777513
+M72139,요리술맛술,기타,기타,1,False,False,False,,,요리술맛술,완9,,만능 맛술 혼미린 1.8L 1개 업소용 일본 요리술 맛술,10320,1.8L,1.8,L,0.95,https://www.foodspring.co.kr/goods/detail/490381
+M72324,미더덕,어패류,젓갈·건어물,1,False,False,False,,,미더덕,완1,,미더덕(오만디/국내산/냉동)1kg,6200,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/964558
+M72475,푸른고추,채소류,열매채소,1,False,False,False,,,푸른고추,완7,푸른고추,[이푸른] 굿푸드 고추 왕교자 1kg x 2봉,15920,1kg,1.0,kg,1.25,https://www.foodspring.co.kr/goods/detail/977484
+M72550,오레오화이트크림과자,유제품,우유·크림,1,False,False,False,,,오레오화이트크림과자,완10,,동서 오레오 화이트크림과자 100g,1200,100g,100.0,g,2.5,https://www.foodspring.co.kr/goods/detail/790106
+M72606,청어,양념·기름,식초·발효,1,False,False,False,,,청어,완2,,청어표 건칼국수(1.4Kg/EA),3608,1.4Kg,1.4,Kg,3.5,https://www.foodspring.co.kr/goods/detail/500856
+M72728,황태실채,어패류,해조류,1,False,False,False,,,황태실채,완8,,황태실채 1kg (북어실채/뼈없는북어채),35000,1kg,1.0,kg,3.4,https://www.foodspring.co.kr/goods/detail/878642
+M72823,대추칩,기타,기타,1,False,False,False,,,대추칩,완6,,대추칩 1kg,7120,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/924221
+M73013,붕어빵,곡류·면,빵·곡식가공,1,False,False,False,,,붕어빵,완6,,붕어빵 348G 오리온제과,5336,348G,348.0,G,3.5,https://www.foodspring.co.kr/goods/detail/543369
+M73226,서리태콩,기타,기타,1,False,False,False,,,서리태콩,완2,,"서리태콩,500g,실온,국산",5168,500g,500.0,g,3.5,https://www.foodspring.co.kr/goods/detail/693460
+M73261,명태이리,기타,기타,1,False,True,True,,,명태이리,완4,,"명태곤이 동태이리 고니 러시아산 7.5kg 2,4,8등분 절단 포장",32800,7.5kg,7.5,kg,0.65,https://www.foodspring.co.kr/goods/detail/433025
+M73388,불고기불고기,기타,기타,1,False,False,False,,,불고기불고기,완8,,태종 미스터셰프 버섯뚝불고기(뉴질랜드산) 400g 뚝배기불고기,2736,400g,400.0,g,0.8,https://www.foodspring.co.kr/goods/detail/563687
+M73453,브라질너트견과류,기타,기타,1,False,False,False,,,브라질너트견과류,완6,,"★무료배송/재구매↑★ 브라질너트 300g * 5 / 개별 지퍼백포장 / 견과, 인기견과, 견과류",11824,300g,300.0,g,-0.15,https://www.foodspring.co.kr/goods/detail/979198
+M73539,화덕피자도우,기타,기타,1,False,False,False,,,화덕피자도우,완9,,수제화덕피자도우(10인치) 642g(214g*3ea),5520,642g,642.0,g,2.05,https://www.foodspring.co.kr/goods/detail/924881
+M73654,스위트칠리,기타,기타,1,False,False,False,,,스위트칠리,완1,,3분스위트칠리치킨(오뚜기/실온)150g,2136,150g,150.0,g,2.45,https://www.foodspring.co.kr/goods/detail/966955
+P00014,박력분,곡류·면,밀가루·전분,1,False,False,False,,,박력분,완1,,곰표 박력분 밀가루 2.5kg,3200,2.5kg,2.5,kg,5.5,https://www.foodspring.co.kr/goods/detail/829594
+P00019,코코넛칩,기타,기타,1,False,False,False,,,코코넛칩,완6,,킨디 코코넛칩 40g,1760,40g,40.0,g,2.5,https://www.foodspring.co.kr/goods/detail/536138
+P00028,생강초절임,기타,기타,1,False,True,True,,,생강초절임,완3,생강초절임,초생강 백색 1.3kg 생강초절임 미드미,2080,1.3kg,1.3,kg,1.4,https://www.foodspring.co.kr/goods/detail/449869
+P00029,통아몬드,과일·견과,견과·씨앗,1,False,True,True,,,통아몬드,완1,,대림 매화어묵 160g 어묵란,1736,160g,160.0,g,3.5,https://www.foodspring.co.kr/goods/detail/366587
+P00029,통아몬드,과일·견과,견과·씨앗,1,False,True,True,,,통아몬드,완1,,통아몬드 (미국) 150g,2320,150g,150.0,g,3.5,https://www.foodspring.co.kr/goods/detail/749478
+P00029,어묵,가공식품,어묵·햄·소시지,1,False,True,True,,,어묵,완2,,대림 매화어묵 160g 어묵란,1736,160g,160.0,g,3.5,https://www.foodspring.co.kr/goods/detail/366587
+P00029,어묵,가공식품,어묵·햄·소시지,1,False,True,True,,,어묵,완2,,통아몬드 (미국) 150g,2320,150g,150.0,g,3.5,https://www.foodspring.co.kr/goods/detail/749478
+P00037,시트,기타,기타,1,False,False,False,,,시트,완9,,화이트시트 초미니(90g),2080,90g,90.0,g,2.5,https://www.foodspring.co.kr/goods/detail/753297
+P00051,중력분,유제품,버터,1,False,False,False,,,중력분,완1,,중력분 밀가루 2.5kg 곰표,2880,2.5kg,2.5,kg,3.5,https://www.foodspring.co.kr/goods/detail/890366
+P00061,치킨튀김가루,곡류·면,밀가루·전분,1,False,False,False,,,치킨튀김가루,완4,,치킨튀김가루 1kg/오뚜기,3840,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/760345
+P00078,오징어채,어패류,두족류,1,False,False,False,,,오징어채,완1,,오징어채(중국산/블럭/700g*),5096,700g,700.0,g,3.5,https://www.foodspring.co.kr/goods/detail/49138
+P00103,칵테일새우,어패류,갑각류,1,False,True,True,,,칵테일새우,완5,칵테일새우,칵테일새우(71-90),3600,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/518449
+P00103,식물성생크림,유제품,우유·크림,1,False,False,False,,,식물성생크림,완6,,칵테일새우(71-90),3600,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/518449
+P00103,식물성생크림,유제품,우유·크림,1,False,False,False,,,식물성생크림,완6,,서울우유 식물성 쿠킹크림 1L 생크림,4116,1L,1.0,L,2.5,https://www.foodspring.co.kr/goods/detail/366969
+P00103,생새우,어패류,갑각류,1,False,True,True,,,생새우,완3,생새우,생새우살(51/70 4.5Kg/EA),45720,4.5Kg,4.5,Kg,3.5,https://www.foodspring.co.kr/goods/detail/951049
+P00103,칵테일새우,어패류,갑각류,1,False,True,True,,,칵테일새우,완5,칵테일새우,서울우유 식물성 쿠킹크림 1L 생크림,4116,1L,1.0,L,2.5,https://www.foodspring.co.kr/goods/detail/366969
+P00103,칵테일새우,어패류,갑각류,1,False,True,True,,,칵테일새우,완5,칵테일새우,생새우살(51/70 4.5Kg/EA),45720,4.5Kg,4.5,Kg,3.5,https://www.foodspring.co.kr/goods/detail/951049
+P00103,생새우,어패류,갑각류,1,False,True,True,,,생새우,완3,생새우,서울우유 식물성 쿠킹크림 1L 생크림,4116,1L,1.0,L,2.5,https://www.foodspring.co.kr/goods/detail/366969
+P00103,생새우,어패류,갑각류,1,False,True,True,,,생새우,완3,생새우,칵테일새우(71-90),3600,200g,200.0,g,3.5,https://www.foodspring.co.kr/goods/detail/518449
+P00103,식물성생크림,유제품,우유·크림,1,False,False,False,,,식물성생크림,완6,,생새우살(51/70 4.5Kg/EA),45720,4.5Kg,4.5,Kg,3.5,https://www.foodspring.co.kr/goods/detail/951049
+P00126,파마산치즈가루,곡류·면,밀가루·전분,1,False,False,False,,,파마산치즈가루,완2,,파마산치즈가루(옥산/227g)ea,6536,227g,227.0,g,3.5,https://www.foodspring.co.kr/goods/detail/968228
+P00137,바나나칩,유제품,우유·크림,1,False,True,True,,,바나나칩,완1,,바나나칩 700g/두리식품,4960,700g,700.0,g,3.5,https://www.foodspring.co.kr/goods/detail/760209
+P00145,꽃맛살,기타,기타,1,False,False,False,,,꽃맛살,완4,,꽃맛살 1kg,5946,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/881361
+P00153,와인,기타,기타,1,False,False,False,,,와인,완3,와인,폰티 화이트와인 식초 500ml,2800,500ml,500.0,ml,2.5,https://www.foodspring.co.kr/goods/detail/678084
+P00198,녹차파우더,유제품,버터,1,False,False,False,,,녹차파우더,완1,,녹차파우더(포모나 500g) 업소용 녹차가루 녹차분말,8792,500g,500.0,g,3.05,https://www.foodspring.co.kr/goods/detail/756387
+P00204,컵육수,곡류·면,밀가루·전분,1,False,False,False,,,컵육수,완2,,304 스텐 막걸리잔 일반형 300ml,2000,300ml,300.0,ml,1.45,https://www.foodspring.co.kr/goods/detail/871478
+P00204,막걸리,육류·계란,닭고기,1,False,True,True,,,막걸리,완6,,304 스텐 막걸리잔 일반형 300ml,2000,300ml,300.0,ml,1.45,https://www.foodspring.co.kr/goods/detail/871478
+P00222,올리브오일,채소류,열매채소,1,False,True,True,,,올리브오일,완1,,올리브오일(버도로/엑/버진),15360,1L,1.0,L,3.5,https://www.foodspring.co.kr/goods/detail/624685
+P00225,진한진간장,채소류,열매채소,1,False,True,True,,,진한진간장,완3,진한진간장,"양송이버섯(상품,냉장,중국)",6800,1Kg,1.0,Kg,6.5,https://www.foodspring.co.kr/goods/detail/943158
+P00225,양송이버섯,채소류,버섯,1,False,True,True,,,양송이버섯,완4,,참진한진간장S 14L/이츠웰,16320,14L,14.0,L,2.5,https://www.foodspring.co.kr/goods/detail/758469
+P00225,양송이버섯,채소류,버섯,1,False,True,True,,,양송이버섯,완4,,"양송이버섯(상품,냉장,중국)",6800,1Kg,1.0,Kg,6.5,https://www.foodspring.co.kr/goods/detail/943158
+P00225,진한진간장,채소류,열매채소,1,False,True,True,,,진한진간장,완3,진한진간장,참진한진간장S 14L/이츠웰,16320,14L,14.0,L,2.5,https://www.foodspring.co.kr/goods/detail/758469
+P00230,마늘가루,양념·기름,당류,1,False,False,False,,,마늘가루,완8,,마늘가루(뚜레반/마늘봉)60g,1120,60g,60.0,g,3.5,https://www.foodspring.co.kr/goods/detail/617929
+P00255,비율사과,곡류·면,밀가루·전분,1,False,True,True,,,비율사과,완6,,허쉬 다크초콜릿 석류 초코볼 100g,3600,100g,100.0,g,2.5,https://www.foodspring.co.kr/goods/detail/944853
+P00255,다크초콜릿,채소류,양념채소,1,False,False,False,,,다크초콜릿,완1,,허쉬 다크초콜릿 석류 초코볼 100g,3600,100g,100.0,g,2.5,https://www.foodspring.co.kr/goods/detail/944853
+P00260,김가루,곡류·면,밀가루·전분,1,False,False,False,,,김가루,완3,김가루,"김가루[섬김푸드,국내산]1kg",16200,1kg,1.0,kg,3.5,https://www.foodspring.co.kr/goods/detail/926199
+P00281,키조,곡류·면,면류,1,False,False,False,,,키조,완8,,키조개관자 400g 업소용 냉동 관자,9752,400g,400.0,g,3.5,https://www.foodspring.co.kr/goods/detail/894740
+P00305,생략가능라임즙,양념·기름,당류,1,False,False,False,,,생략가능라임즙,완10,,마른표고버섯 홀 1kg,17864,1kg,1.0,kg,6.5,https://www.foodspring.co.kr/goods/detail/945866
+P00305,마른표고버섯,채소류,버섯,1,False,True,True,,,마른표고버섯,완2,,마른표고버섯 홀 1kg,17864,1kg,1.0,kg,6.5,https://www.foodspring.co.kr/goods/detail/945866
+P00340,각각,채소류,열매채소,1,False,True,True,,,각각,완7,각각,각각 1.4kg / 각각1봉지씩,18000,1개,1.0,개,2.5,https://www.foodspring.co.kr/goods/detail/901135
+P00350,무설탕식빵,채소류,열매채소,1,False,True,True,,,무설탕식빵,완9,,무설탕 애플 아로니아잼 250g 토스트 브런치 업소용 가정용 식자재 식빵,8280,250g,250.0,g,0.5,https://www.foodspring.co.kr/goods/detail/608381
+P00354,티백,양념·기름,가루양념,1,False,False,False,,,티백,완2,,쟈스민 10티백 8g 쿠우쿠우 1개,2880,8g,8.0,g,2.5,https://www.foodspring.co.kr/goods/detail/877072
+P00368,스트링치즈,유제품,치즈,1,False,False,False,,,스트링치즈,완6,,스트링치즈(썬리취/11mm),49520,5Kg,5.0,Kg,8.5,https://www.foodspring.co.kr/goods/detail/518889
+P00382,고운팥앙금,기타,물·음료,1,False,False,False,,,고운팥앙금,완1,,대두식품 고운팥앙금S35R 5kg,17520,5kg,5.0,kg,1.5,https://www.foodspring.co.kr/goods/detail/635697
